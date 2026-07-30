@@ -49,9 +49,13 @@ function pruneChromiumLocales(dir: string) {
 }
 
 function copyWokNotices(buildPath: string, platform: string) {
-    const resourcesPath = platform === 'darwin'
-        ? join(buildPath, 'Contents', 'Resources')
-        : join(buildPath, 'resources');
+    let resourcesPath = join(buildPath, 'resources');
+    if (platform === 'darwin') {
+        const appBundle = readdirSync(buildPath, { withFileTypes: true })
+            .find(entry => entry.isDirectory() && entry.name.endsWith('.app'));
+        if (!appBundle) throw new Error(`Could not find the packaged macOS app in ${buildPath}.`);
+        resourcesPath = join(buildPath, appBundle.name, 'Contents', 'Resources');
+    }
     copyFileSync(join(import.meta.dirname, 'LICENSE'), join(resourcesPath, 'WOK-CLIENT-GPL-3.0.txt'));
     copyFileSync(join(import.meta.dirname, 'THIRD_PARTY_NOTICES.txt'), join(resourcesPath, 'THIRD_PARTY_NOTICES.txt'));
     copyFileSync(join(import.meta.dirname, 'PATCHED_ELECTRON.txt'), join(resourcesPath, 'PATCHED_ELECTRON.txt'));

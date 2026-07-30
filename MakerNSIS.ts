@@ -51,13 +51,15 @@ export class MakerNSIS extends MakerBase<{}> {
     await this.ensureDirectory(outDir);
     const iconPath = resolveIcon(Array.isArray(packagerConfig.icon) ? packagerConfig.icon?.[0] : packagerConfig.icon);
     const outFile = path.resolve(outDir, `${appDisplayName}-${version}-${targetArch}-setup.exe`);
-    const nsiPath = path.resolve(fs.mkdtempSync(path.join(tmpdir(), "nsis-")), 'installer.nsi');
+    const temporaryDirectory = fs.mkdtempSync(path.join(tmpdir(), "nsis-"));
+    const nsiPath = path.resolve(temporaryDirectory, 'installer.nsi');
 
     const APP_EXECUTABLE = `${packagerConfig.executableName || appName}.exe`;
     const UNINSTALL_KEY = `Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${appDisplayName}`;
 
     const script = `
 Unicode true
+SetCompressor /SOLID lzma
 ManifestDPIAware true
 
 !include "MUI2.nsh"
@@ -103,15 +105,18 @@ ShowUnInstDetails show
 !insertmacro MUI_LANGUAGE "English"
 
 Section "Install"
+  SetShellVarContext current
   SetOutPath "$INSTDIR"
   File /r "${dir}\\*.*"
 
   WriteUninstaller "$INSTDIR\\Uninstall.exe"
 
-  CreateDirectory "$SMPROGRAMS\\${appDisplayName}"
-  CreateShortCut "$SMPROGRAMS\\${appDisplayName}\\${appDisplayName}.lnk" "$INSTDIR\\${APP_EXECUTABLE}"
-  CreateShortCut "$SMPROGRAMS\\${appDisplayName}\\Uninstall ${appDisplayName}.lnk" "$INSTDIR\\Uninstall.exe"
-  CreateShortCut "$DESKTOP\\${appDisplayName}.lnk" "$INSTDIR\\${APP_EXECUTABLE}"
+  ; Keep the app at the Start Menu root so Windows Search indexes it immediately.
+  Delete "$SMPROGRAMS\\${appDisplayName}\\${appDisplayName}.lnk"
+  Delete "$SMPROGRAMS\\${appDisplayName}\\Uninstall ${appDisplayName}.lnk"
+  RMDir "$SMPROGRAMS\\${appDisplayName}"
+  CreateShortCut "$SMPROGRAMS\\${appDisplayName}.lnk" "$INSTDIR\\${APP_EXECUTABLE}" "" "$INSTDIR\\${APP_EXECUTABLE}" 0 SW_SHOWNORMAL "" "${appDisplayName}"
+  CreateShortCut "$DESKTOP\\${appDisplayName}.lnk" "$INSTDIR\\${APP_EXECUTABLE}" "" "$INSTDIR\\${APP_EXECUTABLE}" 0 SW_SHOWNORMAL "" "${appDisplayName}"
 
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayName" "${appDisplayName}"
   WriteRegStr HKCU "${UNINSTALL_KEY}" "DisplayVersion" "${version}"
@@ -125,30 +130,49 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "NoRepair" 1
 
+  ; App Paths and Applications metadata improve Start search and Run discovery.
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${APP_EXECUTABLE}" "" "$INSTDIR\\${APP_EXECUTABLE}"
+  WriteRegStr HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${APP_EXECUTABLE}" "Path" "$INSTDIR"
+  WriteRegStr HKCU "Software\\Classes\\Applications\\${APP_EXECUTABLE}" "FriendlyAppName" "${appDisplayName}"
+  WriteRegStr HKCU "Software\\Classes\\Applications\\${APP_EXECUTABLE}" "ApplicationCompany" "${publisher}"
+  WriteRegStr HKCU "Software\\Classes\\Applications\\${APP_EXECUTABLE}\\shell\\open\\command" "" '"$INSTDIR\\${APP_EXECUTABLE}" "%1"'
+
   \${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKCU "${UNINSTALL_KEY}" "EstimatedSize" "$0"
 SectionEnd
 
 Section "Uninstall"
+  SetShellVarContext current
   Delete "$INSTDIR\\Uninstall.exe"
   RMDir /r "$INSTDIR"
 
+  Delete "$SMPROGRAMS\\${appDisplayName}.lnk"
   Delete "$SMPROGRAMS\\${appDisplayName}\\${appDisplayName}.lnk"
   Delete "$SMPROGRAMS\\${appDisplayName}\\Uninstall ${appDisplayName}.lnk"
   RMDir "$SMPROGRAMS\\${appDisplayName}"
   Delete "$DESKTOP\\${appDisplayName}.lnk"
 
+  DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\${APP_EXECUTABLE}"
+  DeleteRegKey HKCU "Software\\Classes\\Applications\\${APP_EXECUTABLE}"
   DeleteRegKey HKCU "${UNINSTALL_KEY}"
 SectionEnd
 `;
 
-    fs.writeFileSync(nsiPath, script);
+    try {
+      fs.writeFileSync(nsiPath, script);
 
-    const execFile = promisify((await import("node:child_process")).execFile);
-    await execFile("makensis", ["-NOCD", "-V2", "-WX", nsiPath]);
-
-    fs.rmSync(nsiPath, { recursive: true })
-
-    return [outFile];
+      const execFile = promisify((await import("node:child_process")).execFile);
+      try {
+        await execFile("makensis", ["-NOCD", "-V2", "-WX", nsiPath]);
+      } catch (error) {
+        const compilerError = error as Error & { stderr?: string; stdout?: string };
+        if (compilerError.stdout) console.error(compilerError.stdout);
+        if (compilerError.stderr) console.error(compilerError.stderr);
+        throw error;
+      }
+      return [outFile];
+    } finally {
+      fs.rmSync(temporaryDirectory, { recursive: true, force: true });
+    }
   }
 }

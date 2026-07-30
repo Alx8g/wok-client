@@ -1,54 +1,88 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerAppImage } from "@reforged/maker-appimage";
 import { MakerDMG } from "@electron-forge/maker-dmg";
-import { PublisherGitHub } from "@electron-forge/publisher-github"
 import { MakerNSIS } from "./MakerNSIS.ts";
-import { readdirSync, renameSync, rmdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const VERSION = "44.0.0-nightly.20260522"
+export const PATCHED_ELECTRON_VERSION = "44.0.0-nightly.20260522";
+export const PATCHED_ELECTRON_RELEASE = `v${PATCHED_ELECTRON_VERSION}-patched-2`;
 
-function removeEmptyDirs(dir: string) {
-  if (!statSync(dir).isDirectory()) return false;
-
-  let entries = readdirSync(dir);
-
-  for (const entry of entries) {
-    const fullPath = join(dir, entry);
-    if (statSync(fullPath).isDirectory()) {
-      removeEmptyDirs(fullPath);
+function removeEmptyDirs(dir: string): boolean {
+    let hasEntries = false;
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory() && removeEmptyDirs(join(dir, entry.name))) continue;
+        hasEntries = true;
     }
-  }
 
-  entries = readdirSync(dir);
-  if (entries.length === 0) {
+    if (hasEntries) return false;
     rmdirSync(dir);
-  }
+    return true;
+}
+
+function pruneNodeModuleArtifacts(dir: string) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+            pruneNodeModuleArtifacts(fullPath);
+        } else if (entry.name.endsWith('.d.ts') || entry.name.endsWith('.js.map') || entry.name === 'README.md') {
+            rmSync(fullPath, { force: true });
+        }
+    }
+}
+
+const retainedChromiumLocales = new Set(['en-US.pak', 'en-GB.pak']);
+function pruneChromiumLocales(dir: string) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const fullPath = join(dir, entry.name);
+        if (entry.name === 'locales') {
+            for (const locale of readdirSync(fullPath, { withFileTypes: true })) {
+                if (locale.isFile() && locale.name.endsWith('.pak') && !retainedChromiumLocales.has(locale.name)) {
+                    rmSync(join(fullPath, locale.name), { force: true });
+                }
+            }
+            continue;
+        }
+        pruneChromiumLocales(fullPath);
+    }
+}
+
+function copyWokNotices(buildPath: string, platform: string) {
+    const resourcesPath = platform === 'darwin'
+        ? join(buildPath, 'Contents', 'Resources')
+        : join(buildPath, 'resources');
+    copyFileSync(join(import.meta.dirname, 'LICENSE'), join(resourcesPath, 'WOK-CLIENT-GPL-3.0.txt'));
+    copyFileSync(join(import.meta.dirname, 'THIRD_PARTY_NOTICES.txt'), join(resourcesPath, 'THIRD_PARTY_NOTICES.txt'));
+    copyFileSync(join(import.meta.dirname, 'PATCHED_ELECTRON.txt'), join(resourcesPath, 'PATCHED_ELECTRON.txt'));
 }
 
 export default {
     packagerConfig: {
-        name: "crankshaft",
-        executableName: "crankshaft",
-        appBundleId: "com.kraxen72.crankshaft",
+        name: "WOK Client",
+        executableName: "wok-client",
+        appBundleId: "social.wok.client",
         icon: "./build/icon",
         appCategoryType: "public.app-category.games",
-        appCopyright: "",
-        ignore: /^\/(?!(src|assets|node_modules|package\.json|README\.md|LICENSE))/,
+        appCopyright: "Copyright © 2026 WOK contributors; based on Crankshaft contributors",
+        ignore: [
+            /^\/(?!(src|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
+            /^\/src\/global\.d\.ts$/,
+            /^\/assets\/(?!(?:blockFilters\.txt|full_logo\.svg|wok-mark\.svg|wok-mark-favicon\.svg|hideAds\.css|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash\.css)$)/
+        ],
         prune: true,
-        // asar: true,
+        asar: true,
         download: {
-            unsafelyDisableChecksums: true,
             mirrorOptions: {
-                customDir: `v${VERSION}-patched-2`,
+                customDir: PATCHED_ELECTRON_RELEASE,
                 mirror: "https://github.com/thegu5/electron/releases/download/",
                 nightlyMirror: "https://github.com/thegu5/electron/releases/download/",
             }
         },
         protocols: [
             {
-                name: "Crankshaft Comp Match Host",
-                schemes: ["crankshaft"]
+                name: "WOK Client Link",
+                schemes: ["wok", "crankshaft"]
             }
         ]
     },
@@ -57,10 +91,10 @@ export default {
     makers: [
         new MakerAppImage({
             options: {
-                bin: "crankshaft",
+                bin: "wok-client",
                 categories: ["Game"],
                 icon: "./build/icon.png",
-                mimeType: ["x-scheme-handler/crankshaft"]
+                mimeType: ["x-scheme-handler/wok", "x-scheme-handler/crankshaft"]
             },
             
         }),
@@ -73,13 +107,19 @@ export default {
     hooks: {
         packageAfterPrune: async (_, buildPath) => {
             const nodeModules = join(buildPath, "node_modules");
-            removeEmptyDirs(nodeModules)
-            rmSync(join(nodeModules, ".pnpm"), { recursive: true, force: true })
+            if (!existsSync(nodeModules)) return;
+            for (const metadataFile of ['.pnpm', '.modules.yaml', '.package-map.json', '.pnpm-workspace-state-v1.json']) {
+                rmSync(join(nodeModules, metadataFile), { recursive: true, force: true });
+            }
+            pruneNodeModuleArtifacts(nodeModules);
+            removeEmptyDirs(nodeModules);
         },
         postPackage: async (config, { platform, outputPaths }) => {
-            if (platform !== "linux") return;
-
             for (const buildPath of outputPaths) {
+                copyWokNotices(buildPath, platform);
+                if (platform === "linux" || platform === "win32") pruneChromiumLocales(buildPath);
+                if (platform !== "linux") continue;
+
                 const exeName = config.packagerConfig.executableName;
                 const realBin = join(buildPath, `${exeName}.bin`);
                 const wrapper = join(buildPath, exeName);
@@ -106,16 +146,5 @@ export default {
             }
             return results;
         }
-    },
-    publishers: [
-        new PublisherGitHub({
-            repository: {
-                owner: "KraXen72",
-                name: "crankshaft",
-            },
-            draft: true,
-            force: true,
-            tagPrefix: ""
-        })
-    ]
+    }
 } satisfies ForgeConfig

@@ -1,0 +1,106 @@
+WOK CLIENT THIRD-PARTY AND MODIFICATION NOTICES
+Updated: 2026-07-30
+
+WOK CLIENT AND CRANKSHAFT
+
+WOK Client 1.0.0 is the first WOK release and is a modified version of Crankshaft 2.0.0 at commit:
+  ee43dee847ece639b7e5b6e9b8f6dc1729af90bd
+  https://github.com/KraXen72/crankshaft/tree/ee43dee847ece639b7e5b6e9b8f6dc1729af90bd
+
+Crankshaft and this modified source are licensed under GNU GPL version 3 only.
+The complete license is in LICENSE. Upstream attribution and contributor history
+are preserved in Git, README.md, and CHANGELOG.md.
+
+WOK modifications dated 2026-07-30 include branding and application identity,
+hardware-adaptive graphics selection and recovery, calibration and diagnostics,
+Competitive mode, safer configuration migration and IPC/request validation,
+terms-sensitive defaults, cross-platform source and tag-release CI, packaging
+changes, and removal of the userscript subsystem. See the top WOK Client entry
+in CHANGELOG.md.
+
+DISCORD LOCAL RPC
+
+src/discord-rpc.ts is an in-tree WOK Client implementation of Discord's local
+RPC framing and SET_ACTIVITY request. Protocol reference:
+  https://discord.com/developers/docs/topics/rpc
+
+The previously used @nyabsi/minimal-discord-rpc npm package is not a dependency
+and is not redistributed. Its package metadata declared GPL-3.0 while its
+included license file contained AGPL-3.0 text; removing it avoids relying on that
+ambiguous declaration.
+
+PATCHED ELECTRON RUNTIME
+
+WOK Client uses Electron nightly 44.0.0-nightly.20260522 API metadata with
+third-party patched executable archives from thegu5/electron. Exact source,
+release, patch, and SHA-256 details are in PATCHED_ELECTRON.txt.
+
+Electron: MIT
+  https://github.com/electron/electron
+
+Chromium and other components bundled by Electron retain their own licenses.
+Packaged Electron distributions include LICENSE and LICENSES.chromium.html.
+
+DIRECT SOURCE, DEVELOPMENT, AND BUILD DEPENDENCIES
+
+The versions below are the direct dependencies declared by package.json. The
+complete pinned transitive graph and registry integrity hashes are recorded in
+pnpm-lock.yaml. Installed packages retain their own license files.
+
+@biomejs/biome 2.5.5: MIT OR Apache-2.0
+  https://github.com/biomejs/biome
+
+@electron-forge/cli 8.0.0-alpha.10: MIT
+@electron-forge/maker-base 8.0.0-alpha.10: MIT
+@electron-forge/maker-dmg 8.0.0-alpha.10: MIT
+@electron-forge/shared-types 8.0.0-alpha.10: MIT
+  https://github.com/electron/forge
+
+@reforged/maker-appimage 5.2.0: ISC
+  https://github.com/SpacingBat3/ReForged
+
+@types/node 24.13.3: MIT
+  https://github.com/DefinitelyTyped/DefinitelyTyped
+
+electron-nightly 44.0.0-nightly.20260522: MIT
+  https://github.com/electron/electron
+
+typescript 6.0.3: Apache-2.0
+  https://github.com/microsoft/TypeScript
+
+pnpm 11.15.1: MIT
+  https://github.com/pnpm/pnpm
+
+NSIS is an external Windows installer build tool and is not stored in this
+source tree. NSIS is distributed under the zlib/libpng license:
+  https://nsis.sourceforge.io/License
+
+SOURCE-VALIDATION CI ACTIONS
+
+actions/checkout, pinned to de0fac2e4500dabe0009e67214ff5f5447ce83dd: MIT
+  https://github.com/actions/checkout
+
+actions/setup-node, pinned to 48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e: MIT
+  https://github.com/actions/setup-node
+
+pnpm/action-setup, pinned to 0e279bb959325dab635dd2c09392533439d90093: MIT
+  https://github.com/pnpm/action-setup
+
+actions/upload-artifact, pinned to 043fb46d1a93c77aae656e7c1c64a875d1fc6a0a: MIT
+  https://github.com/actions/upload-artifact
+
+actions/download-artifact, pinned to 3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c: MIT
+  https://github.com/actions/download-artifact
+
+negrutiu/nsis-install, pinned to f3339c88dba6fd08910d5275a943f8f746d94876: MIT
+  https://github.com/negrutiu/nsis-install
+
+SOURCE CREDITS RETAINED FROM CRANKSHAFT
+
+Crankshaft includes or credits work originating in Gatoclient, idkr, Gatoclient
+Lite, Krunker Civilian Client, and Another Krunker Client. Names and links are
+retained in README.md and the source comments. Historical authorship remains in
+the fetched Git history.
+
+This notice summarizes direct provenance. It does not replace any third-party
+license text or copyright notice shipped with a dependency or Electron binary.

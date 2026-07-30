@@ -1,3 +1,18 @@
+## WOK Client 1.0.0 (2026-07-30)
+
+Modification notice: WOK Client is a modified distribution based on Crankshaft 2.0.0 (`ee43dee847ece639b7e5b6e9b8f6dc1729af90bd`). Crankshaft's GPL terms, attribution, contributor history, and historical changelog are retained below.
+
+### WOK changes
+- Added hardware-adaptive graphics selection, recovery, calibration, Competitive mode, and performance diagnostics.
+- Added WOK application identity and one-time, non-destructive migration of legacy Crankshaft configuration.
+- Hardened navigation, IPC payload handling, resource-swapper protocol resolution, preference validation, and optional-feature defaults.
+- Replaced the ambiguously licensed Discord RPC package with an in-tree local IPC implementation and removed all runtime npm dependencies.
+- Removed the userscript subsystem, stale examples, selectors, and unused legacy assets from the public source tree.
+- Kept resource swapping, ad controls, custom filters, matchmaker, and competition automation disabled by default.
+- Removed the `in-process-gpu` switch after the upstream Crankshaft 2.0.1 fix identified Windows startup breakage.
+- Assigned a fork-specific version and added patched-Electron source, patch, license, and SHA-256 provenance records.
+- Added source validation across Windows, Linux, and macOS plus a pinned tag-only workflow for unsigned, checksum-published GitHub prereleases.
+
 ## [2.0.0](https://github.com/KraXen72/crankshaft/compare/1.12.0...2.0.0) (2026-07-28)
 
 

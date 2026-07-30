@@ -1,11 +1,9 @@
 ﻿import { readFileSync } from 'fs';
+import { readFile } from 'fs/promises';
 import { join as pathJoin, resolve as pathResolve } from 'path';
 import { ipcRenderer, webFrame } from 'electron';
-import { fetchGame } from './matchmaker.ts';
-import { createElement, hiddenClassesImages, toggleSettingCSS, repoID, keyboardEventMatchesCustomSetting } from './utils.ts';
-import { renderSettings } from './settingsui.ts';
-import { compareVersions } from 'compare-versions';
-import { splashFlavor } from './splashscreen.ts';
+import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
+import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
 
 // get rid of client unsupported message
 window.OffCliV = true;
@@ -20,7 +18,45 @@ export const strippedConsole = {
 	timeEnd: console.timeEnd.bind(console)
 };
 
+let settingsRenderPromise: Promise<void> | undefined;
+let stopAdaptiveValidationRuntime: (() => void) | undefined;
+let adaptiveValidationLoadGeneration = 0;
+let competitiveModeEnabled = false;
+
+function updateAdaptiveValidationRuntime(value: unknown) {
+	const adaptiveValidationGeneration = ++adaptiveValidationLoadGeneration;
+	stopAdaptiveValidationRuntime?.();
+	stopAdaptiveValidationRuntime = undefined;
+	if (!competitiveModeEnabled || value === undefined) return;
+
+	void import('./adaptive-validation-runtime.ts')
+		.then(adaptiveValidation => {
+			if (adaptiveValidationGeneration !== adaptiveValidationLoadGeneration) return;
+			const state = adaptiveValidation.parseAdaptiveValidationState(value);
+			if (!state) return;
+			stopAdaptiveValidationRuntime = adaptiveValidation.startAdaptiveValidationRuntime({
+				onError: error => { strippedConsole.error('Adaptive gameplay validation failed', error); },
+				state,
+				submitSession: submission => ipcRenderer.invoke('adaptiveValidation_recordSession', submission)
+			});
+		})
+		.catch(error => { strippedConsole.error('Failed to start adaptive gameplay validation', error); });
+}
+
+function renderSettings() {
+	if (settingsRenderPromise) return;
+	settingsRenderPromise = import('./settingsui.ts')
+		.then(async settingsUI => {
+			await settingsUI.settingsReady;
+			settingsUI.renderSettings();
+		})
+		.catch(error => { strippedConsole.error('Failed to load WOK Client settings UI', error); })
+		.finally(() => { settingsRenderPromise = undefined; });
+}
+
 const $assets = pathResolve(import.meta.dirname, '..', 'assets');
+
+let competitionAutomationEnabled = false;
 
 interface CompHostParams {
     mapId: string;
@@ -34,35 +70,44 @@ interface CompHostParams {
 }
 
 
-const waitForElement = (selector: string): Promise<HTMLElement> => {
-	return new Promise((resolve) => {
-		const el = document.querySelector(selector) as HTMLElement;
-		if (el) return resolve(el);
+const waitForElement = (selector: string, timeoutMs = 15_000): Promise<HTMLElement> => {
+	return new Promise((resolve, reject) => {
+		const existingElement = document.querySelector<HTMLElement>(selector);
+		if (existingElement) return resolve(existingElement);
 
+		let settled = false;
 		const observer = new MutationObserver(() => {
-			const el = document.querySelector(selector) as HTMLElement;
-			if (el) {
-				resolve(el);
-				observer.disconnect();
-			}
+			const element = document.querySelector<HTMLElement>(selector);
+			if (element) finish(element);
 		});
+		const finish = (element?: HTMLElement) => {
+			if (settled) return;
+			settled = true;
+			window.clearTimeout(timeout);
+			observer.disconnect();
+			if (element) resolve(element);
+			else reject(new Error(`Timed out waiting for ${selector}.`));
+		};
+		const timeout = window.setTimeout(() => finish(), timeoutMs);
 		observer.observe(document.body, { childList: true, subtree: true });
 	});
 };
 
-const waitForGameReady = (): Promise<void> => {
-    return new Promise((resolve) => {
-        if (typeof window.openHostWindow === 'function') {
-            return resolve();
-        }
+const waitForGameReady = (timeoutMs = 15_000): Promise<void> => {
+	return new Promise((resolve, reject) => {
+		if (typeof window.openHostWindow === 'function') return resolve();
 
-        const interval = setInterval(() => {
-            if (typeof window.openHostWindow === 'function') {
-                clearInterval(interval);
-                resolve();
-            }
-        }, 100);
-    });
+		const startedAt = performance.now();
+		const interval = window.setInterval(() => {
+			if (typeof window.openHostWindow === 'function') {
+				window.clearInterval(interval);
+				resolve();
+			} else if (performance.now() - startedAt >= timeoutMs) {
+				window.clearInterval(interval);
+				reject(new Error('Timed out waiting for Krunker competition hosting APIs.'));
+			}
+		}, 100);
+	});
 };
 
 const setInputValue = (selector: string, value?: string) => {
@@ -97,7 +142,7 @@ const automateCompHost = async (params: CompHostParams) => {
 	const mapCheckbox = findMapCheckbox(params.mapId);
 
 	if (!mapCheckbox) {
-        strippedConsole.error(`[Crankshaft] Automation failed: Could not find map '${params.mapId}'`);
+        strippedConsole.error(`[WOK Client] Automation failed: Could not find map '${params.mapId}'`);
         window.closeHostWindow();
         return;
     }
@@ -133,58 +178,125 @@ const automateCompHost = async (params: CompHostParams) => {
     if (params.webhook) {
         try {
             const webhookInput = await waitForElement("#customSwebhook") as HTMLInputElement;
-            webhookInput.value = decodeURIComponent(params.webhook);
+            webhookInput.value = params.webhook;
         } catch(e) {
-            strippedConsole.error("[Crankshaft] Could not find webhook input element.", e);
+            strippedConsole.error("[WOK Client] Could not find webhook input element.", e);
         }
     }
 
 	window.createPrivateRoom();
 };
 
+function readCompHostParameter(url: URL, key: string, maximumLength: number, required = false): string | undefined {
+	const value = url.searchParams.get(key)?.trim();
+	if (!value) return required ? undefined : '';
+	return value.length <= maximumLength ? value : undefined;
+}
+
 const parseStartupArgs = (args: string) => {
-    try {
-        if (args.includes("action=host-comp")) {
-            const url = new URL(args);
-            const params = Object.fromEntries(url.searchParams.entries()) as unknown as CompHostParams;
-            automateCompHost(params);
-        }
-    } catch(e) {
-        strippedConsole.error("[Crankshaft] Error parsing startup URL:", e);
-    }
+	try {
+		if (args.length > 4_096) return;
+		const url = new URL(args);
+		if (url.protocol !== `${APP_PROTOCOL}:` && url.protocol !== `${LEGACY_APP_PROTOCOL}:`) return;
+		if (url.searchParams.get('action') !== 'host-comp') return;
+		if (!competitionAutomationEnabled) {
+			strippedConsole.warn('[WOK Client] Competition host automation is disabled in settings.');
+			return;
+		}
+
+		const mapId = readCompHostParameter(url, 'mapId', 100, true);
+		const team1Name = readCompHostParameter(url, 'team1Name', 64, true);
+		const team2Name = readCompHostParameter(url, 'team2Name', 64, true);
+		const teamSize = readCompHostParameter(url, 'teamSize', 8, true);
+		if (!mapId || !team1Name || !team2Name || !teamSize || !/^(?:[1-4]v[1-4]|[0-3])$/u.test(teamSize)) {
+			strippedConsole.warn('[WOK Client] Competition link contains invalid or missing room settings.');
+			return;
+		}
+		if (!window.confirm(`Create a private ${teamSize} competition room on ${mapId}?`)) return;
+
+		const webhook = url.searchParams.has('webhook')
+			? window.prompt('Paste the competition webhook URL. WOK does not accept webhook secrets inside launch links.')?.trim()
+			: undefined;
+		const params: CompHostParams = {
+			mapId,
+			team1Name,
+			team2Name,
+			teamSize,
+			team1Players: readCompHostParameter(url, 'team1Players', 4_096),
+			team2Players: readCompHostParameter(url, 'team2Players', 4_096),
+			spectators: readCompHostParameter(url, 'spectators', 4_096),
+			...(webhook && webhook.length <= 2_048 ? { webhook } : {})
+		};
+		void automateCompHost(params).catch(error => {
+			strippedConsole.error('[WOK Client] Competition host automation failed.', error);
+		});
+	} catch (error) {
+		strippedConsole.error('[WOK Client] Error parsing startup URL.', error);
+	}
 };
 
 ipcRenderer.on('process-startup-url', (_event, url: string) => {
-	strippedConsole.log('[Crankshaft Preload] Received startup URL from main process:', url);
 	parseStartupArgs(url);
 });
 
-/** actual css for settings that are style-based (hide ads, etc)*/
+const styleSettingsCSSCache = new Map<string, string>();
+function loadStyleSettingCSS(name: 'hideAds' | 'menuTimer' | 'quickClassPicker') {
+	const cached = styleSettingsCSSCache.get(name);
+	if (cached !== undefined) return cached;
+
+	const css = readFileSync(pathJoin($assets, `${name}.css`), { encoding: 'utf-8' })
+		+ (name === 'quickClassPicker' ? hiddenClassesImages(16) : '');
+	styleSettingsCSSCache.set(name, css);
+	return css;
+}
+
+/** CSS for style-based settings, loaded and cached only when a setting uses it. */
 export const styleSettingsCSS = {
-	hideAds: readFileSync(pathJoin($assets, 'hideAds.css'), { encoding: 'utf-8' }),
-	menuTimer: readFileSync(pathJoin($assets, 'menuTimer.css'), { encoding: 'utf-8' }),
-	quickClassPicker: readFileSync(pathJoin($assets, 'quickClassPicker.css'), { encoding: 'utf-8' }) + hiddenClassesImages(16),
+	get hideAds() { return loadStyleSettingCSS('hideAds'); },
+	get menuTimer() { return loadStyleSettingCSS('menuTimer'); },
+	get quickClassPicker() { return loadStyleSettingCSS('quickClassPicker'); }
 };
 
-ipcRenderer.on('main_did-finish-load', (_event, _userPrefs) => {
+ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
+	updateAdaptiveValidationRuntime(value);
+});
+
+ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
+	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
+	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
+	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
+
+	if (_userPrefs.performanceOverlay) {
+		void import('./performance-monitor.ts')
+			.then(performanceMonitor => { performanceMonitor.startPerformanceMonitor(graphicsRuntimeInfo); })
+			.catch(error => { strippedConsole.error('Failed to start performance diagnostics', error); });
+	}
+
+	if (_userPrefs.competitiveMode || competitiveRuntimeInfo.hasGameSettingsBackup) {
+		void import('./competitive-mode.ts')
+			.then(competitiveMode => competitiveMode.synchronizeCompetitiveMode(Boolean(_userPrefs.competitiveMode), competitiveRuntimeInfo.hasGameSettingsBackup))
+			.catch(error => { strippedConsole.error('Failed to synchronize Competitive mode game settings', error); });
+	}
 	patchSettings(_userPrefs);
 
 	// fix fps dropping on scroll
 	// https://github.com/bigjakk/Krunker-Civilian-Client/blob/573de775d4b299db87d45d67d568264eb7d7e0f0/src/preload/index.ts#L29
-	window.addEventListener('wheel', (e: WheelEvent) => {
-    	if (document.pointerLockElement) {
-        	e.preventDefault();
-        	return;
-    	}
-    	let el = e.target as HTMLElement | null;
-    	while (el && el !== document.body && el !== document.documentElement) {
-        	const cs = getComputedStyle(el);
-        	const scrolls = (cs.overflowY === 'auto' || cs.overflowY === 'scroll' || cs.overflowX === 'auto' || cs.overflowX === 'scroll')
-            	&& (el.scrollHeight > el.clientHeight || el.scrollWidth > el.clientWidth);
-        	if (scrolls) return;
-        	el = el.parentElement;
-    	}
-    	e.preventDefault();
+	window.addEventListener('wheel', (event: WheelEvent) => {
+		if (document.pointerLockElement) {
+			event.preventDefault();
+			return;
+		}
+
+		for (const target of event.composedPath()) {
+			if (!(target instanceof HTMLElement) || target === document.body || target === document.documentElement) continue;
+			const hasScrollableContent = target.scrollHeight > target.clientHeight || target.scrollWidth > target.clientWidth;
+			if (!hasScrollableContent) continue;
+
+			const style = getComputedStyle(target);
+			if (/^(?:auto|scroll)$/u.test(style.overflowY) || /^(?:auto|scroll)$/u.test(style.overflowX)) return;
+		}
+
+		event.preventDefault();
 	}, { capture: true, passive: false });
 
 	if (!_userPrefs.saveMatchResultJSONButton) return;
@@ -238,38 +350,7 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs) => {
 	document.getElementById('endMidHolder').appendChild(buttonElement);
 });
 
-ipcRenderer.on('checkForUpdates', async (_event, currentVersion) => {
-	const releases = await fetch(`https://api.github.com/repos/${repoID}/releases/latest`);
-	const response = await releases.json();
-	const latestVersion = response.tag_name;
-	const comparison = compareVersions(currentVersion, latestVersion); // -1 === new version available
-
-	const updateElement = createElement('div', {
-		class: ['crankshaft-holder-update', 'refresh-popup'],
-		id: '#loadInfoUpdateHolder'
-	});
-
-	if (comparison === -1) {
-		updateElement.appendChild(createElement('a', { text: `New update! Download ${latestVersion}` }));
-
-		const callback = () => { ipcRenderer.send('openExternal', `https://github.com/${repoID}/releases/latest`); };
-		try { updateElement.removeEventListener('click', callback); } catch (_e) { }
-		updateElement.addEventListener('click', callback);
-	} else {
-		updateElement.appendChild(createElement('span', { text: 'No new updates' }));
-	}
-
-	strippedConsole.log(`Crankshaft client v${currentVersion} latest: v${latestVersion}`);
-
-	document.body.appendChild(updateElement);
-
-	let hideTimeout = setTimeout(() => updateElement.remove(), 5000);
-	updateElement.onmouseenter = () => clearTimeout(hideTimeout);
-	updateElement.onmouseleave = () => { hideTimeout = setTimeout(() => updateElement.remove(), 5000); };
-	document.addEventListener('pointerlockchange', () => { clearTimeout(hideTimeout); updateElement.remove(); }, { once: true });
-});
-
-ipcRenderer.on('initDiscordRPC', () => {
+ipcRenderer.once('initDiscordRPC', () => {
 	function updateRPC() {
 		strippedConsole.log('> updated RPC');
 		const classElem = document.getElementById('menuClassName');
@@ -286,7 +367,7 @@ ipcRenderer.on('initDiscordRPC', () => {
 			state: `${gameActivity.class.name} • ${skinElem === null ? '' : skinElem.textContent}`
 		};
 		if (!skinElem) { // as long as we have skinElem, we can fill in the other blanks
-			ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: 'github.com/KraXen72/crankshaft' });
+			ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: new URL(WEBSITE_URL).hostname });
 		} else {
 			ipcRenderer.send('preload_updates_DiscordRPC', data);
 		}
@@ -305,9 +386,12 @@ ipcRenderer.on('initDiscordRPC', () => {
 	document.addEventListener('pointerlockchange', updateRPC); // thank God this exists
 });
 
-ipcRenderer.on('matchmakerRedirect', (_event, _userPrefs: UserPrefs) => fetchGame(_userPrefs));
+ipcRenderer.on('matchmakerRedirect', async (_event, _userPrefs: UserPrefs) => {
+	const { fetchGame } = await import('./matchmaker.ts');
+	await fetchGame(_userPrefs);
+});
 
-ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: string, cssPath: string) => {
+ipcRenderer.on('injectClientCSS', async (_event, _userPrefs: UserPrefs, version: string, cssPath: string) => {
 	const { matchmaker, matchmakerKey, overrideURL } = _userPrefs;
 
 	document.addEventListener('keydown', event => {
@@ -323,18 +407,21 @@ ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: strin
 		}
 	});
 
-	const { hideAds, menuTimer, quickClassPicker, clientSplash, immersiveSplash, immersiveSplashBackgroundColor, loadingSplashTitleCardBackgroundColor, userscripts, cssSwapper } = _userPrefs;
+	const { hideAds, menuTimer, quickClassPicker, clientSplash, immersiveSplash, immersiveSplashBackgroundColor, loadingSplashTitleCardBackgroundColor, cssSwapper } = _userPrefs;
 
-	const settCss = readFileSync(pathJoin($assets, 'settings.css'), { encoding: 'utf-8' });
-	webFrame.insertCSS(settCss);
-
-	if (matchmaker) {
-		const matchmakerCss = readFileSync(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' });
-		webFrame.insertCSS(matchmakerCss);
-	}
+	const [settingsCSS, matchmakerCSS] = await Promise.all([
+		readFile(pathJoin($assets, 'settings.css'), { encoding: 'utf-8' }),
+		matchmaker ? readFile(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' }) : Promise.resolve(undefined)
+	]);
+	webFrame.insertCSS(settingsCSS);
+	if (matchmakerCSS) webFrame.insertCSS(matchmakerCSS);
 
 	if (clientSplash) {
-		const splashCSS = readFileSync(pathJoin($assets, 'splash.css'), { encoding: 'utf-8' });
+		const [{ splashFlavor }, splashCSS, logoSVGSource] = await Promise.all([
+			import('./splashscreen.ts'),
+			readFile(pathJoin($assets, 'splash.css'), { encoding: 'utf-8' }),
+			readFile(pathJoin($assets, 'full_logo.svg'), { encoding: 'utf-8' })
+		]);
 		webFrame.insertCSS(splashCSS);
 
 		const splashMountElementID = 'uiBase';
@@ -347,9 +434,9 @@ ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: strin
 			splashBackground.style.setProperty("background-color", `${immersiveSplashBackgroundColor}`);
 		}
 
-		const logoSVG = createElement('svg', {
+		const logoSVG = createElement('div', {
 			id: 'crankshaft-logo-holder',
-			innerHTML: readFileSync(pathJoin($assets, 'full_logo.svg'), { encoding: 'utf-8' })
+			innerHTML: logoSVGSource
 		});
 		logoSVG.style.setProperty('background-color', `${loadingSplashTitleCardBackgroundColor}`);
 
@@ -366,12 +453,12 @@ ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: strin
 
 		// i am not sure if you should be injecting more elements into a svg element, but it seems to work. feel free to pr a better version tho.
 		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-l', id: 'loadInfoLHolder', text: `v${version}` }));
-		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-r', id: 'loadInfoRHolder', text: 'Client by KraXen72, thegu5, and more' }));
+		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-r', id: 'loadInfoRHolder', text: 'WOK Client • Based on Crankshaft' }));
 		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-splash', id: 'loadInfoSplashHolder', text: splashFlavor }));
 		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-loadingindicator', id: 'loadInfoLoadingIndicator', text: 'LOADING...' }));
 		splashBackground.appendChild(logoSVG);
 
-		const observerConfig = { attributes: true, childList: true, subtree: true };
+		const observerConfig = { childList: true, subtree: true };
 		const callback = (mutationList: MutationRecord[], observer: MutationObserver) => {
 			for (const mutation of mutationList) if (mutation.type === 'childList') clearSplash(observer);
 		};
@@ -394,10 +481,7 @@ ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: strin
 	const styleElement = createElement('style', { id: 'crankshaftCustomCSS' });
 	document.body.appendChild(styleElement);
 	if (cssSwapper !== 'None') {
-		const cssInUse = readFileSync(pathJoin(cssPath, `${cssSwapper}`), { encoding: 'utf-8' });
-		addEventListener('DOMContentLoaded', (_event) => {
-			styleElement.textContent = cssInUse;
-		});
+		styleElement.textContent = await readFile(pathJoin(cssPath, `${cssSwapper}`), { encoding: 'utf-8' });
 	}
 
 	if (hideAds === 'block' || hideAds === 'hide') {
@@ -411,12 +495,14 @@ ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: strin
 	 * Animate transforms instead of position properties
 	 * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
 	 */
-	addEventListener('DOMContentLoaded', _event => {
-		const styleElement = createElement('style', { id: 'crankshaftKeyframeFix' });
-		styleElement.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
-		document.body.appendChild(styleElement);
-	});
-	if (userscripts) ipcRenderer.send('initializeUserscripts');
+	const injectKeyframeFix = () => {
+		if (document.getElementById('crankshaftKeyframeFix')) return;
+		const keyframeStyle = createElement('style', { id: 'crankshaftKeyframeFix' });
+		keyframeStyle.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
+		document.body.appendChild(keyframeStyle);
+	};
+	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectKeyframeFix, { once: true });
+	else injectKeyframeFix();
 });
 
 // warning: timezone calculation may be slighty innacurate: no special logic for DST and approx. offsets for BRZ, BHN and AFR
@@ -460,7 +546,16 @@ export function getTimezoneByRegionKey(key: 'code' | 'id', value: string) {
 
 function patchSettings(_userPrefs: UserPrefs) {
 	// hooking & binding credit: https://github.com/asger-finding/anotherkrunkerclient/blob/main/src/preload/game-settings.ts
-	let interval: number = null;
+	let interval: number | undefined;
+	let timeout: number | undefined;
+	const stopWaiting = () => {
+		if (interval !== undefined) window.clearInterval(interval);
+		if (timeout !== undefined) window.clearTimeout(timeout);
+		interval = undefined;
+		timeout = undefined;
+	};
+	const stopWaitingOnUnload = () => stopWaiting();
+	window.addEventListener('beforeunload', stopWaitingOnUnload, { once: true });
 	strippedConsole.log('waiting to hook settings...');
 
 	function hookSettings() {
@@ -480,6 +575,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 		const getSettingsHook = settingsWindow.getSettings.bind(settingsWindow);
 		const changeTabHook = settingsWindow.changeTab.bind(settingsWindow);
 		const searchHook = settingsWindow.searchList.bind(settingsWindow);
+		let searchRenderTimer: number | undefined;
 
 		window.showWindow = (...args: unknown[]) => {
 			const result = showWindowHook(...args);
@@ -488,7 +584,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 				if (settingsWindow.settingType === 'basic') settingsWindow.toggleType({ checked: true });
 				const advSliderElem: HTMLInputElement = document.querySelector('.advancedSwitch input#typeBtn');
 				advSliderElem.disabled = true;
-				advSliderElem.nextElementSibling.setAttribute('title', 'Crankshaft auto-enables advanced settings mode');
+				advSliderElem.nextElementSibling.setAttribute('title', 'WOK Client auto-enables advanced settings mode');
 
 				// We check the search query here because krunker reloads the search each time the settings page is closed/reopened, causing any client settings to be erased
 				const searchQuery = (document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? "";
@@ -551,7 +647,11 @@ function patchSettings(_userPrefs: UserPrefs) {
 		settingsWindow.searchList = (...args: unknown[]) => {
 			// biome-ignore lint/suspicious/noExplicitAny: hook code, expected to be hacky
 			const result: any = searchHook(...args); // Do normal krunker settings search things
-			renderSettings();
+			if (searchRenderTimer !== undefined) window.clearTimeout(searchRenderTimer);
+			searchRenderTimer = window.setTimeout(() => {
+				searchRenderTimer = undefined;
+				renderSettings();
+			}, 75);
 			return result;
 		}
 
@@ -567,10 +667,15 @@ function patchSettings(_userPrefs: UserPrefs) {
 			&& typeof window.windows[0] !== 'undefined'
 			&& typeof window.windows[0].changeTab === 'function'
 		) {
-			clearInterval(interval);
+			stopWaiting();
+			window.removeEventListener('beforeunload', stopWaitingOnUnload);
 			strippedConsole.log('hooking settings');
 			hookSettings();
 		}
 	}
-	interval = setInterval(waitForWindow0, 250);
+	interval = window.setInterval(waitForWindow0, 250);
+	timeout = window.setTimeout(() => {
+		stopWaiting();
+		strippedConsole.warn('WOK Client stopped waiting for Krunker settings APIs after 30 seconds.');
+	}, 30_000);
 }

@@ -1,5 +1,5 @@
 allowBuilds:
-  electron-nightly: true
+  electron-nightly: false
   electron-winstaller: true
   fs-xattr: true
   macos-alias: true

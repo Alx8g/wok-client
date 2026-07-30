@@ -1,0 +1,353 @@
+import type { FramePolicy } from './calibration.ts';
+import type { AppliedGraphicsBackend } from './graphics-profile.ts';
+
+export const ADAPTIVE_VALIDATION_STATE_VERSION = 1;
+export const ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION = 1;
+export const ADAPTIVE_VALIDATION_REQUIRED_SESSIONS = 3;
+export const ADAPTIVE_VALIDATION_MIN_SESSION_MS = 30_000;
+export const ADAPTIVE_VALIDATION_MIN_FRAME_SAMPLES = 100;
+export const ADAPTIVE_VALIDATION_SEVERE_P95_FRAME_TIME_MS = 25;
+export const ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_RATIO = 0.4;
+
+export const ADAPTIVE_VALIDATION_LOW_CONFIDENCE_REASONS = [
+	'window-blurred',
+	'document-visibility-changed',
+	'window-resized',
+	'severe-event-loop-disturbance'
+] as const;
+
+export type AdaptiveValidationLowConfidenceReason = (typeof ADAPTIVE_VALIDATION_LOW_CONFIDENCE_REASONS)[number];
+export type AdaptiveValidationFramePolicy = FramePolicy | 'unknown';
+export type AdaptiveValidationStatus = 'sampling' | 'complete';
+export type AdaptiveValidationClassification = 'validated' | 'inconclusive' | 'recalibration-recommended';
+
+export interface AdaptiveValidationProfileIdentity {
+	activeBackend: AppliedGraphicsBackend;
+	benchmarkSemanticVersion: number;
+	driverFingerprint: string;
+	electronVersion: string;
+	framePolicy: AdaptiveValidationFramePolicy;
+	hardwareFingerprint: string;
+	profileSemanticVersion: number;
+}
+
+export interface AdaptiveValidationSessionMetrics {
+	averageFps: number;
+	onePercentLowFps: number;
+	p95FrameTimeMs: number;
+	sampleCount: number;
+	worstFrameTimeMs: number;
+}
+
+export interface AdaptiveValidationSession {
+	completedAt: number;
+	durationMs: number;
+	id: string;
+	lowConfidenceReasons: AdaptiveValidationLowConfidenceReason[];
+	metrics: AdaptiveValidationSessionMetrics;
+}
+
+export interface AdaptiveValidationState {
+	classification: AdaptiveValidationClassification;
+	completedAt?: number;
+	profile: AdaptiveValidationProfileIdentity;
+	profileChangeConfirmationRequired: true;
+	recommendationDismissedAt?: number;
+	sessions: AdaptiveValidationSession[];
+	status: AdaptiveValidationStatus;
+	summary: AdaptiveValidationEvidenceSummary;
+	updatedAt: number;
+	version: 1;
+}
+
+export interface AdaptiveValidationSubmission {
+	profile: AdaptiveValidationProfileIdentity;
+	session: AdaptiveValidationSession;
+}
+
+export interface AdaptiveValidationEvidenceSummary {
+	acceptedSessionCount: number;
+	cleanSessionCount: number;
+	maximumP95FrameTimeMs: number;
+	maximumWorstFrameTimeMs: number;
+	minimumAverageFps: number;
+	minimumOnePercentLowFps: number;
+	severeInstabilitySessionCount: number;
+	totalFrameSamples: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isAppliedBackend(value: unknown): value is AppliedGraphicsBackend {
+	return value === 'default' || value === 'd3d11' || value === 'd3d11on12' || value === 'vulkan';
+}
+
+function isFramePolicy(value: unknown): value is AdaptiveValidationFramePolicy {
+	return value === 'uncapped' || value === 'capped' || value === 'unknown';
+}
+
+function isLowConfidenceReason(value: unknown): value is AdaptiveValidationLowConfidenceReason {
+	return typeof value === 'string' && ADAPTIVE_VALIDATION_LOW_CONFIDENCE_REASONS.includes(value as AdaptiveValidationLowConfidenceReason);
+}
+
+function finiteNumberInRange(value: unknown, maximum: number): number | undefined {
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= maximum
+		? value
+		: undefined;
+}
+
+function parseRequiredIdentityString(value: unknown): string | undefined {
+	return typeof value === 'string' && value.length > 0 && value.length <= 1_024 ? value : undefined;
+}
+
+function parseSessionId(value: unknown): string | undefined {
+	return typeof value === 'string' && /^[A-Za-z0-9_-]{16,128}$/u.test(value) ? value : undefined;
+}
+
+export function parseAdaptiveValidationProfileIdentity(value: unknown): AdaptiveValidationProfileIdentity | undefined {
+	if (!isRecord(value) || !isAppliedBackend(value.activeBackend) || !isFramePolicy(value.framePolicy)) return undefined;
+	if (!Number.isInteger(value.benchmarkSemanticVersion) || Number(value.benchmarkSemanticVersion) < 1) return undefined;
+	if (value.profileSemanticVersion !== ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION) return undefined;
+
+	const driverFingerprint = parseRequiredIdentityString(value.driverFingerprint);
+	const electronVersion = parseRequiredIdentityString(value.electronVersion);
+	const hardwareFingerprint = parseRequiredIdentityString(value.hardwareFingerprint);
+	if (driverFingerprint === undefined || electronVersion === undefined || hardwareFingerprint === undefined) return undefined;
+
+	return {
+		activeBackend: value.activeBackend,
+		benchmarkSemanticVersion: Number(value.benchmarkSemanticVersion),
+		driverFingerprint,
+		electronVersion,
+		framePolicy: value.framePolicy,
+		hardwareFingerprint,
+		profileSemanticVersion: ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION
+	};
+}
+
+export function adaptiveValidationProfileIdentitiesEqual(
+	left: AdaptiveValidationProfileIdentity,
+	right: AdaptiveValidationProfileIdentity
+): boolean {
+	return left.activeBackend === right.activeBackend
+		&& left.benchmarkSemanticVersion === right.benchmarkSemanticVersion
+		&& left.driverFingerprint === right.driverFingerprint
+		&& left.electronVersion === right.electronVersion
+		&& left.framePolicy === right.framePolicy
+		&& left.hardwareFingerprint === right.hardwareFingerprint
+		&& left.profileSemanticVersion === right.profileSemanticVersion;
+}
+
+function parseSessionMetrics(value: unknown): AdaptiveValidationSessionMetrics | undefined {
+	if (!isRecord(value)) return undefined;
+	const averageFps = finiteNumberInRange(value.averageFps, 100_000);
+	const onePercentLowFps = finiteNumberInRange(value.onePercentLowFps, 100_000);
+	const p95FrameTimeMs = finiteNumberInRange(value.p95FrameTimeMs, 60_000);
+	const worstFrameTimeMs = finiteNumberInRange(value.worstFrameTimeMs, 60_000);
+	if (averageFps === undefined || onePercentLowFps === undefined || p95FrameTimeMs === undefined || worstFrameTimeMs === undefined) return undefined;
+	if (!Number.isSafeInteger(value.sampleCount) || Number(value.sampleCount) < 0 || Number(value.sampleCount) > 100_000_000) return undefined;
+
+	return {
+		averageFps,
+		onePercentLowFps,
+		p95FrameTimeMs,
+		sampleCount: Number(value.sampleCount),
+		worstFrameTimeMs
+	};
+}
+
+export function parseAdaptiveValidationSession(value: unknown): AdaptiveValidationSession | undefined {
+	if (!isRecord(value) || !Array.isArray(value.lowConfidenceReasons)) return undefined;
+	if (value.lowConfidenceReasons.length > ADAPTIVE_VALIDATION_LOW_CONFIDENCE_REASONS.length) return undefined;
+	if (value.lowConfidenceReasons.some(reason => !isLowConfidenceReason(reason))) return undefined;
+	const completedAt = finiteNumberInRange(value.completedAt, Number.MAX_SAFE_INTEGER);
+	const durationMs = finiteNumberInRange(value.durationMs, 7 * 24 * 60 * 60 * 1_000);
+	const id = parseSessionId(value.id);
+	const metrics = parseSessionMetrics(value.metrics);
+	if (completedAt === undefined || durationMs === undefined || id === undefined || !metrics) return undefined;
+
+	return {
+		completedAt,
+		durationMs,
+		id,
+		lowConfidenceReasons: [...new Set(value.lowConfidenceReasons as AdaptiveValidationLowConfidenceReason[])],
+		metrics
+	};
+}
+
+export function parseAdaptiveValidationSubmission(value: unknown): AdaptiveValidationSubmission | undefined {
+	if (!isRecord(value)) return undefined;
+	const profile = parseAdaptiveValidationProfileIdentity(value.profile);
+	const session = parseAdaptiveValidationSession(value.session);
+	return profile && session ? { profile, session } : undefined;
+}
+
+function sessionHasEnoughEvidence(session: AdaptiveValidationSession): boolean {
+	return session.metrics.sampleCount >= ADAPTIVE_VALIDATION_MIN_FRAME_SAMPLES
+		&& session.metrics.averageFps > 0
+		&& session.metrics.onePercentLowFps > 0
+		&& session.metrics.p95FrameTimeMs > 0;
+}
+
+export function adaptiveValidationSessionHasSevereInstability(session: AdaptiveValidationSession): boolean {
+	if (!sessionHasEnoughEvidence(session)) return false;
+	const lowRatio = session.metrics.onePercentLowFps / session.metrics.averageFps;
+	return session.metrics.p95FrameTimeMs > ADAPTIVE_VALIDATION_SEVERE_P95_FRAME_TIME_MS
+		|| lowRatio < ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_RATIO;
+}
+
+function classificationForSessions(sessions: readonly AdaptiveValidationSession[]): AdaptiveValidationClassification {
+	if (sessions.length < ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return 'inconclusive';
+	if (sessions.some(session => session.lowConfidenceReasons.length > 0 || !sessionHasEnoughEvidence(session))) return 'inconclusive';
+
+	const severeSessions = sessions.filter(adaptiveValidationSessionHasSevereInstability).length;
+	if (severeSessions === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return 'recalibration-recommended';
+	if (severeSessions === 0) return 'validated';
+	return 'inconclusive';
+}
+
+function summarizeSessions(sessions: readonly AdaptiveValidationSession[]): AdaptiveValidationEvidenceSummary {
+	const cleanSessions = sessions.filter(session => session.lowConfidenceReasons.length === 0);
+	return {
+		acceptedSessionCount: sessions.length,
+		cleanSessionCount: cleanSessions.length,
+		maximumP95FrameTimeMs: cleanSessions.reduce((maximum, session) => Math.max(maximum, session.metrics.p95FrameTimeMs), 0),
+		maximumWorstFrameTimeMs: cleanSessions.reduce((maximum, session) => Math.max(maximum, session.metrics.worstFrameTimeMs), 0),
+		minimumAverageFps: cleanSessions.length > 0 ? Math.min(...cleanSessions.map(session => session.metrics.averageFps)) : 0,
+		minimumOnePercentLowFps: cleanSessions.length > 0 ? Math.min(...cleanSessions.map(session => session.metrics.onePercentLowFps)) : 0,
+		severeInstabilitySessionCount: cleanSessions.filter(adaptiveValidationSessionHasSevereInstability).length,
+		totalFrameSamples: cleanSessions.reduce((total, session) => total + session.metrics.sampleCount, 0)
+	};
+}
+
+function evidenceSummaryMatches(value: unknown, expected: AdaptiveValidationEvidenceSummary): boolean {
+	return isRecord(value)
+		&& value.acceptedSessionCount === expected.acceptedSessionCount
+		&& value.cleanSessionCount === expected.cleanSessionCount
+		&& value.maximumP95FrameTimeMs === expected.maximumP95FrameTimeMs
+		&& value.maximumWorstFrameTimeMs === expected.maximumWorstFrameTimeMs
+		&& value.minimumAverageFps === expected.minimumAverageFps
+		&& value.minimumOnePercentLowFps === expected.minimumOnePercentLowFps
+		&& value.severeInstabilitySessionCount === expected.severeInstabilitySessionCount
+		&& value.totalFrameSamples === expected.totalFrameSamples;
+}
+
+export function summarizeAdaptiveValidationEvidence(state: AdaptiveValidationState): AdaptiveValidationEvidenceSummary {
+	return summarizeSessions(state.sessions);
+}
+
+export function createAdaptiveValidationState(
+	profile: AdaptiveValidationProfileIdentity,
+	now: number = Date.now()
+): AdaptiveValidationState {
+	return {
+		classification: 'inconclusive',
+		profile,
+		profileChangeConfirmationRequired: true,
+		sessions: [],
+		status: 'sampling',
+		summary: summarizeSessions([]),
+		updatedAt: now,
+		version: ADAPTIVE_VALIDATION_STATE_VERSION
+	};
+}
+
+export function prepareAdaptiveValidationState(
+	existing: AdaptiveValidationState | undefined,
+	profile: AdaptiveValidationProfileIdentity,
+	now: number = Date.now()
+): AdaptiveValidationState {
+	return existing && adaptiveValidationProfileIdentitiesEqual(existing.profile, profile)
+		? existing
+		: createAdaptiveValidationState(profile, now);
+}
+
+export function recordAdaptiveValidationSession(
+	state: AdaptiveValidationState,
+	value: unknown,
+	now: number = Date.now()
+): AdaptiveValidationState {
+	if (state.status === 'complete' || state.sessions.length >= ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return state;
+	const session = parseAdaptiveValidationSession(value);
+	const previousSession = state.sessions.at(-1);
+	if (
+		!session
+		|| session.durationMs < ADAPTIVE_VALIDATION_MIN_SESSION_MS
+		|| state.sessions.some(existing => existing.id === session.id)
+		|| (previousSession !== undefined && session.completedAt <= previousSession.completedAt)
+	) return state;
+
+	const sessions = [...state.sessions, session];
+	const complete = sessions.length === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS;
+	return {
+		classification: classificationForSessions(sessions),
+		...(complete ? { completedAt: now } : {}),
+		profile: state.profile,
+		profileChangeConfirmationRequired: true,
+		sessions,
+		status: complete ? 'complete' : 'sampling',
+		summary: summarizeSessions(sessions),
+		updatedAt: now,
+		version: ADAPTIVE_VALIDATION_STATE_VERSION
+	};
+}
+
+export function dismissAdaptiveValidationRecommendation(
+	state: AdaptiveValidationState,
+	now: number = Date.now()
+): AdaptiveValidationState {
+	if (
+		state.status !== 'complete'
+		|| state.classification !== 'recalibration-recommended'
+		|| state.recommendationDismissedAt !== undefined
+	) return state;
+
+	return {
+		...state,
+		recommendationDismissedAt: now,
+		updatedAt: now
+	};
+}
+
+export function parseAdaptiveValidationState(value: unknown): AdaptiveValidationState | undefined {
+	if (!isRecord(value) || value.version !== ADAPTIVE_VALIDATION_STATE_VERSION || !Array.isArray(value.sessions)) return undefined;
+	if (value.sessions.length > ADAPTIVE_VALIDATION_REQUIRED_SESSIONS || value.profileChangeConfirmationRequired !== true) return undefined;
+	const profile = parseAdaptiveValidationProfileIdentity(value.profile);
+	const sessions = value.sessions.map(parseAdaptiveValidationSession);
+	if (!profile || sessions.some(session => !session || session.durationMs < ADAPTIVE_VALIDATION_MIN_SESSION_MS)) return undefined;
+
+	const parsedSessions = sessions as AdaptiveValidationSession[];
+	if (
+		new Set(parsedSessions.map(session => session.id)).size !== parsedSessions.length
+		|| parsedSessions.some((session, index) => index > 0 && session.completedAt <= parsedSessions[index - 1].completedAt)
+	) return undefined;
+	const status: AdaptiveValidationStatus = parsedSessions.length === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS ? 'complete' : 'sampling';
+	const classification = classificationForSessions(parsedSessions);
+	const summary = summarizeSessions(parsedSessions);
+	if (value.status !== status || value.classification !== classification || !evidenceSummaryMatches(value.summary, summary)) return undefined;
+	const updatedAt = finiteNumberInRange(value.updatedAt, Number.MAX_SAFE_INTEGER);
+	const completedAt = finiteNumberInRange(value.completedAt, Number.MAX_SAFE_INTEGER);
+	const recommendationDismissedAt = finiteNumberInRange(value.recommendationDismissedAt, Number.MAX_SAFE_INTEGER);
+	if (
+		updatedAt === undefined
+		|| (status === 'complete' && completedAt === undefined)
+		|| (status === 'sampling' && value.completedAt !== undefined)
+		|| (value.recommendationDismissedAt !== undefined && recommendationDismissedAt === undefined)
+		|| (recommendationDismissedAt !== undefined && classification !== 'recalibration-recommended')
+	) return undefined;
+
+	return {
+		classification,
+		...(completedAt !== undefined ? { completedAt } : {}),
+		profile,
+		profileChangeConfirmationRequired: true,
+		...(recommendationDismissedAt !== undefined ? { recommendationDismissedAt } : {}),
+		sessions: parsedSessions,
+		status,
+		summary,
+		updatedAt,
+		version: ADAPTIVE_VALIDATION_STATE_VERSION
+	};
+}

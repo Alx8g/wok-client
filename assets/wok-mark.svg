@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 726 666" width="726" height="666"
+     role="img" aria-label="WOK">
+  <title>WOK mark</title>
+  <!--
+    WOK primary mark. Hand-authored vector twin of the chosen concept
+    (concepts/r2-sweep-02.png), traced to 97.0% silhouette agreement.
+
+    Three shapes, decreasing weight left to right — that taper is the mark:
+
+      A  filled outline. Big round crown, long near-vertical left flank,
+         and a tapering right edge that runs down to a needle point at
+         (94,472). That right edge is the upper wall of the wedge slit.
+      B  straight stroke, weight 181, round caps. Its left wall is the lower
+         wall of the wedge, so the slit is a converging wedge, not a parallel
+         slot. B's bottom cap is the bottom of the whole mark; A tucks under it.
+      C  gently bowed stroke, weight 112, round caps.
+
+    No masks and no clipping: the three shapes never overlap anywhere a slit
+    is wanted, so the negative space IS the background. Drop this on gold,
+    white or a photograph and it is unchanged. One colour — recolour by
+    changing fill/stroke on the group.
+
+    Ink fills the viewBox exactly: 0,0 to 726,666. Do not add padding here;
+    clear space is defined in the README.
+  -->
+  <g class="wok-mark" fill="#FBC02D" stroke="#FBC02D">
+    <path stroke="none"
+          d="M162 0C238 0 290 52 285 132C278 200 120 353 94 472L166 574C120 588
+             35 590 35 576C35 562 27 555 26 546C10 496 0 390 0 300C1 198 4 100
+             36 58C72 16 117 0 162 0Z"/>
+    <path fill="none" stroke-width="181" stroke-linecap="round" d="M453 160L128 575"/>
+    <path fill="none" stroke-width="112" stroke-linecap="round" d="M670 220Q505 363 371 537"/>
+  </g>
+</svg>

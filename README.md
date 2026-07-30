@@ -1,127 +1,114 @@
-# crankshaft
+# WOK Client
 
-[![GitHub All Releases](https://img.shields.io/github/downloads/KraXen72/crankshaft/total.svg)](https://github.com/KraXen72/crankshaft/releases/latest) [![Latest release](https://img.shields.io/github/downloads/KraXen72/crankshaft/latest/total)](https://github.com/KraXen72/crankshaft/releases/latest) [![Chat](https://img.shields.io/discord/966300714060116008?color=blue&label=discord)](https://discord.gg/ZeVuxG7gQJ) [![Recurring donation via Liberapay](https://img.shields.io/badge/donate-liberapay-%23f6c915?logo=liberapay)](https://liberapay.com/KraXen72) [![One-time donation via ko-fi.com](https://img.shields.io/badge/donate-ko--fi-%23ff5e5b?logo=kofi)](https://ko-fi.com/kraxen72)
+WOK Client is a hardware-adaptive, performance-focused Krunker desktop client written in TypeScript.
 
-> a fast, feature-rich krunker client written in typescript
+Website: [client.wok.social](https://client.wok.social)
 
-**Download:**
-[Windows (x64)](https://github.com/KraXen72/crankshaft/releases/latest/download/crankshaft-x64-setup.exe) -
-[Mac (arm64)](https://github.com/KraXen72/crankshaft/releases/latest/download/crankshaft-arm64.dmg) -
-[Linux (x64 AppImage)](https://github.com/KraXen72/crankshaft/releases/latest/download/crankshaft-x64.AppImage) -
-[See Latest Release](https://github.com/KraXen72/crankshaft/releases/latest)
+Source: [github.com/nzalexgarciagil-ctrl/wok-client](https://github.com/nzalexgarciagil-ctrl/wok-client)
 
-> [!WARNING]
-> If you're on MacOS, you may see a popup saying the app is 'damaged' when trying to run it.
-> To fix, open Terminal and run:
-> 
-> `xattr -c /Applications/crankshaft.app`
+Releases: [WOK Client releases](https://github.com/nzalexgarciagil-ctrl/wok-client/releases)
 
-![splash](assets/blank_splash.png)
+![WOK Client](assets/full_logo.svg)
 
-<!-- TODO: update -->
-## client features
-- very good performance with additional performance enhancing settings
-- unobtrusive
-  - no clan colors
-  - no watermarks
-  - all features can be disabled
-- highly customisable, many different settings
-- _hides_ ads by default (can be disabled)
-- resource swapper (sounds & all other assets)
-- css swapper
-- userscript support
-- discord RPC (gamemode, map, class & skin)
-- customisable matchmaker (Gamemode, Region, Min/Max players, Time)
-- quick class switcher using `#hiddenClasses`
-- built-in hotkeys: [more about them here](#hotkeys)
-- maintained & open source
+## Project status
 
-## quality of life
-- very lightweight
-  - only 100kb of javascript combined
-  - dependencies are carefully chosen (currently, there are 3)
-- **no-compromise mac, linux and windows support**
-- **secure:** `web security` is on, the `remote` module and `nodeIntegration` are disabled
-- splash screen is not a separate window, shows only while krunker is actually loading.
-- Discord RPC: if enabled, only updates while you're not actually in game. Does not use `setInterval` like other clients.
+WOK Client `1.0.0` is the first WOK release and is a modified version of GPL-licensed [Crankshaft 2.0.0](https://github.com/KraXen72/crankshaft/tree/2.0.0). Crankshaft attribution, license terms, and contributor history are preserved. See [CHANGELOG.md](CHANGELOG.md), [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt) for the modification and dependency record.
 
-## userscripts
+Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations.
 
-- any `.js` file in `%APPDATA%/crankshaft/config/scripts` will be considered a userscript and executed if enabled in settings.
-- There are a few official/example userscripts:
-  - [keystrokes.js](https://gist.github.com/KraXen72/2ea1332440b0c66b83ca9b73afc38269): shows WASD, shift, space and 2 configurable keys on screen.
-  - [autospectate.js](https://gist.github.com/KraXen72/270b2b8f28dda974f9e643b384e87a68): automatically joins game as spectator if turned on
-- all userscripts are disabled when they are first added.
-- `%APPDATA%/crankshaft/config/tracker.json` is used to keep track of enabled userscripts.
+WOK Client is an independent project. It is not affiliated with, endorsed by, or approved by FRVR. An optimized browser wrapper is not automatically exempt from a game's terms, so users should review the current Krunker rules and use optional legacy features at their own risk.
 
-If you want to write a userscript or learn more about them, read the [Documentation](./USERSCRIPTS.md)
-> **Use userscripts at your own risk**, the author(s) of this client are **not responsible for any damage done** with userscripts because the user is the author of the script.
-> **Do not write or use any userscripts which would give the user a competitive advantage.**
+## Features
 
-## hotkeys
+- Hardware-aware graphics selection with recovery and calibration safeguards
+- Optional Competitive mode with reversible Krunker setting changes
+- Performance diagnostics for FPS, frame pacing, graphics backend, and WebGL state
+- CSS swapper, menu timer, quick class picker, and match-result export
+- Configurable matchmaker and competition-room helper
+- Optional Discord Rich Presence using an in-tree IPC client
+- Legacy resource swapping, ad controls, custom filters, matchmaker, and competition automation remain disabled by default
 
-Press `Alt` to show electron menu. Here you can find all hotkeys.
-standard hotkeys like zooming, copying/pasting and devtools also included.
-**Client's hotkeys:**
+Terms-sensitive features require an explicit user choice. Existing Crankshaft or early WOK profiles are migrated once to the safe defaults without deleting the original profile files.
 
-- `F5`: reload
-- `F6`: find a new match,
-- `F7`: copy game link,
-- `Ctrl+F7`: join game from clipboard
-- `F12`: devtools (alternative hotkey)
+## Security boundaries
 
-## matchmaker
-a customisable matchmaker (with GUI settings!) that you can use alongside/instead of the regular `F6` 
-![matchmaker](./assets/matchmaker_screenshot.png)
+WOK Client keeps Electron web security enabled, disables renderer Node integration, validates privileged IPC senders and payloads, restricts main-window navigation to HTTPS Krunker origins, and opens other HTTPS links in the system browser.
 
-## building from source
-1. **you have to have [git](https://git-scm.com/downloads), [nodejs](https://nodejs.org/en/download/), and [pnpm](https://pnpm.io/installation) installed**.
-2. **installation**:
-   - `git clone https://github.com/KraXen72/crankshaft`
-   - `cd crankshaft`
-   - `pnpm i`
-3. **building from source**: `pnpm dist`
+The game preload still requires the page's main JavaScript world, so `contextIsolation` and the renderer sandbox are not currently enabled for the game window. Do not load arbitrary sites through development overrides. The override setting accepts only HTTPS URLs on `krunker.io` or its subdomains.
 
-### contributing
-1. follow previous steps 1 & 2
-2. make your changes + running from source: `pnpm start`/`pnpm dev` (rebuilds on changes, refresh krunker with `F6`)
-   - make sure to run the code through the configured eslint before contributing. (vs code will enable it if you have the extension)
-3. after your changes, try it out with `pnpm testbuild` - this will minify the code & run the app.
-   - until automated tests are added, try to manually test it works even after the code is minified. if it does not, you're probably doing something wrong
-- please report any bugs/feature requests in the Issues.
-- feel free to submit pull requests, they will be merged as long as they support the client ideology.
+## Hotkeys
 
-#### wanted/potential features
-- here are some features i wanted to add, but don't have the time to
-- if you're looking to contribute, feel free to open pr's for these
-- [ ] **Matchmaker: Map autocomplete**
-  - create a simple typeahead/autocomplete for the matchmaker, where you can input maps (official ones)
-    - you can get more info about maps from [this krunker api link](https://matchmaker.krunker.io/game-list?hostname=krunker.io) or the [client code](https://github.com/KraXen72/crankshaft/blob/master/src/matchmaker.ts)
-    - [Wes Bos' Javascript30 free course (episode 6)](https://javascript30.com) is a tutorial on how to implement a typeahead in vanilla js
-      - (you'd use typescript but it's very similar)
-  - allow toggling the list of maps between whitelist/blacklist
-  - take this white/blacklist into account when using the matchmaker
-- [ ] **Add tests**
-  - could be useful, testing a few thigs like: if the game loads, if settings load, if you can set a setting, etc.
-- [ ] **Add autoupdate** (whatever official way electron recommends)
-  - i tried to add this once and failed.
-  - honestly good luck since this client uses an ancient electron version due to all the newer ones having a bug that causes aim freeze in krunker
+Press `Alt` on Windows or Linux to reveal the application menu.
 
-### credits
-- [Creepycats](https://github.com/creepycats) released [Gatoclient](https://github.com/Gatohost/gatoclient), which was based on top of [idkr](https://github.com/idkr-client/idkr).
-- Crankshaft was built on top of [Gatoclient lite](https://github.com/LukeTheDuke240/gatoclient-lite), an `app.asar` mod optimizing Gatoclient by [LukeTheDuke](https://github.com/LukeTheDuke240).
-- Very little code remains, as Crankshaft was rewritten in typescript & more features were added.
-- Gatoclient was later rewritten, implementing some code from Crankshaft too.
-- **other acknowledgments**
-  - [All contributors](https://github.com/KraXen72/crankshaft/graphs/contributors)
-  - [bigjakk](https://github.com/bigjakk) - electron build help, parallel work on [KCC](https://github.com/bigjakk/Krunker-Civilian-Client)
-  - [AspectQuote](https://github.com/AspectQuote) - Current matchmaker implementation, some UI, CSS backporting
-  - [Iona](https://github.com/eeonaa) - CSS Swapper implementation
-  - [wa/paintingofblue](https://github.com/hsyslm) - original matchmaker implementation
-  - [Commander/asger-finding](https://github.com/asger-finding) (AKC client) - resource swapper implementation
-  - [Tae](https://github.com/whuuayu) - awesome logo for the client <3
+- `F5`: reload the game
+- `F7`: copy the current game link
+- `Ctrl+F7` or `Cmd+F7`: join the game link from the clipboard
+- `F12` or `Ctrl+Shift+I`/`Cmd+Shift+I`: toggle Developer Tools
+- `Alt+F8`: toggle performance diagnostics when enabled
+- Matchmaker accept, cancel, and launch keys are configurable; the default launch key is `F1`
 
-## support development
-[![Recurring donation via Liberapay](https://liberapay.com/assets/widgets/donate.svg)](https://liberapay.com/KraXen72) [![One-time donation via ko-fi.com](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/kraxen72)
+## Build and validation
 
-You can support ongoing development & maintainance by donating. All donations are highly appreciated! <3
+Requirements:
+
+- Git
+- Node.js 24.13.0 or newer
+- pnpm 11.15.1 or newer
+- Platform packaging tools when making a local executable; Windows installer creation also requires NSIS
+
+The documented patched-Electron release currently provides archives for macOS arm64, Linux x64, and Windows x64. Other architectures require a separately reviewed Electron build and checksum record. Windows x64 has received local gameplay testing. Linux x64 and macOS arm64 retain Crankshaft's packaging paths and are covered by source validation, but still require native package and gameplay smoke tests before they are described as verified releases.
+
+From a source checkout:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run validate
+```
+
+`pnpm install` downloads the documented patched Electron build and verifies it against the release checksum manifest. The mirror, source commit, and SHA-256 values are recorded in [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt).
+
+Development commands:
+
+```sh
+pnpm start
+pnpm run lint
+pnpm run typecheck
+pnpm test
+```
+
+To make a local platform package after reviewing the provenance and platform prerequisites:
+
+```sh
+pnpm run make
+```
+
+There is intentionally no registry publish command in the package metadata. Pushing a reviewed version tag invokes the pinned GitHub Actions release workflow, which publishes unsigned GitHub prerelease artifacts and SHA-256 checksums.
+
+## macOS quarantine
+
+Locally built or unsigned applications may be quarantined by macOS. Review the source and build provenance before clearing quarantine. If appropriate for your own build:
+
+```sh
+xattr -c "/Applications/WOK Client.app"
+```
+
+## Credits
+
+WOK Client is based on [Crankshaft](https://github.com/KraXen72/crankshaft). See the [full Crankshaft contributor history](https://github.com/KraXen72/crankshaft/graphs/contributors).
+
+Crankshaft was built from earlier work in Gatoclient, idkr, and Gatoclient Lite. Upstream acknowledgements include:
+
+- [Creepycats](https://github.com/creepycats) and [Gatoclient](https://github.com/Gatohost/gatoclient)
+- [LukeTheDuke](https://github.com/LukeTheDuke240) and Gatoclient Lite
+- [bigjakk](https://github.com/bigjakk) for Electron build work and parallel work on [KCC](https://github.com/bigjakk/Krunker-Civilian-Client)
+- [AspectQuote](https://github.com/AspectQuote) for matchmaker and UI work
+- [Iona](https://github.com/eeonaa) for the CSS swapper
+- [wa/paintingofblue](https://github.com/hsyslm) for the original matchmaker
+- [Commander/asger-finding](https://github.com/asger-finding) for resource-swapper work
+- [Tae](https://github.com/whuuayu) for the original Crankshaft logo
+
+The complete historical record remains in Git and [CHANGELOG.md](CHANGELOG.md).
+
+## License
+
+WOK Client and the modified Crankshaft source are distributed under GNU GPL version 3 only. See [LICENSE](LICENSE). Third-party components retain their own licenses as listed in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). Local packages copy the WOK GPL license, third-party notices, and patched-Electron provenance into the packaged resources directory without replacing Electron's own license files.

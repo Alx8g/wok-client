@@ -12,42 +12,38 @@ type KeybindUserPref = {
 
 type UserPrefValue = boolean | string | string[] | number | KeybindUserPref;
 
-interface UserscriptTracker {
-	[script: string]: boolean;
-}
-
 interface InsertedCSS {
 	[identifier: string]: string;
 }
 
-interface IUserscript {
-	name: string;
-	fullpath: string;
-	settingsPath: string;
-	content?: string;
-	exported?: {
-		meta?: UserscriptMeta | false,
-		unload?: Function | false
-	};
+interface GraphicsRuntimeInfo {
+	activeBackend: string;
+	preference: string;
+	recommendation: string;
+	reason: string;
+	source: string;
+	features: Record<string, string>;
 }
 
-interface IUserscriptInstance extends IUserscript {
-	meta: UserscriptMeta | false,
-	hasRan: boolean,
-	runAt: ('document-start' | 'document-end'),
-	priority: number,
-	load: Function,
-	unload: Function | false,
-	settings?: Record<string, UserscriptRenderReadySetting>
+interface CompetitiveModeRuntimeInfo {
+	adaptiveValidationState?: unknown;
+	hasGameSettingsBackup: boolean;
 }
 
-interface UserscriptMeta {
-	name: string;
-	author: string;
-	version: string;
-	desc: string;
-	src: string;
-	settingsID: string;
+interface PerformanceSnapshot {
+	averageFps: number;
+	currentFps: number;
+	onePercentLowFps: number;
+	p95FrameTimeMs: number;
+	sampleCount: number;
+	worstFrameTimeMs: number;
+	windowSeconds: number;
+}
+
+interface WokPerformanceAPI {
+	reset: () => void;
+	setVisible: (visible: boolean) => void;
+	snapshot: () => PerformanceSnapshot;
 }
 
 // stuff krunker adds
@@ -59,8 +55,11 @@ type SettingsTab = {
 interface Window {
 	OffCliV: boolean;
 	closeClient: Function;
+	wokPerformance?: WokPerformanceAPI;
+	crankshaftPerformance?: WokPerformanceAPI;
 	getGameActivity: Function;
 	showWindow: Function;
+	setSetting: (key: string, value: boolean | number | string) => void;
 	instruction: { log: (type: number, message: string) => void };
 	openHostWindow: (isCustom: boolean, type: number) => void;
 	openServerWindow: (id: number) => void;
@@ -88,7 +87,7 @@ interface Window {
  *	basically, settings are SettingItemGeneric + a type: string. some types have extra fields, as you can see
  */
 
-type Callbacks = 'normal' | 'userscript' | Function;
+type Callbacks = 'normal' | Function;
 type ValidTypes = 'bool' | 'heading' | 'text' | 'sel' | 'multisel' | 'color' | 'num' | 'keybind';
 
 interface SettingExtraButton {
@@ -171,35 +170,6 @@ interface RenderReadySetting extends SettingItemGeneric {
 	callback: Callbacks;
 
 	value: UserPrefValue;
-
-	// an optional unload function (for now for userscripts)
-	userscriptReference?: IUserscriptInstance
-}
-
-interface UserscriptRenderReadySetting extends SettingItemGeneric {
-	type: ValidTypes;
-
-	// for sel
-	opts?: string[];
-	cols?: number;
-
-	// for multisel
-	/** optDescriptions.length must equal opts.length! */
-	optDescriptions?: string[];
-
-	// for num
-	min?: number;
-	max?: number;
-	step?: number;
-
-	// the data
-	key: string;
-	changed: Function;
-
-	value: UserPrefValue;
-
-	// an optional unload function (for now for userscripts)
-	userscriptReference?: IUserscriptInstance
 }
 
 interface CategoryName {

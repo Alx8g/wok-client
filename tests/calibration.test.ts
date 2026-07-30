@@ -1,0 +1,437 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { buildCalibrationResultPage, buildCalibrationTrialPage } from '../src/calibration-window.ts';
+import {
+	CALIBRATION_VERSION,
+	calculateCalibrationScore,
+	calibrationSignaturesEqual,
+	collectStableGraphicsDriverFields,
+	completeCalibration,
+	createCalibrationCandidates,
+	createCalibrationSignature,
+	finalizeCalibration,
+	getPendingCalibrationCandidate,
+	isMeaningfulCalibrationScoreWin,
+	parseCalibrationState,
+	prepareCalibrationState,
+	recordCalibrationResult,
+	requestCalibrationRerun,
+	verifyEffectiveRendererBackend,
+	type CalibrationMetrics,
+	type CalibrationSignature
+} from '../src/calibration.ts';
+
+const d3d11on12Renderer = 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, D3D11on12 vs_5_0 ps_5_0, D3D11)';
+const stableMetrics: CalibrationMetrics = {
+	averageFps: 300,
+	eventLoopP95Ms: 0.8,
+	eventLoopWorstMs: 3,
+	longFrameRatio: 0,
+	lowConfidenceReasons: [],
+	onePercentLowFps: 250,
+	p95FrameTimeMs: 4,
+	sampleCount: 800,
+	success: true,
+	webglRenderer: d3d11on12Renderer,
+	worstFrameTimeMs: 8
+};
+
+const signature = createCalibrationSignature('2.0.0', '44.0.0', '8086:46a6', 'driver-a');
+
+function createWindowsCandidates() {
+	return createCalibrationCandidates({
+		currentBackend: 'd3d11on12',
+		currentFramePolicy: 'uncapped',
+		platform: 'win32',
+		recommendedBackend: 'd3d11on12'
+	});
+}
+
+function unstableMetrics(overrides: Partial<CalibrationMetrics> = {}): CalibrationMetrics {
+	return {
+		...stableMetrics,
+		averageFps: 140,
+		longFrameRatio: 0.1,
+		onePercentLowFps: 30,
+		p95FrameTimeMs: 30,
+		worstFrameTimeMs: 90,
+		...overrides
+	};
+}
+
+function signatureWith(overrides: Partial<CalibrationSignature>): CalibrationSignature {
+	return { ...signature, ...overrides };
+}
+
+test('driver invalidation ignores backend-dependent GL renderer strings', () => {
+	const d3d11 = collectStableGraphicsDriverFields({
+		driverVendor: 'Intel',
+		driverVersion: '32.0.101.9999',
+		glRenderer: 'ANGLE D3D11'
+	});
+	const d3d11on12 = collectStableGraphicsDriverFields({
+		driverVendor: 'Intel',
+		driverVersion: '32.0.101.9999',
+		glRenderer: 'ANGLE D3D11on12'
+	});
+
+	assert.deepEqual(d3d11, d3d11on12);
+});
+
+test('stages a short uncapped-first Windows candidate plan', () => {
+	const candidates = createWindowsCandidates();
+
+	assert.deepEqual(candidates.map(candidate => candidate.id), [
+		'd3d11on12:uncapped',
+		'default:uncapped'
+	]);
+	assert.equal(candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+});
+
+test('stages a capped recovery only after clean severe uncapped instability', () => {
+	const candidates = createWindowsCandidates();
+	let healthyState = prepareCalibrationState(undefined, signature, candidates, false);
+	healthyState = recordCalibrationResult(healthyState, candidates[0], stableMetrics);
+	assert.equal(healthyState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+
+	let contaminatedState = prepareCalibrationState(undefined, signature, candidates, false);
+	contaminatedState = recordCalibrationResult(contaminatedState, candidates[0], unstableMetrics({
+		lowConfidenceReasons: ['window-blurred']
+	}));
+	assert.equal(contaminatedState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+
+	let unstableState = prepareCalibrationState(undefined, signature, candidates, false);
+	unstableState = recordCalibrationResult(unstableState, candidates[0], unstableMetrics());
+	assert.deepEqual(unstableState.candidates.map(candidate => candidate.id), [
+		'd3d11on12:uncapped',
+		'd3d11on12:capped',
+		'default:uncapped'
+	]);
+	assert.equal(getPendingCalibrationCandidate(unstableState)?.id, 'd3d11on12:capped');
+});
+
+test('never schedules blocked or Windows-only profiles where unsupported', () => {
+	const windowsCandidates = createCalibrationCandidates({
+		blockedBackends: ['d3d11on12'],
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'win32',
+		recommendedBackend: 'd3d11on12'
+	});
+	assert.equal(windowsCandidates.some(candidate => candidate.backend === 'd3d11on12'), false);
+
+	const linuxCandidates = createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'linux',
+		recommendedBackend: 'd3d11'
+	});
+	assert.deepEqual(linuxCandidates.map(candidate => candidate.id), ['default:uncapped']);
+
+	const macCandidates = createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'darwin',
+		recommendedBackend: 'd3d11on12'
+	});
+	assert.deepEqual(macCandidates.map(candidate => candidate.id), ['default:uncapped']);
+});
+
+test('verifies explicit effective renderer backends and treats default conservatively', () => {
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('d3d11', 'ANGLE (NVIDIA, GeForce RTX, D3D11 vs_5_0 ps_5_0, D3D11)'),
+		{ candidateBackend: 'd3d11', detectedBackend: 'd3d11', status: 'verified' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('d3d11on12', d3d11on12Renderer),
+		{ candidateBackend: 'd3d11on12', detectedBackend: 'd3d11on12', status: 'verified' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('vulkan', 'ANGLE (AMD, Radeon RX, Vulkan 1.3.0)'),
+		{ candidateBackend: 'vulkan', detectedBackend: 'vulkan', status: 'verified' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('d3d11on12', 'ANGLE (Intel, Iris Xe, D3D11 vs_5_0 ps_5_0, D3D11)'),
+		{ candidateBackend: 'd3d11on12', detectedBackend: 'd3d11', status: 'mismatch' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('default', d3d11on12Renderer),
+		{ candidateBackend: 'default', detectedBackend: 'd3d11on12', status: 'indeterminate' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('vulkan', 'Unknown renderer'),
+		{ candidateBackend: 'vulkan', status: 'indeterminate' }
+	);
+});
+
+test('scores factual throughput and consistency without a frame-policy penalty', () => {
+	const unstable = unstableMetrics({
+		averageFps: 330,
+		eventLoopP95Ms: 5,
+		longFrameRatio: 0.12,
+		onePercentLowFps: 90,
+		p95FrameTimeMs: 14,
+		worstFrameTimeMs: 80
+	});
+
+	assert.ok(calculateCalibrationScore(stableMetrics) > calculateCalibrationScore(unstable));
+	assert.equal(calculateCalibrationScore(stableMetrics, 'uncapped'), calculateCalibrationScore(stableMetrics, 'capped'));
+});
+
+test('records every first-pass trial and recommends the strongest measured backend', () => {
+	const candidates = createWindowsCandidates();
+	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	assert.equal(getPendingCalibrationCandidate(state)?.id, candidates[0].id);
+
+	state = recordCalibrationResult(state, candidates[0], stableMetrics);
+	state = recordCalibrationResult(state, candidates[1], {
+		...stableMetrics,
+		averageFps: 220,
+		onePercentLowFps: 180,
+		p95FrameTimeMs: 5.5
+	});
+	state = finalizeCalibration(state);
+
+	assert.equal(state.status, 'awaiting-confirmation');
+	assert.equal(state.recommendedSelection?.candidate.id, candidates[0].id);
+	state = completeCalibration(state, true);
+	assert.equal(state.status, 'complete');
+	assert.equal(state.activeSelection?.candidate.id, candidates[0].id);
+});
+
+test('does not accept an explicit candidate whose renderer reports another backend', () => {
+	const candidates = createWindowsCandidates();
+	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	state = recordCalibrationResult(state, candidates[0], {
+		...stableMetrics,
+		averageFps: 400,
+		onePercentLowFps: 350,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, D3D11 vs_5_0 ps_5_0, D3D11)'
+	});
+	state = recordCalibrationResult(state, candidates[1], {
+		...stableMetrics,
+		averageFps: 220,
+		onePercentLowFps: 180
+	});
+	state = finalizeCalibration(state);
+
+	assert.equal(state.results[0].backendVerification.status, 'mismatch');
+	assert.match(state.results[0].failureReason ?? '', /requested d3d11on12/i);
+	assert.equal(state.recommendedSelection?.candidate.backend, 'default');
+});
+
+test('does not trade a healthy uncapped profile for synchronized frame pacing', () => {
+	const candidates = createWindowsCandidates();
+	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
+	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
+	assert.ok(cappedCandidate);
+
+	state = recordCalibrationResult(state, candidates[0], {
+		...stableMetrics,
+		averageFps: 144,
+		eventLoopP95Ms: 9.4,
+		onePercentLowFps: 77,
+		p95FrameTimeMs: 9.9
+	});
+	state = recordCalibrationResult(state, cappedCandidate, {
+		...stableMetrics,
+		averageFps: 120,
+		eventLoopP95Ms: 2.5,
+		onePercentLowFps: 113,
+		p95FrameTimeMs: 8.5
+	});
+	state = finalizeCalibration(state);
+
+	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'uncapped');
+	assert.equal(state.recommendedSelection?.candidate.backend, 'd3d11on12');
+});
+
+test('uses a cap only as meaningful recovery evidence for severely unstable uncapped rendering', () => {
+	const candidates = createWindowsCandidates();
+	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
+	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
+	assert.ok(cappedCandidate);
+
+	state = recordCalibrationResult(state, cappedCandidate, {
+		...stableMetrics,
+		averageFps: 132,
+		longFrameRatio: 0.01,
+		onePercentLowFps: 110,
+		p95FrameTimeMs: 8,
+		worstFrameTimeMs: 11
+	});
+	state = finalizeCalibration(state);
+
+	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'capped');
+});
+
+test('treats app version as informational while relevant signature fields invalidate', () => {
+	const appOnlyChange = signatureWith({ appVersion: '2.1.0' });
+	assert.equal(calibrationSignaturesEqual(signature, appOnlyChange), true);
+	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ benchmarkVersion: CALIBRATION_VERSION + 1 })), false);
+	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ electronVersion: '45.0.0' })), false);
+	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ hardwareFingerprint: '10de:2684' })), false);
+	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ driverFingerprint: 'driver-b' })), false);
+
+	const candidates = createWindowsCandidates();
+	const state = prepareCalibrationState(undefined, signature, candidates, false);
+	const appUpdated = prepareCalibrationState(state, appOnlyChange, candidates, false);
+	assert.notEqual(appUpdated, state);
+	assert.equal(appUpdated.status, state.status);
+	assert.equal(appUpdated.results, state.results);
+	assert.equal(appUpdated.signature.appVersion, '2.1.0');
+	assert.notEqual(prepareCalibrationState(state, signatureWith({ benchmarkVersion: CALIBRATION_VERSION + 1 }), candidates, false), state);
+	assert.notEqual(prepareCalibrationState(state, signatureWith({ electronVersion: '45.0.0' }), candidates, false), state);
+	assert.notEqual(prepareCalibrationState(state, signatureWith({ hardwareFingerprint: '10de:2684' }), candidates, false), state);
+	assert.notEqual(prepareCalibrationState(state, signatureWith({ driverFingerprint: 'driver-b' }), candidates, false), state);
+});
+
+test('preserves a known-good selection for an explicit rerun but not a relevant signature change', () => {
+	const candidates = createWindowsCandidates();
+	let completed = prepareCalibrationState(undefined, signature, candidates, true);
+	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
+	completed = completeCalibration(finalizeCalibration(completed), true);
+	assert.ok(completed.activeSelection);
+
+	const explicitRerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, candidates, true);
+	assert.equal(explicitRerun.activeSelection?.candidate.id, completed.activeSelection.candidate.id);
+
+	const driverInvalidated = prepareCalibrationState(
+		completed,
+		signatureWith({ driverFingerprint: 'driver-b' }),
+		candidates,
+		true
+	);
+	assert.equal(driverInvalidated.activeSelection, undefined);
+});
+
+test('preserves backward-compatible parsing while an old benchmark version reruns', () => {
+	const candidates = createWindowsCandidates();
+	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	state = recordCalibrationResult(state, candidates[0], stableMetrics);
+	const legacyState = {
+		...state,
+		results: state.results.map(result => ({
+			candidate: result.candidate,
+			metrics: {
+				averageFps: result.metrics.averageFps,
+				eventLoopP95Ms: result.metrics.eventLoopP95Ms,
+				longFrameRatio: result.metrics.longFrameRatio,
+				onePercentLowFps: result.metrics.onePercentLowFps,
+				p95FrameTimeMs: result.metrics.p95FrameTimeMs,
+				sampleCount: result.metrics.sampleCount,
+				success: result.metrics.success,
+				webglRenderer: result.metrics.webglRenderer,
+				worstFrameTimeMs: result.metrics.worstFrameTimeMs
+			},
+			score: result.score
+		})),
+		signature: { ...state.signature, benchmarkVersion: 1 }
+	};
+	const parsed = parseCalibrationState(legacyState);
+
+	assert.ok(parsed);
+	assert.equal(parsed.signature.benchmarkVersion, 1);
+	assert.deepEqual(parsed.results[0].metrics.lowConfidenceReasons, []);
+	assert.equal(parsed.results[0].metrics.eventLoopWorstMs, 0);
+	assert.equal(parsed.results[0].backendVerification.status, 'verified');
+	assert.notEqual(prepareCalibrationState(parsed, signature, candidates, false), parsed);
+});
+
+test('uses a meaningful-win threshold and keeps known-good active selection on marginal low-confidence evidence', () => {
+	assert.equal(isMeaningfulCalibrationScoreWin(104.99, 100), false);
+	assert.equal(isMeaningfulCalibrationScoreWin(106, 100), true);
+
+	const candidates = createWindowsCandidates();
+	let completed = prepareCalibrationState(undefined, signature, candidates, true);
+	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
+	completed = completeCalibration(finalizeCalibration(completed), true);
+	assert.equal(completed.activeSelection?.candidate.id, candidates[0].id);
+
+	let rerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, candidates, true);
+	const marginalLowConfidenceMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 306,
+		lowConfidenceReasons: ['window-blurred'],
+		onePercentLowFps: 252,
+		p95FrameTimeMs: 3.95
+	};
+	rerun = recordCalibrationResult(rerun, candidates[1], marginalLowConfidenceMetrics);
+	assert.equal(
+		isMeaningfulCalibrationScoreWin(rerun.results[0].score, completed.activeSelection?.score ?? 0),
+		false
+	);
+	rerun = finalizeCalibration(rerun);
+
+	assert.deepEqual(rerun.results[0].metrics.lowConfidenceReasons, ['window-blurred']);
+	assert.equal(rerun.recommendedSelection?.candidate.id, completed.activeSelection?.candidate.id);
+});
+
+test('allows warn-and-continue evidence to win only when the measured gain is meaningful', () => {
+	const candidates = createWindowsCandidates();
+	let completed = prepareCalibrationState(undefined, signature, candidates, true);
+	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
+	completed = completeCalibration(finalizeCalibration(completed), true);
+
+	let rerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, candidates, true);
+	rerun = recordCalibrationResult(rerun, candidates[1], {
+		...stableMetrics,
+		averageFps: 340,
+		lowConfidenceReasons: ['window-resized', 'severe-event-loop-disturbance'],
+		onePercentLowFps: 290,
+		p95FrameTimeMs: 3.5,
+		worstFrameTimeMs: 7
+	});
+	assert.equal(
+		isMeaningfulCalibrationScoreWin(rerun.results[0].score, completed.activeSelection?.score ?? 0),
+		true
+	);
+	rerun = finalizeCalibration(rerun);
+
+	assert.equal(rerun.recommendedSelection?.candidate.id, candidates[1].id);
+});
+
+test('benchmark page reports contamination and keeps measured-loop UI work bounded', () => {
+	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
+
+	assert.match(page, /UI_UPDATE_INTERVAL_MS = 200/);
+	assert.match(page, /frameTimeSum \+= frameTime/);
+	assert.match(page, /window\.addEventListener\('blur'/);
+	assert.match(page, /document\.addEventListener\('visibilitychange'/);
+	assert.match(page, /window\.addEventListener\('resize'/);
+	assert.match(page, /webglcontextlost/);
+	assert.match(page, /severe-event-loop-disturbance/);
+	assert.doesNotMatch(page, /average\(frameTimes\)/);
+	assert.doesNotMatch(page, /\.toFixed\(/);
+	assert.doesNotMatch(page, /gl\.finish\(/);
+	assert.ok(page.indexOf('sortedFrames = [...frameTimes].sort') > page.indexOf('updateUi(end, true)'));
+});
+
+test('result page displays low-confidence and backend-verification evidence without a latency claim', () => {
+	const candidates = createWindowsCandidates();
+	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	state = recordCalibrationResult(state, candidates[0], {
+		...stableMetrics,
+		lowConfidenceReasons: [
+			'window-blurred',
+			'document-visibility-changed',
+			'window-resized',
+			'webgl-context-lost',
+			'severe-event-loop-disturbance'
+		]
+	});
+	const result = state.results[0];
+	const page = buildCalibrationResultPage([result], result, '<svg></svg>', false);
+
+	assert.match(page, /Lower confidence/);
+	assert.match(page, /window lost focus/);
+	assert.match(page, /document visibility changed/);
+	assert.match(page, /window was resized/);
+	assert.match(page, /WebGL context loss/);
+	assert.match(page, /severe event-loop disturbance/);
+	assert.match(page, /Effective renderer verified as d3d11on12/);
+	assert.match(page, /not an end-to-end input-latency measurement/);
+	assert.doesNotMatch(page, /renderer-response estimate/);
+});

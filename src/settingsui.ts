@@ -1,12 +1,11 @@
 import { join } from 'path';
-import { writeFileSync, readFileSync, readdirSync } from 'fs';
+import { readFileSync, readdirSync } from 'fs';
 import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
-import { createElement, haveSameContents, toggleSettingCSS, repoID, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
+import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
+import { UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
 import { styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
-import { su } from './userscripts.ts';
 import { MATCHMAKER_GAMEMODES, MATCHMAKER_REGIONS } from './matchmaker.ts';
-import { customSettingIsMalformed, customSettingSavedJSONIsNotMalformed } from './userscriptvalidators.ts';
 
 const RefreshEnum = {
 	notNeeded: 0,
@@ -15,18 +14,18 @@ const RefreshEnum = {
 } as const;
 
 interface IPaths { [path: string]: string }
-type CustomUserscriptSettings = Record<string, UserPrefs>;
-
 let userPrefs: UserPrefs;
 let userPrefsPath: string;
-let userscriptPrefsPath: string;
-const userscriptPreferences: CustomUserscriptSettings = {};
 let userPrefsCache: UserPrefs; // the userprefs on path
 let refreshNeeded: (typeof RefreshEnum)[keyof typeof RefreshEnum]  = RefreshEnum.notNeeded;
 let refreshNotifElement: HTMLElement;
 let paths: IPaths;
+let resolveSettingsReady: () => void;
+export const settingsReady = new Promise<void>(resolve => { resolveSettingsReady = resolve; });
 
-document.addEventListener('DOMContentLoaded', () => { ipcRenderer.send('settingsUI_requests_userPrefs'); });
+const requestUserPrefs = () => { ipcRenderer.send('settingsUI_requests_userPrefs'); };
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', requestUserPrefs, { once: true });
+else requestUserPrefs();
 
 // Swapper options are declared here so that TS knows they are the correct type for modifications under the m_userPrefs_for_settingUI message
 const cssSwapperOption: SelectSettingDescItem = {
@@ -47,17 +46,17 @@ const cssSwapperOption: SelectSettingDescItem = {
 ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, received_userPrefs: UserPrefs) => {
 	// main sends us the path to settings and also settings themselves on initial load.
 	userPrefsPath = received_paths.settingsPath;
-	userscriptPrefsPath = received_paths.userscriptPreferencesPath;
 	paths = received_paths;
 	userPrefs = received_userPrefs;
 	userPrefsCache = { ...received_userPrefs }; // cache userprefs
 
+	settingsDesc.competitiveMode.button = { icon: 'speed', text: 'Recalibrate', callback: () => ipcRenderer.send('calibration_request_rerun') };
 	settingsDesc.resourceSwapper.button = { icon: 'folder', text: 'Swapper', callback: e => openPath(e, paths.swapperPath) };
 	settingsDesc.customFilters.button = { icon: 'filter_list', text: 'Filters file', callback: e => openPath(e, paths.filtersPath) };
-	settingsDesc.userscripts.button = { icon: 'folder', text: 'Scripts', callback: e => openPath(e, paths.userscriptsPath) };
 
 	cssSwapperOption.opts = ['None', ...readdirSync(paths.cssPath).filter(path => path.endsWith('.css'))];
 	if (!cssSwapperOption.opts.includes(`${userPrefs.cssSwapper}`)) userPrefs.cssSwapper = 'None';
+	resolveSettingsReady();
 });
 
 /** joins the data: userPrefs and Desc: SettingsDesc into one array of objects */
@@ -91,16 +90,17 @@ function openPath(e: MouseEvent, path: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: '', safety: 0, cat: 0 },
+	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Applies the calibrated graphics and frame-delivery profile plus a reversible set of safe Krunker performance settings. Original game settings are backed up before modification.', safety: 0, cat: 0 },
+	fpsUncap: { title: 'Manual Un-cap FPS', type: 'bool', desc: 'Used when Competitive mode is off. Competitive mode uses the frame policy selected by calibration.', safety: 0, cat: 0 },
+	graphicsBackend: { title: 'Manual Graphics Backend', type: 'sel', desc: 'Used when Competitive mode is off. Auto selects a conservative hardware profile. D3D11on12 is tuned for Intel-only Windows systems; Vulkan is experimental.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
+	performanceOverlay: { title: 'Performance Diagnostics', type: 'bool', desc: 'Shows lightweight FPS, 1% low, frame-time, active-backend, WebGL, and rasterization diagnostics. Alt+F8 toggles visibility.', safety: 0, cat: 0, refreshOnly: true },
 	fullscreen: { title: 'Start in Windowed/Fullscreen mode', type: 'sel', desc: "Use 'borderless' if you have client-capped fps and unstable fps in fullscreen", safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
-	inProcessGPU: { title: 'In-Process GPU (video capture)', type: 'bool', desc: 'Enables video capture & embeds the GPU under the same process', safety: 1, cat: 0 },
-	resourceSwapper: { title: 'Resource swapper', type: 'bool', desc: 'Enable Krunker Resource Swapper. ', safety: 0, cat: 0 },
-	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Enable Discord Rich Presence. Shows Gamemode, Map, Class and Skin', safety: 0, cat: 0 },
-	extendedRPC: { title: 'Extended Discord RPC', type: 'bool', desc: 'Adds Github + Discord buttons to RPC. No effect if RPC is off.', safety: 0, cat: 0, instant: true },
-	hideAds: { title: 'Hide/Block Ads', type: 'sel', desc: 'Using \'block\' also blocks trackers.', safety: 0, cat: 0, refreshOnly: true, opts: ['block', 'hide', 'off'] },
-	customFilters: { title: 'Custom Filters', type: 'bool', desc: 'Enable custom network filters. ', safety: 0, cat: 0, refreshOnly: true },
+	resourceSwapper: { title: 'Legacy Resource Swapper', type: 'bool', desc: 'Disabled by default. Prefer Krunker\'s official resource-pack and mod APIs; unofficial replacement may conflict with current service rules.', safety: 3, cat: 0 },
+	discordRPC: { title: 'Legacy Discord Rich Presence', type: 'bool', desc: 'Uses the upstream Crankshaft Discord application until WOK Client receives its own Discord application ID.', safety: 0, cat: 0 },
+	extendedRPC: { title: 'Extended Discord RPC', type: 'bool', desc: 'Adds WOK Client and upstream source buttons. No effect if RPC is off.', safety: 0, cat: 0, instant: true },
+	hideAds: { title: 'Legacy Ad Controls', type: 'sel', desc: 'Disabled by default. Blocking or hiding advertisements may conflict with current service requirements.', safety: 4, cat: 0, refreshOnly: true, opts: ['off', 'hide', 'block'] },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Disabled by default. Filters can modify or cancel game requests and may conflict with current service rules.', safety: 4, cat: 0, refreshOnly: true },
 	saveMatchResultJSONButton: { title: 'Match Result To Clipboard', type: 'bool', desc: 'New button on match end which copies the match results JSON.', safety: 0, cat: 0, refreshOnly: true },
-	userscripts: { title: 'Userscript support', type: 'bool', desc: `Enable userscript support. read <a href="https://github.com/${repoID}/blob/master/USERSCRIPTS.md" target="_blank">USERSCRIPTS.md</a> for more info.`, safety: 1, cat: 0 },
 
 	cssSwapper: cssSwapperOption,
 	menuTimer: { title: 'Menu Timer', type: 'bool', safety: 0, cat: 1, instant: true },
@@ -111,7 +111,8 @@ const settingsDesc: SettingsDesc = {
 	loadingSplashTitleCardBackgroundColor: { title: 'Splash Screen Title Card BG Color', desc: 'Changes the color of the immersive splash screen title card. Has no effect if Client Splash Screen is off.', safety: 0, cat: 1, refreshOnly: true, type: 'color' },
 	regionTimezones: { title: 'Region Picker Timezones', type: 'bool', desc: 'Adds local time to all region pickers', safety: 0, cat: 1, refreshOnly: true },
 
-	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: "Use the configurable matchmaker over krunker's matchmaker.", safety: 0, cat: 2, refreshOnly: true },
+	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: "Disabled by default. Selects servers but does not automate gameplay; unofficial matchmaking may conflict with current service rules.", safety: 2, cat: 2, refreshOnly: true },
+	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Disabled by default. Allows confirmed WOK links to fill and create private competition rooms. Webhook secrets must be pasted manually; unofficial automation may conflict with current service rules.', safety: 4, cat: 2, refreshOnly: true },
 	matchmakerKey: { title: 'Matchmaker Hotkey', type: 'keybind', desc: 'Change the hotkey for the matchmaker', safety: 0, cat: 2, refreshOnly: true },
 	matchmaker_openServerWindow: { title: 'Open Server Window On Cancel', type: 'bool', safety: 0, cat: 2, instant: true },
 	matchmaker_regions: { title: 'Whitelisted regions', type: 'multisel', desc: '', safety: 0, cat: 2, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
@@ -122,12 +123,12 @@ const settingsDesc: SettingsDesc = {
 	matchmakerAcceptKey: { title: 'Matchmaker Accept Hotkey', type: 'keybind', desc: 'Change the hotkey that accepts a game from the custom matchmaker.', safety: 0, cat: 2, instant: true },
 	matchmakerCancelKey: { title: 'Matchmaker Cancel Hotkey', type: 'keybind', desc: 'Change the hotkey that rejects a game from the custom matchmaker.', safety: 0, cat: 2, instant: true },
 
-	overrideURL: { title: 'Override URL', desc: 'Useful for beta tests', type: 'text', placeholder: 'https://krunker.io', safety: 0, cat: 3 },
-	alwaysWaitForDevTools: { title: 'Always wait for DevTools', desc: 'Crankshaft uses an alt. method to open Devtools in a new window if they take too long. This disables that. Might cause DevTools to not work', type: 'bool', safety: 3, cat: 3 },
-	safeFlags_gpuRasterizing: { title: 'GPU rasterization', type: 'bool', desc: 'Enable GPU rasterization and disable Zero-copy rasterizer so rasterizing is stable', safety: 2, cat: 3 },
+	overrideURL: { title: 'Override URL', desc: 'Advanced testing override. Only HTTPS URLs on krunker.io or its subdomains are accepted.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 3 },
+	alwaysWaitForDevTools: { title: 'Always wait for DevTools', desc: 'WOK Client uses an alternative method to open DevTools in a new window if they take too long. This disables that. Might cause DevTools to not work', type: 'bool', safety: 3, cat: 3 },
+	safeFlags_gpuRasterizing: { title: 'GPU Rasterization', type: 'bool', desc: 'Requests Chromium GPU page rasterization without bypassing driver protections. Krunker WebGL is already GPU rendered.', safety: 2, cat: 3 },
 	safeFlags_disableBackgrounding: { title: 'Disable background optimizations', type: 'bool', desc: 'When tabbed out, keep the game running as if you were tabbed in. Uses more resources, but avoids catch-up', safety: 2, cat: 3 },
-	experimentalFlags_increaseLimits: { title: 'Increase limits flags', type: 'bool', desc: 'Allows more renderer processes and disables gpu blocklist', safety: 4, cat: 3 },
-	experimentalFlags_experimental: { title: 'Experimental flags', type: 'bool', desc: 'Breaks things. Only enable if you know what you\'re doing.', safety: 4, cat: 3 }
+	experimentalFlags_increaseLimits: { title: 'Increase Renderer Limit', type: 'bool', desc: 'Raises the renderer-process ceiling. It does not bypass the GPU blocklist or guarantee better performance.', safety: 4, cat: 3 },
+	experimentalFlags_experimental: { title: 'Unsupported Experimental Flags', type: 'bool', desc: 'May increase power use or reduce stability. No Krunker performance benefit has been proven.', safety: 4, cat: 3 }
 };
 
 /** index-based safety descriptions. goes in title attribute */
@@ -147,58 +148,32 @@ const categoryNames: CategoryName[] = [
 	{ name: 'Advanced Settings', cat: 'advSettings' }
 ];
 
-const refreshToUnloadMessage = 'REFRESH PAGE TO UNLOAD USERSCRIPT';
+const pendingSettingsUpdates: Record<string, UserPrefs[keyof UserPrefs]> = {};
+let settingsUpdateFrame: number | undefined;
 
-function saveSettings() {
-	writeFileSync(userPrefsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
-	ipcRenderer.send('settingsUI_updates_userPrefs', userPrefs); // send them back to main
+function flushSettingsUpdates() {
+	settingsUpdateFrame = undefined;
+	if (Object.keys(pendingSettingsUpdates).length === 0) return;
+	ipcRenderer.send('settingsUI_updates_userPrefs', { ...pendingSettingsUpdates });
+	for (const key of Object.keys(pendingSettingsUpdates)) delete pendingSettingsUpdates[key];
 }
-function loadUserScriptSettings(eventSuffix: string, settings: Record<string, UserscriptRenderReadySetting>): UserPrefs {
-	try {
-		const settingsJSON: { [key: string]: UserPrefValue } = JSON.parse(readFileSync(join(userscriptPrefsPath, `${eventSuffix}.json`), 'utf-8'));
-		Object.keys(settingsJSON).forEach(settingKey => {
-			if (customSettingSavedJSONIsNotMalformed(settingKey, settings, settingsJSON)) {
-				userscriptPreferences[eventSuffix][settingKey] = settingsJSON[settingKey];
-			}
-		});
-		return userscriptPreferences[eventSuffix];
-	} catch (_e) { // Settings file for script probably doesn't exist yet
-		return {};
-	}
+
+function saveSettings(key: string, value: UserPrefs[keyof UserPrefs]) {
+	// Send at most one settings patch per frame and persist it asynchronously in the main process.
+	pendingSettingsUpdates[key] = value;
+	if (settingsUpdateFrame === undefined) settingsUpdateFrame = requestAnimationFrame(flushSettingsUpdates);
 }
-function userscriptSettingsResetDefaults(eventSuffix: string, userscriptSettings: Record<string, UserscriptRenderReadySetting>, userscriptCategoryID: string, brokenSettings: string[]) {
-	const optionsContainer = document.querySelector(`.${userscriptCategoryID}`);
-	Object.keys(userscriptSettings).forEach(settingKey => {
-		if (!brokenSettings.includes(settingKey)) {
-			const setting = userscriptSettings[settingKey];
-			const settingValue = userscriptSettings[settingKey].value;
-			setting.changed(settingValue);
-			const settingValueContainer: HTMLElement = optionsContainer.querySelector(`#settingElem-${settingKey}`);
-			const settingValueElement: HTMLInputElement = settingValueContainer.querySelector('.s-update');
-			const secondarySettingValueElement: HTMLInputElement = settingValueContainer.querySelector('.s-update-secondary');
-			userscriptPreferences[eventSuffix][settingKey] = settingValue;
-			switch (setting.type) {
-				case 'bool':
-					settingValueElement.checked = settingValue as boolean;
-					break;
-				default:
-					settingValueElement.value = String(settingValue);
-					if (secondarySettingValueElement) secondarySettingValueElement.value = String(settingValue);
-					break;
-			}
-			saveUserScriptSettings(eventSuffix);
-		}
-	});
-}
-function saveUserScriptSettings(eventSuffix: string) {
-	writeFileSync(join(userscriptPrefsPath, `${eventSuffix}.json`), JSON.stringify(userscriptPreferences[eventSuffix], null, 2), { encoding: 'utf-8' });
-}
+
+window.addEventListener('beforeunload', () => {
+	if (settingsUpdateFrame !== undefined) cancelAnimationFrame(settingsUpdateFrame);
+	flushSettingsUpdates();
+});
 
 function recalculateRefreshNeeded() {
 	refreshNeeded = RefreshEnum.notNeeded;
-	for (let i = 0; i < Object.keys(userPrefs).length; i++) {
+	const keys = Object.keys(userPrefs);
+	for (const key of keys) {
 		const cache = (item: UserPrefs[keyof UserPrefs]) => (Array.isArray(item) ? [...item] : item);
-		const key = Object.keys(userPrefs)[i];
 		const descObj = settingsDesc[key];
 		const setting = cache(userPrefs[key]);
 		const cachedSetting = cache(userPrefsCache[key]);
@@ -216,10 +191,6 @@ function recalculateRefreshNeeded() {
 			}
 		}
 	}
-}
-
-function saveUserscriptTracker() {
-	writeFileSync(su.userscriptTrackerPath, JSON.stringify(su.userscriptTracker, null, 2), { encoding: 'utf-8' });
 }
 
 function sanitizeString(string: string) {
@@ -280,14 +251,6 @@ class SettingElem {
 		if (this.props.key === 'matchmaker_regions' && userPrefs.regionTimezones) {
 			this.props.cols = 8;
 			this.props.optDescriptions = MATCHMAKER_REGIONS.map(regionCode => getTimezoneByRegionKey('code', regionCode));
-		}
-
-		if ('userscriptReference' in props) {
-			const userscript = props.userscriptReference;
-			if (userscript.hasRan && !props.instant && props.type === 'bool' && props.value === false) {
-				this.#disabled = true;
-				this.props.desc = refreshToUnloadMessage;
-			}
 		}
 
 		function sanitize(string: string) {
@@ -387,7 +350,7 @@ class SettingElem {
 	 * update the settings when you change something in the gui
 	 * not sure if you can currently synthetically update the settings, but at that point just change userPrefs and re-render?
 	 */
-	update(elem: HTMLElement, callback: 'normal' | 'userscript' | Function, event?: InputEvent) {
+	update(elem: HTMLElement, callback: Callbacks, event?: InputEvent) {
 		if (this.updateKey === '') throw new Error('Invalid update key');
 		const target = elem.querySelector('.s-update') as HTMLInputElement;
 
@@ -420,16 +383,14 @@ class SettingElem {
 			elem.querySelector('.keyIcon').innerHTML = parseKeybindSettingDisplay(value);
 
 			// Calculate whether or not this conflicts with any other keybinds
-			if (callback === "normal") { // We don't care about userscript keybinds conflicting; that's outside of our scope.
-				const warningElement = elem.querySelector('.crankshaftKeybindConflict');
+			if (callback === "normal") {				const warningElement = elem.querySelector('.crankshaftKeybindConflict');
 				updateKeybindConflictDisplay(this.props.key, value, userPrefs[this.props.key] as KeybindUserPref, warningElement);
 			}
 		}
 
 		if (callback === 'normal') {
-			ipcRenderer.send('logMainConsole', `received an update for ${this.props.key}:`, value);
 			userPrefs[this.props.key] = value;
-			saveSettings();
+			saveSettings(this.props.key, value);
 			if (this.props.key === 'hideAds') {
 				const adsHidden = value === 'hide' || value === 'block';
 				toggleSettingCSS(styleSettingsCSS.hideAds, this.props.key, adsHidden);
@@ -450,38 +411,6 @@ class SettingElem {
 				if (this.props.key === 'menuTimer') toggleSettingCSS(styleSettingsCSS.menuTimer, this.props.key, value);
 				if (this.props.key === 'quickClassPicker') toggleSettingCSS(styleSettingsCSS.quickClassPicker, this.props.key, value);
 			}
-		} else if (callback === 'userscript') {
-			if (typeof value !== 'boolean') throw new Error(`Callback cannot be "userscript" for non-boolean values, like: ${value.toString()}`);
-
-			let refreshSettings = false;
-			if ('userscriptReference' in this.props) {
-				const userscript = this.props.userscriptReference;
-				// I would normally check if the script has settings before forcing a settings refresh... but userscripts don't define their settings until they run, so it wouldn't hot-reload settings.
-				// I hate that I have to take the lazy route but I don't see a way of extracting settings without loading the script.
-				/* if ('settings' in userscript && Object.keys(userscript.settings).length > 0) */ refreshSettings = true;
-				// either the userscsript has not ran yet, or it's instant
-				if (value && (!userscript.hasRan || this.props.instant)) {
-					userscript.load();
-					userscript.hasRan = true;
-				} else if (!value) {
-					if (this.props.instant && typeof userscript.unload === 'function') {
-						userscript.unload();
-					} else {
-						elem.querySelector('.setting-desc-new').textContent = refreshToUnloadMessage;
-						target.setAttribute('disabled', '');
-						this.#disabled = true;
-					}
-				}
-				ipcRenderer.send('logMainConsole', `userscript: received an update for ${userscript.name}`, value);
-				su.userscriptTracker[userscript.name] = value;
-			} else {
-				ipcRenderer.send('logMainConsole', `userscript: received an update for ${this.props.title}`, value);
-				su.userscriptTracker[this.props.title] = value;
-			}
-			saveUserscriptTracker();
-
-			// krunkers transition takes .4s, this is more reliable than to wait for transitionend
-			if (refreshSettings) setTimeout(renderSettings, 400);
 		} else {
 			callback(value);
 		}
@@ -534,8 +463,7 @@ class SettingElem {
 			})
 
 			const warningElement = wrapper.querySelector('.crankshaftKeybindConflict') as HTMLElement;
-			if (this.props.callback === "normal") { // We don't care about userscript keybinds conflicting; that's outside of our scope.
-				updateKeybindConflictDisplay(this.props.key, this.props.value as KeybindUserPref, this.props.value as KeybindUserPref, warningElement);
+			if (this.props.callback === "normal") {				updateKeybindConflictDisplay(this.props.key, this.props.value as KeybindUserPref, this.props.value as KeybindUserPref, warningElement);
 			} else {
 				warningElement.style.display = "none";
 			}
@@ -785,109 +713,6 @@ const skeleton = {
 };
 
 /**
- * Creates userscript setting DOM elements
- * @param userscript The userscript that needs custom settings created
- * @param scriptVanity The author and name of the script
- * @param filter The current settings search term, used to filter the userscript settings
- * @param forceInclude Whether or not to render all settings regardless of search term, used when the userscript name matches the settings search term
- * @returns the rendered userscript settings and how many settings were rendered
- */
-function generateRenderReadyUserscriptSettings(userscript: IUserscriptInstance, scriptVanity: { author: string, name: string }, filter: string, forceInclude: boolean) {
-	const renderReadyData = {
-		/**
-		 * Document Fragment containing the custom userscript settings to be rendered
-		 */
-		documentFragment: new DocumentFragment(),
-
-		/**
-		 * Count of the actual rendered custom userscript settings
-		 */
-		renderedSettings: 0
-	}
-
-	// Create tracker for broken settings so that they aren't saved or modified.
-	const brokenSettings: string[] = [];
-
-	// Create container for script, basically follows what happens above.
-	const userscriptCategoryID: string = `${scriptVanity.name}by${scriptVanity.author}`.replaceAll(' ', '').toLowerCase().replaceAll(/[^a-z0-9]/gu, '');
-	renderReadyData.documentFragment.appendChild(skeleton.catHedElem(` ${scriptVanity.name} <span class='settings-Userscript-Author'>by ${sanitizeString(`${scriptVanity.author}`)}</span>`));
-	renderReadyData.documentFragment.appendChild(skeleton.catBodElem(userscriptCategoryID, ''));
-
-	// Create immutable variable for the userscript's settings for predictable behaviour
-	const userScriptDefinedOptions: Record<string, UserscriptRenderReadySetting> = { ...userscript.settings };
-
-	// The object key that will store all the settings for a specific userscript
-	const userscriptPrefsKey: string = userscript?.name?.replace(/.js$/u, '') ?? userscriptCategoryID;
-	try {
-		// We are re-applying saved settings here. We do also this on startup in userscripts.ts. This is so that if a script is hot-reloaded, its preferences are immediately re-applied.
-		userscriptPreferences[userscriptPrefsKey] = {};
-		loadUserScriptSettings(userscriptPrefsKey, userScriptDefinedOptions);
-
-		// Loop through each custom setting and do stuff
-		Object.entries(userScriptDefinedOptions).forEach(([settingKey, settingData]) => {
-			const setting = { ...settingData };
-
-			// This is a failsafe just in case a user adds a setting to a script without restarting the client. Not 100% sure if this is needed.
-			if (userscriptPreferences[userscriptPrefsKey][settingKey] === undefined) userscriptPreferences[userscriptPrefsKey][settingKey] = setting.value;
-
-			// Check if the script creator made their settings dumb
-			const settingIsMalformed: boolean | string = customSettingIsMalformed(setting);
-			if (settingIsMalformed === false) {
-				// Below, we're basically designating a default RenderReadySetting just in case the script creator omitted properties.
-				const customSettingObject: RenderReadySetting = {
-					key: settingKey ?? 'UNDEFINED CUSTOM SETTINGS OPTION',
-					title: 'Unset Custom Setting Title: {title}',
-					value: false,
-					type: 'bool',
-					safety: 0,
-					callback() { }
-				};
-
-				// Apply defaults and squash objects.
-				Object.assign(customSettingObject, setting, {
-					value: userscriptPreferences[userscriptPrefsKey][settingKey],
-
-					// We specifically apply the callback at the top level so that a userscript creator can't just define their own callback() and access the client directly through a userscript.
-					callback: function(this: { settingKey: string, prefsKey: string, changed: Function }, value: UserPrefs[keyof UserPrefs]) {
-						userscriptPreferences[this.prefsKey][this.settingKey] = value;
-						ipcRenderer.send('logMainConsole', `Custom userscript setting: received an update for key: '${this.settingKey}' from '${this.prefsKey}.js'`, value);
-						saveUserScriptSettings(this.prefsKey);
-						this.changed(value);
-					}.bind({ settingKey, prefsKey: userscriptPrefsKey, changed: setting.changed })
-				});
-
-				if (forceInclude || settingSearchFilter(customSettingObject, filter)) {
-					// Adding the entire constructed custom element to the DOM fragment
-					const customOptionElem = new SettingElem(customSettingObject, false);
-					renderReadyData.documentFragment.querySelector(`.${userscriptCategoryID}`).appendChild(customOptionElem.elem);
-					renderReadyData.renderedSettings++;
-				}
-			} else {
-				// If the custom setting is dumb, make sure it's never changed and the script user gets a nice, big, very red warning about it.
-				brokenSettings.push(settingKey);
-				const brokenOptionWrapper = createElement('div', { class: ['setting', 'settName', 'safety-0', 'brokenCustomUserscriptSettingWrapper'], innerHTML: '' });
-				const brokenOptionElem = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: `<div class="setting-title brokenCustomUserscriptSettingTitle">Malformed Setting: ${settingKey}</div><div class='setting-desc-new brokenCustomUserscriptSettingDesc'>Userscript Setting Validation error: ${settingIsMalformed}</div>` });
-				brokenOptionWrapper.appendChild(brokenOptionElem);
-				renderReadyData.documentFragment.querySelector(`.${userscriptCategoryID}`).appendChild(brokenOptionWrapper);
-			}
-		});
-	} catch (err) {
-		strippedConsole.error(`Error creating custom settings for userscript: ${userscript.name}`, err);
-		renderReadyData.documentFragment = new DocumentFragment();
-	}
-
-	if (forceInclude || 'reset defaults'.includes(filter)) {
-		// Add the 'reset defaults' button
-		const defaultsItem = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: `<span class="buttons-title">Reset ${scriptVanity.name} Settings</span>` });
-		defaultsItem.appendChild(skeleton.settingButton('refresh', 'Reset Defaults', _e => { userscriptSettingsResetDefaults(userscript.name.replace(/.js$/u, '') ?? userscriptCategoryID, userScriptDefinedOptions, userscriptCategoryID, brokenSettings); }));
-		renderReadyData.documentFragment.querySelector(`.${userscriptCategoryID}`).appendChild(defaultsItem);
-		renderReadyData.renderedSettings++;
-	}
-
-	return renderReadyData;
-}
-
-/**
  * The function used to filter settings to match the search term
  * @param setting The setting that may be filtered out
  * @param query The search term
@@ -947,81 +772,6 @@ export function renderSettings() {
 		}
 	}
 
-	if (userPrefs.userscripts) {
-		/**
-		 * Turn On/Off Userscripts settings header
-		 */
-		const userscriptToggleHeadingElement = skeleton.catHedElem('Userscripts');
-
-		/**
-		 * Turn On/Off Userscripts settings body element
-		 */
-		let userscriptToggleBodyElement: HTMLElement;
-		if (su.userscripts.length > 0) {
-			userscriptToggleBodyElement = skeleton.catBodElem('userscripts', skeleton.notice('NOTE: refresh page to update list', { iconHTML: skeleton.refreshIcon('refresh-icon') }));
-		} else {
-			userscriptToggleBodyElement = skeleton.catBodElem('userscripts', skeleton.notice('No userscripts...', { desc: `Go to the Crankshaft <a href="https://github.com/${repoID}#userscripts">README.md</a> to download some made by the client dev.` }));
-		}
-
-		// This array is used to store userscript settings HTML
-		const customUserscriptSettingsDocumentFragments: DocumentFragment[] = [];
-
-		const toggleUserscriptSettings: RenderReadySetting[] = su.userscripts.map(userscript => {
-			const customUserscriptSetting: RenderReadySetting = {
-				key: userscript.name.replace(/.js$/u, ''), // remove .js
-				title: userscript.name,
-				value: su.userscriptTracker[userscript.name],
-				type: 'bool',
-				desc: userscript.fullpath,
-				safety: 0,
-				userscriptReference: userscript,
-				callback: 'userscript'
-			};
-			if (userscript.meta) { // render custom metadata if provided
-				const thisMeta = userscript.meta;
-				// Define low-scope variables because I can't be arsed to copy + paste the same ternary operator
-				const scriptAuthor = ('author' in thisMeta && thisMeta.author) ? `${thisMeta.author}` : false;
-				const scriptName = ('name' in thisMeta && thisMeta.name) ? thisMeta.name : userscript.name;
-				const scriptHasSettings = (userscript.settings && Object.keys(userscript.settings).length > 0 && su.userscriptTracker[userscript.name]);
-				Object.assign(customUserscriptSetting, {
-					title: scriptName,
-					desc: `${'desc' in thisMeta && thisMeta.desc ? thisMeta.desc.slice(0, 60) : ''}
-					${scriptAuthor ? `&#8226; ${scriptAuthor}` : ''}
-					${'version' in thisMeta && thisMeta.version ? `&#8226; v${thisMeta.version}` : ''}
-					${'src' in thisMeta && thisMeta.src ? ` &#8226; <a target="_blank" href="${thisMeta.src}">source</a>` : ''}`
-				});
-
-				// Read and render script-defined settings
-				if (scriptHasSettings) {
-					const settingCount = Object.keys(userscript.settings).length;
-					customUserscriptSetting.desc = `${customUserscriptSetting.desc} ${`&#8226; Uses ${settingCount} Custom Setting${settingCount === 1 ? '' : 's'}`}`;
-
-					// Last argument below is to make sure userscript settings are rendered if the script name itself is searched
-					const userscriptSettings = generateRenderReadyUserscriptSettings(userscript, { author: (scriptAuthor !== false) ? scriptAuthor : '', name: scriptName }, filter, `${scriptName}${scriptAuthor || ''}`.toLowerCase().includes(filter));
-					if (userscriptSettings.renderedSettings > 0) {
-						// Add fragment to array of userscript options.
-						customUserscriptSettingsDocumentFragments.push(userscriptSettings.documentFragment);
-					}
-				}
-			}
-			customUserscriptSetting.instant = !(userscript.unload === false);
-
-			return customUserscriptSetting;
-		}).filter((setting) => { return settingSearchFilter(setting, filter) });;
-
-		if (toggleUserscriptSettings.length > 0) {
-			// Add the userscript toggle settings to the settings container
-			for (const constructedUserscriptToggle of toggleUserscriptSettings) {
-				const userSet = new SettingElem(constructedUserscriptToggle);
-				userscriptToggleBodyElement.appendChild(userSet.elem);
-			}
-			crankshaftSettingsHolder.appendChild(userscriptToggleHeadingElement);
-			crankshaftSettingsHolder.appendChild(userscriptToggleBodyElement);
-		}
-
-		// Apply custom userscript options to the settings fragment
-		customUserscriptSettingsDocumentFragments.forEach(fragment => { crankshaftSettingsHolder.appendChild(fragment); });
-	}
 	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder); // append the holder to the DOM
 
 	function toggleCategory(me: Element) {
@@ -1040,13 +790,13 @@ export function renderSettings() {
 		header.addEventListener('click', collapseCallback);
 	});
 
-	const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Support:</span>'});
-	supportHolder.appendChild(skeleton.settingButton('chat_bubble', 'Discord', _ => shell.openExternal('https://discord.gg/DVnhngXWaa')));
-	supportHolder.appendChild(skeleton.settingButton('error', 'GitHub', _ => shell.openExternal("https://github.com/KraXen72/crankshaft/issues")))
+	const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
+	supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
+	supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft upstream', _ => shell.openExternal(UPSTREAM_REPO_URL)));
 	document.querySelector('.setBodH.Crankshaft-setBodH').prepend(supportHolder);
 
 	const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
 	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
-	buttonsHolder.appendChild(skeleton.settingButton('folder', 'Crankshaft folder', e => openPath(e, paths.configPath)));
+	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK Client folder', e => openPath(e, paths.configPath)));
 	document.querySelector('.setBodH.Crankshaft-setBodH').prepend(buttonsHolder);
 }

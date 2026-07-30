@@ -1,8 +1,9 @@
 import { webFrame } from 'electron';
 import { strippedConsole } from './preload.ts';
 import * as os from "os";
+import { UPSTREAM_REPO_ID } from './branding.ts';
 
-export const repoID = 'KraXen72/crankshaft';
+export const upstreamRepoID = UPSTREAM_REPO_ID;
 
 // create element util function. source is my utils lib: https://github.com/KraXen72/roseboxlib/blob/master/esm/lib.js
 /**
@@ -79,12 +80,6 @@ export function toggleSettingCSS(css: string, identifier: string, value: ('toggl
 	}
 }
 
-export function userscriptToggleCSS(css: string, identifier: string, value: ('toggle' | boolean) = 'toggle') {
-	const reservedKeywords = ['menuTimer', 'hideAds'];
-	if (!reservedKeywords.includes(identifier)) toggleSettingCSS(css, identifier, value);
-	else strippedConsole.error(`identifier '${identifier}' is reserved by crankshaft. Try something else.`);
-}
-
 /** @param classesCount how many classes krunker currently has (custom-only included) */
 export function hiddenClassesImages(classesCount: number) {
 	const prepend = 'menuClassPicker0'.slice(0, -1);
@@ -111,10 +106,20 @@ export function secondsToTimestring(num: number) {
 	return `${minutes}m ${seconds}s`;
 }
 
-// https://www.30secondsofcode.org/js/s/arrays-have-same-contents/
 export function haveSameContents(array1: unknown[], array2: unknown[]) {
-	for (const value of new Set([...array1, ...array2])) if (array1.filter(e => e === value).length !== array2.filter(e => e === value).length) return false;
-	return true;
+	if (array1.length !== array2.length) return false;
+
+	const remaining = new Map<unknown, number>();
+	for (const value of array1) remaining.set(value, (remaining.get(value) ?? 0) + 1);
+
+	for (const value of array2) {
+		const count = remaining.get(value);
+		if (!count) return false;
+		if (count === 1) remaining.delete(value);
+		else remaining.set(value, count - 1);
+	}
+
+	return remaining.size === 0;
 }
 
 /**

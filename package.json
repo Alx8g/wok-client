@@ -1,43 +1,60 @@
 {
-	"name": "crankshaft",
-	"version": "2.0.0",
-	"description": "Crankshaft Krunker Client",
+	"name": "wok-client",
+	"productName": "WOK Client",
+	"version": "1.0.0",
+	"private": true,
+	"description": "Hardware-adaptive, performance-focused Krunker desktop client based on Crankshaft",
 	"main": "./src/main.ts",
 	"type": "module",
 	"scripts": {
-		"preinstall": "npx only-allow pnpm",
-		"postinstall": "env ELECTRON_CUSTOM_DIR=\"v{{ version }}-patched-2\" ELECTRON_NIGHTLY_MIRROR=\"https://github.com/thegu5/electron/releases/download/\" electron_use_remote_checksums=1 install-electron",
+		"postinstall": "node scripts/install-electron.mjs",
 		"start": "electron-forge start -- --ozone-platform=x11",
-		"dist": "electron-forge make",
-		"release": "electron-forge make && electron-forge publish",
-		"lint": "biome lint"
+		"make": "electron-forge make",
+		"lint": "biome lint .",
+		"test": "node --test tests/*.test.ts",
+		"typecheck": "tsc --noEmit",
+		"validate": "pnpm run lint && pnpm run typecheck && pnpm test"
 	},
-	"author": "KraXen72, thegu5, and more",
-	"license": "GPL-3.0",
-	"homepage": "https://github.com/KraXen72/crankshaft",
-	"keywords": [
-		"Krunker"
+	"author": "WOK contributors",
+	"contributors": [
+		"Crankshaft contributors (https://github.com/KraXen72/crankshaft/graphs/contributors)"
 	],
+	"license": "GPL-3.0-only",
+	"homepage": "https://client.wok.social",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/KraXen72/crankshaft.git"
+		"url": "https://github.com/nzalexgarciagil-ctrl/wok-client.git"
+	},
+	"bugs": {
+		"url": "https://github.com/nzalexgarciagil-ctrl/wok-client/issues"
+	},
+	"keywords": [
+		"krunker",
+		"performance",
+		"wok"
+	],
+	"engines": {
+		"node": ">=24.13.0",
+		"pnpm": ">=11.15.1"
+	},
+	"wokClient": {
+		"basedOn": {
+			"name": "crankshaft",
+			"version": "2.0.0",
+			"commit": "ee43dee847ece639b7e5b6e9b8f6dc1729af90bd",
+			"repository": "https://github.com/KraXen72/crankshaft"
+		}
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.5",
 		"@electron-forge/cli": "8.0.0-alpha.10",
 		"@electron-forge/maker-base": "8.0.0-alpha.10",
 		"@electron-forge/maker-dmg": "8.0.0-alpha.10",
-		"@electron-forge/publisher-github": "8.0.0-alpha.10",
 		"@electron-forge/shared-types": "8.0.0-alpha.10",
 		"@reforged/maker-appimage": "^5.2.0",
 		"@types/node": "24.13.3",
-		"concurrently": "^10.0.3",
 		"electron": "npm:electron-nightly@44.0.0-nightly.20260522",
 		"typescript": "^6.0.3"
-	},
-	"dependencies": {
-		"@nyabsi/minimal-discord-rpc": "^1.0.1",
-		"compare-versions": "^6.1.0"
 	},
 	"packageManager": "pnpm@11.15.1"
 }

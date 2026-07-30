@@ -7,6 +7,7 @@ export const MATCHMAKER_MAP_ICON_INDICES = ['Burg', 'Littletown', 'Sandstorm', '
 
 // Hacky, but needed (?) until there's a better system to store state
 let openServerWindow: boolean;
+let matchmakerRequest: AbortController | undefined;
 
 // https://greasyfork.org/en/scripts/468482-kraxen-s-krunker-utils
 
@@ -93,7 +94,7 @@ function handleMatchmakerBind(event: KeyboardEvent) {
  * @param game The game that was retrieved by the custom matchmaker
  */
 function createFetchedGamePopup(game: IMatchmakerGame) {
-	popupElement.style.backgroundImage = `url(https://assets.krunker.io/img/maps/map_${ MATCHMAKER_MAP_ICON_INDICES.indexOf(game.map) || 0}.png)`;
+	popupElement.style.backgroundImage = `url(https://assets.krunker.io/img/maps/map_${Math.max(MATCHMAKER_MAP_ICON_INDICES.indexOf(game.map), 0)}.png)`;
 
 	currentMatch = game.gameID;
 	if (game.gameID === "none") {
@@ -135,38 +136,50 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		minRemainingTime: _userPrefs.matchmaker_minRemainingTime
 	} as IMatchmakerCriteria;
 
-	const response = await fetch(`https://matchmaker.krunker.io/game-list?hostname=${window.location.hostname}`);
-	const result = await response.json();
-	const games = [];
+	matchmakerRequest?.abort();
+	const request = new AbortController();
+	matchmakerRequest = request;
 
-	for (const game of result.games) {
-		const gameID = game[0];
-		const region = gameID.split(':')[0];
-		const playerCount = game[2];
-		const playerLimit = game[3];
-		const map = game[4].i;
-		const gamemode = MATCHMAKER_GAMEMODES[game[4].g] ?? "Unknown Gamemode";
-		const remainingTime = game[5];
+	try {
+		const response = await fetch(`https://matchmaker.krunker.io/game-list?hostname=${window.location.hostname}`, {
+			signal: request.signal
+		});
+		if (!response.ok) throw new Error(`Matchmaker request failed with HTTP ${response.status}`);
+		const result = await response.json();
+		if (matchmakerRequest !== request) return;
 
-		if (
-			!criteria.regions.includes(region)
-			|| !criteria.gameModes.includes(gamemode)
-			|| playerCount < criteria.minPlayers
-			|| playerCount > criteria.maxPlayers
-			|| remainingTime < criteria.minRemainingTime
-			|| playerCount === playerLimit
-			|| window.location.href.includes(gameID)
-			|| currentMatch === gameID
-		) continue;
+		const allowedRegions = new Set(criteria.regions);
+		const allowedGameModes = new Set(criteria.gameModes);
+		let selectedGame: IMatchmakerGame | undefined;
+		let matchingGames = 0;
 
-		games.push({ gameID, region, playerCount, playerLimit, map, gamemode, remainingTime });
-	}
+		for (const game of result.games) {
+			const gameID = game[0];
+			const region = gameID.split(':')[0];
+			const playerCount = game[2];
+			const playerLimit = game[3];
+			const map = game[4].i;
+			const gamemode = MATCHMAKER_GAMEMODES[game[4].g] ?? "Unknown Gamemode";
+			const remainingTime = game[5];
 
-	if (games.length > 0) {
-		const game = games[Math.floor(Math.random() * games.length)];
-		createFetchedGamePopup(game);
-	} else {
-		createFetchedGamePopup({
+			if (
+				!allowedRegions.has(region)
+				|| !allowedGameModes.has(gamemode)
+				|| playerCount < criteria.minPlayers
+				|| playerCount > criteria.maxPlayers
+				|| remainingTime < criteria.minRemainingTime
+				|| playerCount === playerLimit
+				|| window.location.href.includes(gameID)
+				|| currentMatch === gameID
+			) continue;
+
+			matchingGames++;
+			if (Math.random() < 1 / matchingGames) {
+				selectedGame = { gameID, region, playerCount, playerLimit, map, gamemode, remainingTime };
+			}
+		}
+
+		createFetchedGamePopup(selectedGame ?? {
 			gameID: "none",
 			region: "none",
 			playerCount: 0,
@@ -175,5 +188,9 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			gamemode: MATCHMAKER_GAMEMODES[0],
 			remainingTime: 0
 		});
+	} catch (error) {
+		if ((error as Error).name !== 'AbortError') console.error('Failed to fetch a matchmaker game', error);
+	} finally {
+		if (matchmakerRequest === request) matchmakerRequest = undefined;
 	}
 }

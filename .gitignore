@@ -1,6 +1,14 @@
 dist/
 app/
 node_modules/
+.working/
+coverage/
+*.log
+*.AppImage
+*.deb
+*.dmg
+*.exe
+*.rpm
 package-lock.json
 multiselect_dummy.html
 metafile.json

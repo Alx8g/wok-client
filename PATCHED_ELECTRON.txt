@@ -1,0 +1,69 @@
+WOK CLIENT PATCHED ELECTRON PROVENANCE
+Last verified: 2026-07-30
+
+WOK Client uses the npm package metadata and TypeScript API definitions from:
+  electron-nightly 44.0.0-nightly.20260522
+  https://www.npmjs.com/package/electron-nightly/v/44.0.0-nightly.20260522
+
+The executable archives are downloaded from this patched release instead of the
+standard Electron nightly release:
+  Repository: https://github.com/thegu5/electron
+  Release tag: v44.0.0-nightly.20260522-patched-2
+  Release URL: https://github.com/thegu5/electron/releases/tag/v44.0.0-nightly.20260522-patched-2
+  Published: 2026-06-06T00:24:53Z
+  Source commit: 733d1c2cdab84ebc252d4f672b3527a1fc73bd01
+  Commit URL: https://github.com/thegu5/electron/commit/733d1c2cdab84ebc252d4f672b3527a1fc73bd01
+  Commit signature reported by GitHub: verified
+  Parent commit: 9b0fb5b473218d51f1fb23fda4d764c309df9b71
+
+The official Electron v44.0.0-nightly.20260522 tag resolves to source commit:
+  75c9a16f7d011d863a1e0b3339a01ed4c4abf584
+
+The patched source is not byte-for-byte the official nightly tag. Compared with
+the official tag, it also includes the upstream Electron Chromium roll commit
+9b0fb5b473218d51f1fb23fda4d764c309df9b71 before the patch commit. Review the
+complete comparison here:
+  https://github.com/electron/electron/compare/v44.0.0-nightly.20260522...thegu5:733d1c2cdab84ebc252d4f672b3527a1fc73bd01
+
+The patch commit adds these Chromium patches:
+  patches/chromium/fix_monkeypatch_input_event_prioritization.patch
+  patches/chromium/fix_correctly_throttle_drawn_frames_when_rate_is_unlimited.patch
+
+Their stated purposes are to prevent left-button mouse movement from starving
+IPC-related work at uncapped frame rates and to keep the compositor's pending
+submit-frame limit active when frame-rate limiting is disabled. These are
+third-party patches, not upstream Electron release binaries.
+
+RELEASE SHA-256 CHECKSUMS
+
+07c98f62fef6f53d46c3267f38be0f64f73e7d9c984d9153e4fdf4396f07b238  electron-v44.0.0-nightly.20260522-darwin-arm64.zip
+6b689e657ea8a664e8dd03e4333b3c08219979b6ae4763b58289db2775fb78f4  electron-v44.0.0-nightly.20260522-linux-x64.zip
+b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e  electron-v44.0.0-nightly.20260522-win32-x64.zip
+
+Checksum manifest:
+  Asset: SHASUMS256.txt
+  SHA-256: 7d97035836d45d3af5d85b20caa9ba0962e77b204c41c0c56883b3cdc185556e
+  URL: https://github.com/thegu5/electron/releases/download/v44.0.0-nightly.20260522-patched-2/SHASUMS256.txt
+
+The hashes above were checked against the release manifest and GitHub release
+asset digest metadata on 2026-07-30.
+
+DOWNLOAD VERIFICATION
+
+pnpm-workspace.yaml disables electron-nightly's automatic dependency build.
+The root postinstall command runs scripts/install-electron.mjs, which supplies
+the patched nightly mirror and enables remote checksums before invoking
+Electron's installer. When its release marker is absent, the helper removes any
+same-version Electron payload first so an official nightly cannot be mistaken
+for the patched build. The installer then downloads SHASUMS256.txt from the same
+release and verifies the selected archive. forge.config.ts uses the same mirror
+without disabling Electron Packager checksum validation.
+
+A checksum confirms the downloaded archive matches the release asset. It is not
+proof that the binary is reproducible from the referenced source commit. Review
+the source comparison and build provenance before distributing executable
+artifacts. Public WOK Client release jobs are tag-only, publish checksums, and label unsigned cross-platform binaries as prereleases with native-test limitations.
+
+Electron is MIT-licensed. Chromium and other bundled components retain their own
+licenses. Packaged Electron distributions include LICENSE and
+LICENSES.chromium.html.

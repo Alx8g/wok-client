@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 745 672" width="745" height="672"
+     role="img" aria-label="WOK">
+  <title>WOK mark, favicon tier</title>
+  <!--
+    SMALL-SIZE VARIANT. Use below 32px only. Above that use wok-mark.svg.
+
+    The problem it solves: the mark is defined by two negative-space slits, and
+    at 16px the box is only ~42 units of the mark's 672 per pixel. The slit
+    between strokes B and C is about 20 units at its narrowest, so it closes
+    completely and B and C fuse into one blob. The mark stops being three
+    strokes and becomes a wedge.
+
+    Two ways to open a slit: thin the strokes, or move them apart. Thinning was
+    tested and rejected - it opens the slits but bleeds the weight that makes
+    this mark legible at all against browser chrome. This variant moves them
+    instead, so every drawn weight is unchanged from wok-mark.svg:
+
+      A  identical
+      B  translated 10 units along its own normal, away from A   (181, as drawn)
+      C  translated 26 units along its own normal, away from B   (112, as drawn)
+
+    Net: the A/B wedge opens by 10 units and the B/C slit by 16, which puts the
+    narrowest point of both above one device pixel at 16px. Footprint grows 2.6%
+    wider, which is invisible at this tier and is why this file is not the
+    primary mark.
+  -->
+  <g fill="#FBC02D" stroke="#FBC02D">
+    <path stroke="none"
+          d="M162 0C238 0 290 52 285 132C278 200 120 353 94 472L166 574C120 588
+             35 590 35 576C35 562 27 555 26 546C10 496 0 390 0 300C1 198 4 100
+             36 58C72 16 117 0 162 0Z"/>
+    <path fill="none" stroke-width="181" stroke-linecap="round" d="M461 166L136 581"/>
+    <path fill="none" stroke-width="112" stroke-linecap="round" d="M689 238Q524 381 390 555"/>
+  </g>
+</svg>

@@ -1,15 +1,15 @@
 import { shell, type MenuItemConstructorOptions, type MenuItem, app, BrowserWindow } from 'electron';
 import type { OpenDevToolsOptions } from 'electron/main';
+import { APP_NAME, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
 
 // Menu
 /** submenu to replace the About screen */
 export const aboutSubmenu: MenuItemConstructorOptions[] = [
-	{ label: 'Consider supporting development by donating <3', enabled: false },
-	{ label: 'Donate: liberapay (recurring)', registerAccelerator: false, click: () => shell.openExternal('https://liberapay.com/KraXen72') },
-	{ label: 'Donate: ko-fi (one time)', registerAccelerator: false, click: () => shell.openExternal('https://ko-fi.com/kraxen72') },
+	{ label: APP_NAME, enabled: false },
+	{ label: 'Website', registerAccelerator: false, click: () => shell.openExternal(WEBSITE_URL) },
 	{ type: 'separator' },
-	{ label: 'Github repo', registerAccelerator: false, click: () => shell.openExternal('https://github.com/KraXen72/crankshaft') },
-	{ label: 'Client Discord', registerAccelerator: false, click: () => shell.openExternal('https://discord.gg/ZeVuxG7gQJ') }
+	{ label: 'Based on the open-source Crankshaft client', enabled: false },
+	{ label: 'Crankshaft upstream source', registerAccelerator: false, click: () => shell.openExternal(UPSTREAM_REPO_URL) }
 ];
 
 /** the menu with the app name on mac (array, to be spread) */

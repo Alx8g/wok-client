@@ -1,81 +1,86 @@
 html {
-	background: #363636 !important;
+	background: #0A0A0A !important;
 }
 
 #crankshaft-logo-holder {
-	background-color: #363636;
-	background-size: 100px !important;
-	background-repeat: repeat !important;
-	background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAMAAAC8EZcfAAAAclBMVEXE/+IAAAAoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgnJycoKCgoKCgoKCgoKCgnJycoKCgoKCgnJycoKCgoKCgoKCgoKCgoKCgpKSm+1W+6AAAAAXRSTlMAQObYZgAAAfpJREFUeNrt3QGqIjsQRuHD2URW0Pvf4oPHcMMt0j0OXqx/hjoAggX4AdJJbEX+zx3gTj7e+cW9CYKF6Gddfyjks+kLwmbfWbgl3b6zEKuw03cQYoBQ74V4FpIixKMQUoQUUL+vCLEKu31FiFXY7KvCPaUrfRLiV90+jkJsFv5+n+eu1xcorL6z0J12ATlpGn1VCPdCA96DcCuU4gvIb7EfSOkABCSnCpS0CpC8CjBZiOFCVCLbQEgWIkQLSS4eSLdvmqZpmqZpmqZpTj5zuH0z44HZQr+K5SUTLQ3wTWGkI4FXgR6Gi4cGaOmHl7oBon2udQtcKq1d3ndtal++UrrPdJ/GA0335QNN8S0ArlTgkz3At2B33QDXSll8r+NU5XOtQnjy9+xpnnycfX3C62lYnughUiv2buALo/XgiwDC1fkTEGqnkbqafFK6TjOVyMvM4lcr5qSOR2Gjz+txGgDUpyFRwmUoUAVPzZb/TeCci+/6R4CQLVw0tu4vLnCpCR8Qroe17XXf3FBafxlwEdfcM/xR4WKapmmapmmapuDmW8XvZTjQcKDBQNN9mu5zfOPrK9Q3whEGZLhQs4WqYpqweDBV6BcwU+gGZgsxXIipQjcwUmgBBgnL+cg4od/CNGHhYZaw+IAc4dl31riz3QePZsP+ueLg6xX+B4FEGkmLcq6yAAAAAElFTkSuQmCC) !important;
-	box-shadow: 0.7em 0.7em 0 rgba(0, 0, 0, 0.5);
-
-	position: absolute;
+	background-color: #0A0A0A;
+	border: 1px solid #FBC02D;
+	border-radius: 8px;
+	box-sizing: border-box;
+	color: #FFFFFF;
 	left: 50%;
+	max-width: calc(100vw - 40px);
+	padding: 3.5rem 2.5rem;
+	position: absolute;
 	top: 50%;
 	transform: translate(-50%, -50%);
+	width: min(880px, calc(100vw - 40px));
 	z-index: 20;
-
-	padding: 5rem 2rem;
-	border-radius: 10px;
-	
-	width: max-content;
-	height: min-content;
 }
 
-/* floating toasts css that is required */
+#crankshaft-logo-holder > svg {
+	display: block;
+	height: auto;
+	width: 100%;
+}
+
 .crankshaft-holder-l,
 .crankshaft-holder-r,
 .crankshaft-holder-update,
 .crankshaft-holder-splash,
 .crankshaft-holder-loadingindicator {
-	position: absolute;
-	font-size: 20px !important;
-	color: rgba(255, 255, 255, 0.7);
+	color: rgba(255, 255, 255, 0.72);
 	display: block !important;
+	font-size: 20px !important;
+	position: absolute;
 }
 
 .crankshaft-holder-r {
-	right: 20px;
 	bottom: 20px;
+	right: 20px;
 	text-align: right;
 }
 
 .crankshaft-holder-l {
-	left: 20px;
 	bottom: 20px;
+	left: 20px;
 	text-align: left;
 }
 
 .crankshaft-holder-update {
-	top: 20px;
-	left: 50% !important;
-	background-color: black;
-	padding: 1rem;
+	background-color: #0A0A0A;
+	border: 1px solid #FBC02D;
 	border-radius: 0.5rem;
+	left: 50% !important;
+	padding: 1rem;
+	top: 20px;
 	width: max-content;
 	z-index: 10;
 }
 
 .crankshaft-holder-splash {
-	top: 100%;
-	left: 0%;
+	left: 0;
 	margin: 0.6em 1em;
+	top: 100%;
 }
+
 .crankshaft-holder-loadingindicator {
 	bottom: 100%;
-	right: 0%;
+	color: #FBC02D;
 	margin: 0.6em 1em;
+	right: 0;
 }
 
 .crankshaft-loading-background {
-	width: 100%;
+	background-color: #0A0A0A;
 	height: 100%;
-	z-index: 50;
+	left: 0;
 	position: absolute;
 	top: 0;
-	left: 0;
+	width: 100%;
+	z-index: 50;
 }
+
 .crankshaft-loading-background.immersive {
-	background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAACgCAMAAAC8EZcfAAAAclBMVEXE/+IAAAAoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgnJycoKCgoKCgoKCgoKCgnJycoKCgoKCgnJycoKCgoKCgoKCgoKCgoKCgpKSm+1W+6AAAAAXRSTlMAQObYZgAAAfpJREFUeNrt3QGqIjsQRuHD2URW0Pvf4oPHcMMt0j0OXqx/hjoAggX4AdJJbEX+zx3gTj7e+cW9CYKF6Gddfyjks+kLwmbfWbgl3b6zEKuw03cQYoBQ74V4FpIixKMQUoQUUL+vCLEKu31FiFXY7KvCPaUrfRLiV90+jkJsFv5+n+eu1xcorL6z0J12ATlpGn1VCPdCA96DcCuU4gvIb7EfSOkABCSnCpS0CpC8CjBZiOFCVCLbQEgWIkQLSS4eSLdvmqZpmqZpmqZpTj5zuH0z44HZQr+K5SUTLQ3wTWGkI4FXgR6Gi4cGaOmHl7oBon2udQtcKq1d3ndtal++UrrPdJ/GA0335QNN8S0ArlTgkz3At2B33QDXSll8r+NU5XOtQnjy9+xpnnycfX3C62lYnughUiv2buALo/XgiwDC1fkTEGqnkbqafFK6TjOVyMvM4lcr5qSOR2Gjz+txGgDUpyFRwmUoUAVPzZb/TeCci+/6R4CQLVw0tu4vLnCpCR8Qroe17XXf3FBafxlwEdfcM/xR4WKapmmapmmapuDmW8XvZTjQcKDBQNN9mu5zfOPrK9Q3whEGZLhQs4WqYpqweDBV6BcwU+gGZgsxXIipQjcwUmgBBgnL+cg4od/CNGHhYZaw+IAc4dl31riz3QePZsP+ueLg6xX+B4FEGkmLcq6yAAAAAElFTkSuQmCC);
-	background-color: #171717;
+	background-color: #0A0A0A;
 }

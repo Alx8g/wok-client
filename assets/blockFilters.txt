@@ -1,15 +1,5 @@
-*://*.pollfish.com/*
-*://www.paypalobjects.com/*
-*://fran-cdn.frvr.com/*
 *://c.amazon-adsystem.com/*
-*://cdn.frvr.com/fran/*
-*://platform.twitter.com/*
-*://cookiepro.com/*
-*://*.cookiepro.com/*
 *://www.googletagmanager.com/*
 *://*.doubleclick.net/*
-*://storage.googleapis.com/pollfish_production/*
-*://coeus.frvr.com/*
-*://apis.google.com/js/platform.js
 *://pagead2.googlesyndication.com/pagead/js/*
 *://imasdk.googleapis.com/*

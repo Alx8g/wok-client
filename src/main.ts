@@ -1550,7 +1550,9 @@ app.on('ready', async () => {
 			sandbox: false,
 			// Cache V8 code for Krunker's multi-MB bundle without waiting for Blink's
 			// seen-it-twice heat heuristic, shifting compile work off early relaunches.
-			v8CacheOptions: 'bypassHeatCheck'
+			// Diagnostic-only escape hatch: WOK_V8_CACHE=off omits the option (Chromium
+			// default heat heuristic) so fresh-profile A/B runs can measure the fix.
+			...(process.env.WOK_V8_CACHE === 'off' ? {} : { v8CacheOptions: 'bypassHeatCheck' as const })
 		},
 		backgroundColor: '#000000'
 	};

@@ -107,15 +107,10 @@ export class RollingPerformanceStats {
 	}
 
 	reset(): void {
-		this.bucketEpochs.fill(-1);
-		this.bucketFirstSampleTimes.fill(0);
-		this.bucketSampleCounts.fill(0);
-		this.bucketTotalFrameTimes.fill(0);
-		this.bucketWorstFrameTimes.fill(0);
-		this.bucketHistogram.fill(0);
-		this.bucketTouchedBins.fill(0);
-		this.bucketTouchedBinCounts.fill(0);
-		this.windowHistogram.fill(0);
+		// Clear incrementally instead of zero-filling the ~2.4 MB histogram storage: reset runs
+		// inside the gameplay rAF on every 10 s segment rollover, and removeBucket already
+		// erases exactly the histogram bins a bucket touched. Cost scales with recorded data.
+		for (let bucketIndex = 0; bucketIndex < TIME_BUCKET_COUNT; bucketIndex++) this.removeBucket(bucketIndex);
 		this.windowSampleCount = 0;
 		this.windowTotalFrameTime = 0;
 	}

@@ -80,6 +80,19 @@ test('uses only the recent time buckets for current FPS', () => {
 	assert.equal(snapshot.currentFps, 50);
 });
 
+test('reset leaves no residue that changes later identical recordings', () => {
+	const stats = new RollingPerformanceStats();
+	const reference = new RollingPerformanceStats();
+	const samples = [...Array.from({ length: 150 }, (_, index) => 4 + (index % 40)), 120, 350];
+
+	recordFrames(stats, [12, 3, 7, 950, 25, 3, 3]);
+	stats.reset();
+	const timestamp = recordFrames(stats, samples);
+	const referenceTimestamp = recordFrames(reference, samples);
+
+	assert.deepEqual(stats.snapshot(timestamp), reference.snapshot(referenceTimestamp));
+});
+
 test('reset and empty snapshots return zeroed diagnostics', () => {
 	const stats = new RollingPerformanceStats();
 	stats.recordFrame(10, 10);

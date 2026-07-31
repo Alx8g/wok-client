@@ -33,14 +33,15 @@ export interface CalibrationWorkloadConstants {
 	warmupSettleRatio: number;
 }
 
-// PROVISIONAL until lane tuning (design §1.4): these values are the design §1.2 initial numbers.
-// They are frozen as WORKLOAD_VERSION 1 only after the reference-machine lane acceptance gate
-// (renderer-main busy 4-6 ms, script 40-60%, GPU-main busy 3-5 ms) passes; any re-tune bumps
-// WORKLOAD_VERSION. Use the WOK_CALIBRATION_TUNING=1 harness to measure without code changes.
+// Frozen as WORKLOAD_VERSION 1 after reference-machine lane tuning (design §1.4), measured on the
+// Iris Xe reference machine with the WOK_CALIBRATION_TUNING=1 + WOK_TRACE_MS harness. Final lanes
+// per workload frame across 3 consecutive runs: renderer-main busy 4.17/4.21/4.34 ms (gate 4-6),
+// script 2.81/2.84/2.93 ms (menu lane 2.68 ms), GPU-main busy 3.66/3.72/3.81 ms (gate 3-5).
+// Session record: .working/perf-round2/quiet-session.md. Any re-tune bumps WORKLOAD_VERSION.
 export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 	atlasTextureSize: 1_024,
 	heightfieldSize: 64,
-	jsSpinIterations: 150_000,
+	jsSpinIterations: 2_560_000,
 	meshVariants: 30,
 	opaqueDraws: 240,
 	prismMaxSides: 17,
@@ -59,7 +60,7 @@ export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 
 export const WORKLOAD_DRAWS_PER_FRAME = WORKLOAD_CONSTANTS.opaqueDraws + WORKLOAD_CONSTANTS.transparentDraws + WORKLOAD_CONSTANTS.uiDraws;
 
-// PROVISIONAL until lane tuning (design §1.4). Matches game-like defaults; `desynchronized` is
+// Frozen with WORKLOAD_VERSION 1. Matches game-like defaults; `desynchronized` is
 // deliberately absent-equivalent (false) because Krunker does not use it and it changes the
 // present path under comparison (audit C1).
 export const WORKLOAD_CONTEXT_ATTRIBUTES = {

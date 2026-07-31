@@ -115,13 +115,22 @@ function sharedStyles(): string {
  * DOM/UI compositing overlay (design §1.2): the game composites a large HTML UI over its canvas,
  * so the workload does too. Panel and HUD animate through compositor-driven CSS keyframes only;
  * the feed text updates at most 5 Hz through the throttled updater. Zero per-frame JS DOM writes.
+ *
+ * The keyframes use stepped timing (~14 updates/s): lane tuning showed that smooth compositor-only
+ * animations let the uncapped compositor free-run presents far past the workload frame rate
+ * (461/s vs 135 canvas frames/s on the reference machine), untethering the present path from the
+ * scene under test and inflating GPU-process busy ~35% beyond the design §1.4 lane gate. Stepped
+ * timing keeps the persistent composited overlay layers and their per-present composite cost while
+ * the canvas drives present cadence, matching the measured menu behavior. `will-change` pins the
+ * layer promotion so it cannot vary across Chromium versions. Part of the WORKLOAD_VERSION 1
+ * freeze: changing this overlay changes the measured lane shape.
  */
 function overlayStyles(): string {
 	return `
-			.overlay-gradient { position: fixed; inset: -12vh -12vw; z-index: 10; pointer-events: none; opacity: .06; background: linear-gradient(115deg, #FBC02D 0%, #202840 45%, #7B3131 100%); animation: wok-pan 7s linear infinite alternate; }
+			.overlay-gradient { position: fixed; inset: -12vh -12vw; z-index: 10; pointer-events: none; opacity: .06; background: linear-gradient(115deg, #FBC02D 0%, #202840 45%, #7B3131 100%); animation: wok-pan 7s steps(96) infinite alternate; will-change: transform; }
 			@keyframes wok-pan { from { transform: translate3d(-3%, -2%, 0) scale(1.05); } to { transform: translate3d(3%, 2%, 0) scale(1.12); } }
 			.hud { position: fixed; left: 24px; right: 24px; bottom: 20px; z-index: 20; display: flex; gap: 6px; pointer-events: none; }
-			.hud span { flex: 1; height: 14px; border: 1px solid #3A3A3A; background: #181818; animation: wok-pulse 1.8s ease-in-out infinite; }
+			.hud span { flex: 1; height: 14px; border: 1px solid #3A3A3A; background: #181818; animation: wok-pulse 1.8s steps(24) infinite; will-change: opacity; }
 			.hud span:nth-child(3n) { animation-delay: .45s; }
 			.hud span:nth-child(3n + 1) { animation-delay: .9s; }
 			@keyframes wok-pulse { 0%, 100% { opacity: .25; } 50% { opacity: .8; } }

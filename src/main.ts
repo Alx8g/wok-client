@@ -1306,8 +1306,8 @@ async function runCalibrationTrialWithRetry(candidate: CalibrationCandidate, ste
 /**
  * Lane-tuning harness (design §1.4): WOK_CALIBRATION_TUNING=1 opens the calibration window, runs
  * one workload trial on the currently selected backend, prints every lane metric as
- * `[wok-tune] key value` lines, and quits. This lets a quiet reference-machine session tune the
- * PROVISIONAL workload constants without code changes.
+ * `[wok-tune] key value` lines, and quits. This lets a quiet reference-machine session measure
+ * the workload constants without code changes (used for the WORKLOAD_VERSION 1 freeze).
  */
 async function runCalibrationTuningHarness(): Promise<void> {
 	try {

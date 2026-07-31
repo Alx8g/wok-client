@@ -122,7 +122,7 @@ test('workload v1 constants match the frozen design table', () => {
 	assert.equal(WORKLOAD_CONSTANTS.sceneTextureSize, 256);
 	assert.equal(WORKLOAD_CONSTANTS.atlasTextureSize, 1_024);
 	assert.equal(WORKLOAD_CONSTANTS.heightfieldSize, 64);
-	assert.equal(WORKLOAD_CONSTANTS.jsSpinIterations, 150_000);
+	assert.equal(WORKLOAD_CONSTANTS.jsSpinIterations, 2_560_000);
 	assert.equal(WORKLOAD_CONSTANTS.warmupMinMs, 900);
 	assert.equal(WORKLOAD_CONSTANTS.warmupMaxMs, 2_000);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleFrames, 30);

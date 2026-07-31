@@ -443,7 +443,7 @@ test('trial page embeds the workload and completion-honest measurement modules',
 	assert.match(page, /const createWorkload = /);
 	assert.match(page, /const createWorkloadSpin = /);
 	assert.match(page, /const runBenchmarkTrial = /);
-	assert.match(page, /"jsSpinIterations":150000/);
+	assert.match(page, /"jsSpinIterations":2560000/);
 	assert.match(page, /EXT_disjoint_timer_query_webgl2/);
 	assert.match(page, /fenceSync/);
 	assert.match(page, /"desynchronized":false/);

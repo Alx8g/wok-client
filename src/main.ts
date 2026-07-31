@@ -1110,7 +1110,10 @@ app.on('ready', async () => {
 			// not ideal, but preload does a lot of interaction w/ the page
 			// turning this on will also likely require transpiling the preload script to js
 			contextIsolation: false,
-			sandbox: false
+			sandbox: false,
+			// Cache V8 code for Krunker's multi-MB bundle without waiting for Blink's
+			// seen-it-twice heat heuristic, shifting compile work off early relaunches.
+			v8CacheOptions: 'bypassHeatCheck'
 		},
 		backgroundColor: '#000000'
 	};

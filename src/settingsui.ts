@@ -50,7 +50,7 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 	userPrefs = received_userPrefs;
 	userPrefsCache = { ...received_userPrefs }; // cache userprefs
 
-	settingsDesc.competitiveMode.button = { icon: 'speed', text: 'Recalibrate', callback: () => ipcRenderer.send('calibration_request_rerun') };
+	settingsDesc.competitiveMode.button = { icon: 'speed', text: 'Run calibration', callback: () => ipcRenderer.send('calibration_request_rerun') };
 	settingsDesc.resourceSwapper.button = { icon: 'folder', text: 'Swapper', callback: e => openPath(e, paths.swapperPath) };
 	settingsDesc.customFilters.button = { icon: 'filter_list', text: 'Filters file', callback: e => openPath(e, paths.filtersPath) };
 
@@ -90,7 +90,7 @@ function openPath(e: MouseEvent, path: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Applies the calibrated graphics and frame-delivery profile plus a reversible set of safe Krunker performance settings. Original game settings are backed up before modification.', safety: 0, cat: 0 },
+	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Applies the calibrated graphics and frame-delivery profile plus a reversible set of safe Krunker performance settings. Calibration runs only with your consent, never blocks first play, and applies its profile provisionally while your next play sessions confirm it. Original game settings are backed up before modification.', safety: 0, cat: 0 },
 	fpsUncap: { title: 'Manual Un-cap FPS', type: 'bool', desc: 'Used when Competitive mode is off. Competitive mode uses the frame policy selected by calibration.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Manual Graphics Backend', type: 'sel', desc: 'Used when Competitive mode is off. Auto selects a conservative hardware profile. D3D11on12 is tuned for Intel-only Windows systems; Vulkan is experimental.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
 	performanceOverlay: { title: 'Performance Diagnostics', type: 'bool', desc: 'Shows lightweight FPS, 1% low, frame-time, active-backend, WebGL, and rasterization diagnostics. Alt+F8 toggles visibility.', safety: 0, cat: 0, refreshOnly: true },

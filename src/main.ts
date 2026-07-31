@@ -2,7 +2,7 @@
 import { join as pathJoin, resolve as pathResolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
-import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
@@ -30,30 +30,51 @@ import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, UPSTREAM_REPO_URL, WEBSITE_U
 import { migrateLegacyConfigsPhaseOne, migrateLegacyConfigsPhaseTwo, type LegacyConfigSource } from './config-migration.ts';
 import {
 	CALIBRATION_BENCHMARK_MS,
+	CALIBRATION_INTRA_LAUNCH_COOLDOWN_MS,
 	CALIBRATION_LOW_CONFIDENCE_REASONS,
+	CALIBRATION_MIN_SAMPLES,
+	CALIBRATION_TRIAL_REJECTION_REASONS,
 	CALIBRATION_VERSION,
-	CALIBRATION_WARMUP_MS,
+	calibrationCandidateId,
+	calibrationProvisionalExpired,
+	calibrationResumeRequired,
+	canAutoRollbackCalibration,
 	collectStableGraphicsDriverFields,
 	completeCalibration,
+	confirmCalibration,
 	createCalibrationCandidates,
 	createCalibrationSignature,
+	declineCalibrationOffer,
 	finalizeCalibration,
 	getPendingCalibrationCandidate,
+	getPendingLaunchSlotIndices,
+	isCalibrationBudgetExhausted,
+	markCalibrationUnwatched,
+	markStaleRerunPromptShown,
 	parseCalibrationState,
 	prepareCalibrationState,
+	recordCalibrationLaunch,
 	recordCalibrationResult,
+	recordRejectedCalibrationAttempt,
 	requestCalibrationRerun,
+	rollbackCalibration,
 	type CalibrationCandidate,
+	type CalibrationGpuTimingStatus,
 	type CalibrationLowConfidenceReason,
 	type CalibrationMetrics,
 	type CalibrationState,
+	type CalibrationTrialEnvironment,
+	type CalibrationTrialRejectionReason,
 	type FramePolicy
 } from './calibration.ts';
+import { WORKLOAD_CONSTANTS, WORKLOAD_VERSION } from './calibration-workload.ts';
+import { BENCHMARK_RUN_RETRY_BUDGET } from './calibration-benchmark.ts';
 import type { CompetitiveGameSettings } from './competitive-mode.ts';
 import { parseUserPreferencePatch } from './user-preferences.ts';
 import {
 	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
 	adaptiveValidationProfileIdentitiesEqual,
+	adaptiveValidationWatchesProfile,
 	dismissAdaptiveValidationRecommendation,
 	parseAdaptiveValidationProfileIdentity,
 	parseAdaptiveValidationState,
@@ -396,6 +417,7 @@ function normalizeBenchmarkMetrics(value: unknown): CalibrationMetrics {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return failedCalibrationMetrics();
 	const metrics = value as Record<string, unknown>;
 	const numberValue = (key: string) => typeof metrics[key] === 'number' && Number.isFinite(metrics[key]) ? Number(metrics[key]) : 0;
+	const optionalNumberValue = (key: string) => typeof metrics[key] === 'number' && Number.isFinite(metrics[key]) ? Number(metrics[key]) : undefined;
 	const lowConfidenceReasons = Array.isArray(metrics.lowConfidenceReasons)
 		? [...new Set(metrics.lowConfidenceReasons.filter(
 			(reason): reason is CalibrationLowConfidenceReason =>
@@ -403,18 +425,69 @@ function normalizeBenchmarkMetrics(value: unknown): CalibrationMetrics {
 				&& CALIBRATION_LOW_CONFIDENCE_REASONS.includes(reason as CalibrationLowConfidenceReason)
 		))]
 		: [];
+	const rejectionReasons = Array.isArray(metrics.rejectionReasons)
+		? [...new Set(metrics.rejectionReasons.filter(
+			(reason): reason is CalibrationTrialRejectionReason =>
+				typeof reason === 'string'
+				&& CALIBRATION_TRIAL_REJECTION_REASONS.includes(reason as CalibrationTrialRejectionReason)
+		))]
+		: [];
+	const contaminationFlags = Array.isArray(metrics.contaminationFlags)
+		? [...new Set(metrics.contaminationFlags.filter((flag): flag is string => typeof flag === 'string' && flag.length <= 64))]
+		: [];
+	const gpuTimingStatus: CalibrationGpuTimingStatus = metrics.gpuTimingStatus === 'measured' || metrics.gpuTimingStatus === 'unreliable'
+		? metrics.gpuTimingStatus
+		: 'unsupported';
+	const rawEnvironment = metrics.environment && typeof metrics.environment === 'object' && !Array.isArray(metrics.environment)
+		? metrics.environment as Record<string, unknown>
+		: undefined;
+	const environment: CalibrationTrialEnvironment | undefined = rawEnvironment
+		? {
+			devicePixelRatio: typeof rawEnvironment.devicePixelRatio === 'number' && Number.isFinite(rawEnvironment.devicePixelRatio) ? Number(rawEnvironment.devicePixelRatio) : 1,
+			drawingBufferHeight: Math.max(0, Math.trunc(typeof rawEnvironment.drawingBufferHeight === 'number' && Number.isFinite(rawEnvironment.drawingBufferHeight) ? Number(rawEnvironment.drawingBufferHeight) : 0)),
+			drawingBufferWidth: Math.max(0, Math.trunc(typeof rawEnvironment.drawingBufferWidth === 'number' && Number.isFinite(rawEnvironment.drawingBufferWidth) ? Number(rawEnvironment.drawingBufferWidth) : 0)),
+			...(typeof rawEnvironment.onBattery === 'boolean' ? { onBattery: rawEnvironment.onBattery } : {}),
+			...(typeof rawEnvironment.refreshRateHz === 'number' && Number.isFinite(rawEnvironment.refreshRateHz) ? { refreshRateHz: Number(rawEnvironment.refreshRateHz) } : {})
+		}
+		: undefined;
+	const gpuTimeP50Ms = optionalNumberValue('gpuTimeP50Ms');
+	const gpuTimeP95Ms = optionalNumberValue('gpuTimeP95Ms');
 	return {
 		averageFps: numberValue('averageFps'),
+		contaminationFlags,
+		cpuSubmitP50Ms: numberValue('cpuSubmitP50Ms'),
+		cpuSubmitP95Ms: numberValue('cpuSubmitP95Ms'),
+		...(environment ? { environment } : {}),
 		eventLoopP95Ms: numberValue('eventLoopP95Ms'),
 		eventLoopWorstMs: numberValue('eventLoopWorstMs'),
+		gpuDisjointDiscardCount: numberValue('gpuDisjointDiscardCount'),
+		...(gpuTimingStatus === 'measured' && gpuTimeP50Ms !== undefined ? { gpuTimeP50Ms } : {}),
+		...(gpuTimingStatus === 'measured' && gpuTimeP95Ms !== undefined ? { gpuTimeP95Ms } : {}),
+		gpuTimingStatus,
 		longFrameRatio: numberValue('longFrameRatio'),
 		lowConfidenceReasons,
 		onePercentLowFps: numberValue('onePercentLowFps'),
 		p95FrameTimeMs: numberValue('p95FrameTimeMs'),
+		rejectionReasons,
 		sampleCount: Math.max(0, Math.trunc(numberValue('sampleCount'))),
+		stallRatio: numberValue('stallRatio'),
 		success: metrics.success === true,
 		webglRenderer: typeof metrics.webglRenderer === 'string' ? metrics.webglRenderer.slice(0, 1_024) : '',
+		workloadVersion: WORKLOAD_VERSION,
 		worstFrameTimeMs: numberValue('worstFrameTimeMs')
+	};
+}
+
+function metricsRejectionReasons(metrics: CalibrationMetrics): CalibrationTrialRejectionReason[] {
+	return metrics.rejectionReasons ?? [];
+}
+
+/** Applies a main-process-detected trial rejection (for example a powerMonitor AC/battery flip). */
+function markMetricsRejected(metrics: CalibrationMetrics, reason: CalibrationTrialRejectionReason): CalibrationMetrics {
+	return {
+		...metrics,
+		lowConfidenceReasons: [...new Set([...(metrics.lowConfidenceReasons ?? []), reason])],
+		rejectionReasons: [...new Set([...(metrics.rejectionReasons ?? []), reason])]
 	};
 }
 
@@ -439,6 +512,12 @@ if (
 	);
 	writeCalibrationStateSync(calibrationState);
 	queuedCalibrationCandidate = getPendingCalibrationCandidate(calibrationState);
+}
+
+// A provisional profile whose confirmation evidence stalls for 14 days is parked unwatched (design §4.4).
+if (calibrationState && calibrationProvisionalExpired(calibrationState)) {
+	calibrationState = markCalibrationUnwatched(calibrationState);
+	writeCalibrationStateSync(calibrationState);
 }
 
 const activeCalibrationSelection = userPrefs.competitiveMode && calibrationState?.status === 'complete'
@@ -756,6 +835,154 @@ function relaunchClient() {
 	app.exit(0);
 }
 
+function persistCalibrationState(next: CalibrationState) {
+	calibrationState = next;
+	writeCalibrationStateSync(next);
+}
+
+/**
+ * Consent path shared by every calibration entry point (design §4.2): stages a rerun-consented
+ * plan and relaunches into it. When no state exists yet, the complete GPU identity is fetched
+ * first so the signature is real.
+ */
+async function requestCalibrationRunAndRelaunch(): Promise<void> {
+	if (!calibrationState) {
+		const gpuInfo = await refreshCompleteGraphicsInfo();
+		prepareCalibrationForGpuInfo(gpuInfo);
+	}
+	if (calibrationState) persistCalibrationState(requestCalibrationRerun(calibrationState));
+	relaunchClient();
+}
+
+/** Consent dialog shown when Competitive mode is switched on without a completed calibration (design §4.2.1). */
+async function offerCalibrationForCompetitiveEnable(): Promise<void> {
+	if (!mainWindow || mainWindow.isDestroyed()) return;
+	if (calibrationState?.status === 'complete' && !calibrationState.signatureStale) return;
+	try {
+		const result = await dialog.showMessageBox(mainWindow, {
+			buttons: ['Calibrate now', 'Use recommended settings'],
+			cancelId: 1,
+			defaultId: 0,
+			detail: 'Calibration takes under a minute and the app restarts a few times while renderer profiles are measured. Declining keeps Competitive mode on with the recommended settings; you can calibrate any time from Settings.',
+			message: 'Calibrate graphics for Competitive mode?',
+			noLink: true,
+			title: 'WOK Competitive mode',
+			type: 'question'
+		});
+		if (result.response === 0) await requestCalibrationRunAndRelaunch();
+	} catch (error) {
+		console.error('Failed to offer Competitive-mode calibration', error);
+	}
+}
+
+/** One-time post-first-session offer (design §4.2.3); declining persists and never re-prompts. */
+let calibrationOfferShownThisSession = false;
+
+async function maybeOfferPostSessionCalibration(): Promise<void> {
+	if (
+		calibrationOfferShownThisSession
+		|| !userPrefs.competitiveMode
+		|| !calibrationState
+		|| calibrationState.status !== 'uncalibrated'
+		|| calibrationState.calibrationOfferDeclinedAt !== undefined
+		|| !mainWindow
+		|| mainWindow.isDestroyed()
+	) return;
+
+	calibrationOfferShownThisSession = true;
+	try {
+		const result = await dialog.showMessageBox(mainWindow, {
+			buttons: ['Calibrate on next launch', 'No thanks'],
+			cancelId: 1,
+			defaultId: 0,
+			detail: 'Calibration measures renderer profiles between launches (under a minute, a few restarts) and only ever applies a change after asking. Declining keeps the recommended settings and will not ask again.',
+			message: 'Calibrate graphics after your next launch?',
+			noLink: true,
+			title: 'WOK calibration',
+			type: 'question'
+		});
+		if (!calibrationState) return;
+		if (result.response === 0) persistCalibrationState(requestCalibrationRerun(calibrationState));
+		else persistCalibrationState(declineCalibrationOffer(calibrationState));
+	} catch (error) {
+		console.error('Failed to offer post-session calibration', error);
+	}
+}
+
+/** One-time dismissible notice for benchmark-only staleness (design §5.2). */
+async function maybeShowStaleCalibrationPrompt(): Promise<void> {
+	if (
+		calibrationState?.signatureStale !== true
+		|| calibrationState.staleRerunPromptShownAt !== undefined
+		|| !mainWindow
+		|| mainWindow.isDestroyed()
+	) return;
+
+	persistCalibrationState(markStaleRerunPromptShown(calibrationState));
+	try {
+		const result = await dialog.showMessageBox(mainWindow, {
+			buttons: ['Recalibrate on next launch', 'Later'],
+			cancelId: 1,
+			defaultId: 1,
+			detail: 'Your current profile keeps applying. Rerun calibration when convenient to refresh it with the upgraded benchmark; the option also stays available in Settings.',
+			message: 'Calibration was upgraded.',
+			noLink: true,
+			title: 'WOK calibration',
+			type: 'info'
+		});
+		if (result.response === 0 && calibrationState) persistCalibrationState(requestCalibrationRerun(calibrationState));
+	} catch (error) {
+		console.error('Failed to show the stale-calibration notice', error);
+	}
+}
+
+/**
+ * Provisional confirm/rollback coordinator (design §4.4). Returns true when the completed
+ * validation verdict was consumed by the confirmation loop; the caller then skips the round-1
+ * recommendation dialog.
+ */
+async function handleProvisionalConfirmation(validation: AdaptiveValidationState): Promise<boolean> {
+	if (calibrationState?.confirmation !== 'pending' || validation.status !== 'complete') return false;
+	const appliedSelection = calibrationState.activeSelection;
+	if (!appliedSelection || !adaptiveValidationWatchesProfile(validation, appliedSelection.candidate.backend, appliedSelection.candidate.framePolicy)) return false;
+
+	if (validation.classification === 'validated') {
+		persistCalibrationState(confirmCalibration(calibrationState));
+		console.log('Calibrated profile confirmed by three clean gameplay sessions.');
+		return true;
+	}
+
+	if (validation.classification === 'recalibration-recommended') {
+		if (!canAutoRollbackCalibration(calibrationState)) return false;
+		const beforeRollback = calibrationState;
+		const previousLabel = beforeRollback.previousSelection?.candidate.id ?? 'the automatic profile';
+		persistCalibrationState(rollbackCalibration(beforeRollback));
+		console.log(`Calibrated profile underperformed in real play; reverting to ${previousLabel} on the next launch.`);
+		if (mainWindow && !mainWindow.isDestroyed()) {
+			void dialog.showMessageBox(mainWindow, {
+				buttons: ['OK', 'Keep new profile anyway'],
+				cancelId: 0,
+				defaultId: 0,
+				detail: `The calibrated profile underperformed across three clean play sessions, so WOK will use ${previousLabel} again after the next restart.`,
+				message: 'Reverting to the previous graphics profile.',
+				noLink: true,
+				title: 'WOK calibration rollback',
+				type: 'warning'
+			}).then(result => {
+				// "Keep anyway" cancels the staged revert and parks the new profile unwatched.
+				if (result.response === 1 && calibrationState?.confirmation === 'rolled-back') {
+					persistCalibrationState(markCalibrationUnwatched(beforeRollback));
+				}
+			}).catch(error => { console.error('Failed to show the calibration rollback notice', error); });
+		}
+		return true;
+	}
+
+	// 'inconclusive' after three sessions: the profile is kept without rollback evidence.
+	persistCalibrationState(markCalibrationUnwatched(calibrationState));
+	return true;
+}
+
 let adaptiveValidationPromptPending = false;
 
 async function maybePromptAdaptiveRecalibration(): Promise<void> {
@@ -770,6 +997,9 @@ async function maybePromptAdaptiveRecalibration(): Promise<void> {
 		|| !mainWindow
 		|| mainWindow.isDestroyed()
 	) return;
+	// While a provisional profile is pending or freshly rolled back, the confirmation loop owns
+	// this verdict; the round-1 dialog handles only the non-provisional degradation case (§4.4).
+	if (calibrationState?.confirmation === 'pending' || calibrationState?.confirmation === 'rolled-back') return;
 
 	adaptiveValidationPromptPending = true;
 	try {
@@ -813,7 +1043,13 @@ ipcMain.handle('adaptiveValidation_recordSession', (event, value: unknown) => {
 	const nextState = recordAdaptiveValidationSession(currentState, submission.session);
 	if (nextState !== currentState) writeAdaptiveValidationStateSync(nextState);
 	adaptiveValidationState = nextState;
-	void maybePromptAdaptiveRecalibration();
+	void handleProvisionalConfirmation(nextState).then(consumed => {
+		if (!consumed) void maybePromptAdaptiveRecalibration();
+	});
+	// After the first clean pointer-locked session on an uncalibrated install, offer calibration once (§4.2.3).
+	if (nextState !== currentState && nextState.sessions.length === 1 && nextState.sessions[0].lowConfidenceReasons.length === 0) {
+		void maybeOfferPostSessionCalibration();
+	}
 	return nextState;
 });
 
@@ -836,11 +1072,7 @@ ipcMain.handle('competitiveMode_clearBackup', event => {
 });
 ipcMain.on('calibration_request_rerun', event => {
 	if (!isTrustedGameIpcSender(event)) return;
-	if (calibrationState) {
-		calibrationState = requestCalibrationRerun(calibrationState);
-		writeCalibrationStateSync(calibrationState);
-	}
-	relaunchClient();
+	void requestCalibrationRunAndRelaunch();
 });
 
 // initial request of settings to populate the settingsUI
@@ -866,9 +1098,13 @@ ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
 	);
 	if (Object.keys(validUpdates).length === 0) return;
 
+	const enablingCompetitiveMode = validUpdates.competitiveMode === true && userPrefs.competitiveMode !== true;
 	Object.assign(userPrefs, validUpdates);
 	settingsRevision++;
 	scheduleSettingsWrite();
+	// Competitive-enable is a calibration consent entry point (design §4.2.1); declining still
+	// enables Competitive mode on the heuristic recommendation with adaptive validation watching.
+	if (enablingCompetitiveMode) void offerCalibrationForCompetitiveEnable();
 });
 
 // Allow the trusted preload to quit the entire Electron process.
@@ -883,15 +1119,16 @@ function calibrationDataUrl(html: string): string {
 }
 
 function createCalibrationWindow(): BrowserWindow {
+	// The trial window matches the real game-window dimensions so the workload renders at the
+	// resolution the selected profile will actually drive (design §1.2).
+	const screenSize = screen.getPrimaryDisplay().size;
 	const calibrationWindow = new BrowserWindow({
 		alwaysOnTop: true,
 		backgroundColor: '#0A0A0A',
 		center: true,
-		height: 680,
-		minHeight: 620,
-		minWidth: 860,
+		height: Math.round(screenSize.height * windowScale),
 		show: false,
-		width: 960,
+		width: Math.round(screenSize.width * windowScale),
 		webPreferences: {
 			backgroundThrottling: false,
 			contextIsolation: true,
@@ -909,15 +1146,22 @@ function createCalibrationWindow(): BrowserWindow {
 	return calibrationWindow;
 }
 
-async function runCalibrationTrial(candidate: CalibrationCandidate, step: number, total: number): Promise<CalibrationMetrics> {
+async function runCalibrationTrial(candidate: CalibrationCandidate, step: number, total: number, attempt = 1): Promise<CalibrationMetrics> {
 	const [{ buildCalibrationTrialPage }, markSvg] = await Promise.all([
 		import('./calibration-window.ts'),
 		readFile(pathJoin($assets, 'wok-mark.svg'), 'utf-8')
 	]);
-	mainWindow = createCalibrationWindow();
-	await mainWindow.loadURL(calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg)));
+	// Same-launch trials and retries reuse the window with a page reload: fresh GL context, no
+	// extra window churn (design §2.4, §3.2).
+	if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createCalibrationWindow();
+	const display = screen.getPrimaryDisplay();
+	await mainWindow.loadURL(calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg, {
+		attempt,
+		onBattery: powerMonitor.isOnBatteryPower(),
+		...(typeof display.displayFrequency === 'number' && display.displayFrequency > 0 ? { refreshRateHz: display.displayFrequency } : {})
+	})));
 
-	const timeoutMs = CALIBRATION_WARMUP_MS + CALIBRATION_BENCHMARK_MS + 5_000;
+	const timeoutMs = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
 	const timeout = new Promise<never>((_resolve, reject) => {
 		setTimeout(() => reject(new Error('Calibration renderer timed out.')), timeoutMs);
 	});
@@ -925,7 +1169,14 @@ async function runCalibrationTrial(candidate: CalibrationCandidate, step: number
 		mainWindow.once('closed', () => reject(new Error('Calibration window was closed.')));
 	});
 	const benchmark = mainWindow.webContents.executeJavaScript(
-		`window.wokRunBenchmark(${JSON.stringify({ warmupMs: CALIBRATION_WARMUP_MS, benchmarkMs: CALIBRATION_BENCHMARK_MS })})`
+		`window.wokRunBenchmark(${JSON.stringify({
+			benchmarkMs: CALIBRATION_BENCHMARK_MS,
+			minSamples: CALIBRATION_MIN_SAMPLES,
+			warmupMaxMs: WORKLOAD_CONSTANTS.warmupMaxMs,
+			warmupMinMs: WORKLOAD_CONSTANTS.warmupMinMs,
+			warmupSettleFrames: WORKLOAD_CONSTANTS.warmupSettleFrames,
+			warmupSettleRatio: WORKLOAD_CONSTANTS.warmupSettleRatio
+		})})`
 	);
 	return normalizeBenchmarkMetrics(await Promise.race([benchmark, timeout, closed]));
 }
@@ -971,66 +1222,170 @@ function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
 	return preparedState;
 }
 
-async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
-	if (process.argv.includes('--safe-graphics')) return false;
+interface CalibrationTrialRunOutcome {
+	aborted: boolean;
+	failureReason?: string;
+	metrics: CalibrationMetrics;
+}
 
-	prepareCalibrationForGpuInfo(gpuInfo);
-	if (!calibrationState || calibrationState.status === 'complete') return false;
+function pickBetterRejectedAttempt(first: CalibrationMetrics, second: CalibrationMetrics): CalibrationMetrics {
+	if (first.success !== second.success) return first.success ? first : second;
+	if (first.sampleCount !== second.sampleCount) return first.sampleCount > second.sampleCount ? first : second;
+	return second.onePercentLowFps > first.onePercentLowFps ? second : first;
+}
 
-	let pendingCandidate = getPendingCalibrationCandidate(calibrationState);
-	while (pendingCandidate && isGraphicsBackendQuarantined(graphicsProfileState, pendingCandidate.backend)) {
-		calibrationState = recordCalibrationResult(
-			calibrationState,
-			pendingCandidate,
-			failedCalibrationMetrics(),
-			`${pendingCandidate.backend} is blocked after a previous GPU-process failure.`
-		);
-		writeCalibrationStateSync(calibrationState);
-		pendingCandidate = getPendingCalibrationCandidate(calibrationState);
-	}
-
-	if (calibrationState.status === 'running' && pendingCandidate) {
-		if (pendingCandidate.backend !== graphicsSelection.backend || pendingCandidate.framePolicy !== effectiveFramePolicy) {
-			relaunchClient();
-			return true;
-		}
-
-		const step = calibrationState.results.length + 1;
+/**
+ * Runs one trial slot with the design §2.4 retry policy: a rejected trial is retried once,
+ * immediately, in the same launch (page reload, fresh GL context), bounded by the global per-run
+ * retry budget; when both attempts are rejected, the better one is kept as warn-and-continue
+ * evidence and the other is persisted for diagnostics.
+ */
+async function runCalibrationTrialWithRetry(candidate: CalibrationCandidate, step: number, total: number): Promise<CalibrationTrialRunOutcome> {
+	let firstRejectedAttempt: CalibrationMetrics | undefined;
+	for (let attempt = 1; ; attempt++) {
 		let metrics = failedCalibrationMetrics();
 		let failureReason: string | undefined;
+		let powerStateChanged = false;
+		const onPowerStateChanged = () => { powerStateChanged = true; };
+		powerMonitor.on('on-ac', onPowerStateChanged);
+		powerMonitor.on('on-battery', onPowerStateChanged);
 		try {
-			metrics = await runCalibrationTrial(pendingCandidate, step, calibrationState.candidates.length);
+			metrics = await runCalibrationTrial(candidate, step, total, attempt);
 			failureReason = activeCalibrationFailureReason;
 			if (failureReason) metrics = failedCalibrationMetrics();
 			else if (!metrics.success) failureReason = 'WebGL calibration did not return valid frame samples.';
 		} catch (error) {
-			if (!mainWindow || mainWindow.isDestroyed()) {
-				if (graphicsProfileState.launchPending) {
-					graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
-					persistGraphicsProfile();
+			if (!mainWindow || mainWindow.isDestroyed()) return { aborted: true, metrics };
+			failureReason = error instanceof Error ? error.message : String(error);
+		} finally {
+			powerMonitor.off('on-ac', onPowerStateChanged);
+			powerMonitor.off('on-battery', onPowerStateChanged);
+		}
+
+		if (!failureReason && powerStateChanged) metrics = markMetricsRejected(metrics, 'power-state-changed');
+		const rejected = !failureReason && metricsRejectionReasons(metrics).length > 0;
+		if (!rejected) return { aborted: false, ...(failureReason ? { failureReason } : {}), metrics };
+
+		if (attempt === 1 && calibrationState && calibrationState.rejectedAttempts.length < BENCHMARK_RUN_RETRY_BUDGET) {
+			persistCalibrationState(recordRejectedCalibrationAttempt(calibrationState, candidate, metrics));
+			firstRejectedAttempt = metrics;
+			continue;
+		}
+		if (firstRejectedAttempt) {
+			const better = pickBetterRejectedAttempt(firstRejectedAttempt, metrics);
+			if (better !== metrics && calibrationState) {
+				persistCalibrationState(recordRejectedCalibrationAttempt(calibrationState, candidate, metrics));
+			}
+			return { aborted: false, metrics: better };
+		}
+		// No retry budget left: round-1 warn-and-continue semantics on the single rejected attempt.
+		return { aborted: false, metrics };
+	}
+}
+
+/**
+ * Lane-tuning harness (design §1.4): WOK_CALIBRATION_TUNING=1 opens the calibration window, runs
+ * one workload trial on the currently selected backend, prints every lane metric as
+ * `[wok-tune] key value` lines, and quits. This lets a quiet reference-machine session tune the
+ * PROVISIONAL workload constants without code changes.
+ */
+async function runCalibrationTuningHarness(): Promise<void> {
+	try {
+		const candidate: CalibrationCandidate = {
+			backend: graphicsSelection.backend,
+			framePolicy: effectiveFramePolicy,
+			id: calibrationCandidateId(graphicsSelection.backend, effectiveFramePolicy)
+		};
+		const metrics = await runCalibrationTrial(candidate, 1, 1, 1);
+		console.log(`[wok-tune] backend ${candidate.backend}`);
+		console.log(`[wok-tune] framePolicy ${candidate.framePolicy}`);
+		console.log(`[wok-tune] workloadVersion ${WORKLOAD_VERSION}`);
+		for (const [key, entry] of Object.entries(metrics)) {
+			if (typeof entry === 'number' || typeof entry === 'boolean' || typeof entry === 'string') {
+				console.log(`[wok-tune] ${key} ${String(entry)}`);
+			} else if (Array.isArray(entry)) {
+				console.log(`[wok-tune] ${key} ${entry.join(',') || 'none'}`);
+			} else if (entry && typeof entry === 'object') {
+				for (const [nestedKey, nestedValue] of Object.entries(entry)) {
+					console.log(`[wok-tune] ${key}.${nestedKey} ${String(nestedValue)}`);
 				}
-				app.quit();
+			}
+		}
+	} catch (error) {
+		console.error('[wok-tune] failed', error);
+	}
+	if (graphicsProfileState.launchPending) {
+		graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
+		persistGraphicsProfile();
+	}
+	app.quit();
+}
+
+async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
+	if (process.argv.includes('--safe-graphics')) return false;
+
+	prepareCalibrationForGpuInfo(gpuInfo);
+	if (!calibrationState || calibrationState.status === 'complete' || calibrationState.status === 'uncalibrated') return false;
+
+	// The hard run budget is checked at each launch (design §3.4); on exhaustion the decision
+	// runs with the collected evidence and missing evidence resolves through the tie rules.
+	if (calibrationState.status === 'running' && isCalibrationBudgetExhausted(calibrationState)) {
+		console.log('Calibration budget exhausted; deciding with the collected evidence.');
+		persistCalibrationState(finalizeCalibration(calibrationState));
+	}
+
+	if (calibrationState.status === 'running') {
+		persistCalibrationState(recordCalibrationLaunch(calibrationState));
+
+		let pendingCandidate = getPendingCalibrationCandidate(calibrationState);
+		while (pendingCandidate && isGraphicsBackendQuarantined(graphicsProfileState, pendingCandidate.backend)) {
+			persistCalibrationState(recordCalibrationResult(
+				calibrationState,
+				pendingCandidate,
+				failedCalibrationMetrics(),
+				`${pendingCandidate.backend} is blocked after a previous GPU-process failure.`
+			));
+			pendingCandidate = getPendingCalibrationCandidate(calibrationState);
+		}
+
+		if (pendingCandidate) {
+			if (pendingCandidate.backend !== graphicsSelection.backend || pendingCandidate.framePolicy !== effectiveFramePolicy) {
+				relaunchClient();
 				return true;
 			}
-			failureReason = error instanceof Error ? error.message : String(error);
-		}
 
-		calibrationState = recordCalibrationResult(calibrationState, pendingCandidate, metrics, failureReason);
-		writeCalibrationStateSync(calibrationState);
-		if (graphicsProfileState.launchPending) {
-			graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
-			persistGraphicsProfile();
-		}
+			// Same-candidate trials share this launch with a cooldown and page reload between them (§3.2).
+			const launchTrialCount = Math.max(1, getPendingLaunchSlotIndices(calibrationState).length);
+			for (let trialInLaunch = 0; trialInLaunch < launchTrialCount; trialInLaunch++) {
+				if (trialInLaunch > 0) await new Promise(resolve => { setTimeout(resolve, CALIBRATION_INTRA_LAUNCH_COOLDOWN_MS); });
+				const step = calibrationState.results.length + 1;
+				const outcome = await runCalibrationTrialWithRetry(pendingCandidate, step, calibrationState.plan.length);
+				if (outcome.aborted) {
+					if (graphicsProfileState.launchPending) {
+						graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
+						persistGraphicsProfile();
+					}
+					app.quit();
+					return true;
+				}
+				persistCalibrationState(recordCalibrationResult(calibrationState, pendingCandidate, outcome.metrics, outcome.failureReason));
+				// A GPU-process failure dooms the rest of this launch group; relaunch handles recovery.
+				if (outcome.failureReason) break;
+			}
+			if (graphicsProfileState.launchPending) {
+				graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
+				persistGraphicsProfile();
+			}
 
-		if (getPendingCalibrationCandidate(calibrationState)) {
-			relaunchClient();
-			return true;
+			if (getPendingCalibrationCandidate(calibrationState)) {
+				relaunchClient();
+				return true;
+			}
 		}
 	}
 
 	if (calibrationState.status === 'running') {
-		calibrationState = finalizeCalibration(calibrationState);
-		writeCalibrationStateSync(calibrationState);
+		persistCalibrationState(finalizeCalibration(calibrationState));
 	}
 	if (graphicsProfileState.launchPending) {
 		graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
@@ -1040,8 +1395,7 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 	try {
 		const decision = await showCalibrationDecision(calibrationState);
 		const applyRecommendation = decision === 'apply' && Boolean(calibrationState.recommendedSelection);
-		calibrationState = completeCalibration(calibrationState, applyRecommendation);
-		writeCalibrationStateSync(calibrationState);
+		persistCalibrationState(completeCalibration(calibrationState, applyRecommendation));
 
 		if (applyRecommendation && calibrationState.activeSelection) {
 			graphicsProfileState = clearKeptGraphicsBackend(graphicsProfileState);
@@ -1105,9 +1459,14 @@ app.on('ready', async () => {
 	logPerfMark('app-ready');
 	app.setAppUserModelId(APP_ID);
 
-	const calibrationBlocksStartup = calibrationState === undefined
-		|| calibrationState.status !== 'complete'
-		|| calibrationState.rerunRequested;
+	if (process.env.WOK_CALIBRATION_TUNING === '1') {
+		await runCalibrationTuningHarness();
+		return;
+	}
+
+	// Fresh installs never block on calibration (design §4.1): startup detours through the
+	// calibration window only to resume a flow the user already consented to.
+	const calibrationBlocksStartup = calibrationResumeRequired(calibrationState);
 
 	// Overlap DNS/TCP/TLS setup for the game origin with the rest of startup.
 	if (!calibrationBlocksStartup && !process.argv.includes('--safe-graphics')) {
@@ -1441,9 +1800,11 @@ app.on('ready', async () => {
 					completeGraphicsIdentityReady = true;
 					const previousCalibrationState = calibrationState;
 					const preparedState = prepareCalibrationForGpuInfo(gpuInfo);
-					if (preparedState !== previousCalibrationState && preparedState.status === 'running') {
-						console.log('Graphics identity changed; calibration is staged for the next launch.');
+					if (preparedState !== previousCalibrationState && preparedState.status === 'uncalibrated') {
+						console.log('Graphics identity changed; calibration can be rerun from Settings when convenient.');
 					}
+					// Benchmark-only staleness gets its single dismissible rerun-when-convenient notice (§5.2).
+					void maybeShowStaleCalibrationPrompt();
 
 					const currentAdaptiveValidationState = userPrefs.competitiveMode
 						? prepareCurrentAdaptiveValidationState()

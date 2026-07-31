@@ -42,7 +42,6 @@ function createFakeGl(options: FakeGlOptions = {}): FakeGl {
 	};
 	const statusPolls = new Map<object, number>();
 	const queryIssue = new Map<object, { issueIndex: number; issueTick: number }>();
-	let activeQuery: object | undefined;
 
 	fake.gl = {
 		QUERY_RESULT: 0x8866,
@@ -51,12 +50,11 @@ function createFakeGl(options: FakeGlOptions = {}): FakeGl {
 		SYNC_GPU_COMMANDS_COMPLETE: 0x9117,
 		SYNC_STATUS: 0x9114,
 		beginQuery: (_target: number, query: object) => {
-			activeQuery = query;
 			queryIssue.set(query, { issueIndex: fake.queryIssueCount++, issueTick: fake.currentTick });
 		},
 		createQuery: () => ({ query: true }),
 		deleteSync: (sync: unknown) => { fake.deletedSyncs.push(sync); },
-		endQuery: () => { activeQuery = undefined; },
+		endQuery: () => {},
 		fenceSync: () => ({ frameIndex: fake.fenceCount++ }),
 		flush: () => {},
 		getParameter: (parameter: number) => (parameter === TIMER_EXT.GPU_DISJOINT_EXT ? Boolean(options.disjoint?.()) : undefined),

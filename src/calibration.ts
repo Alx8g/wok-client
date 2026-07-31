@@ -5,8 +5,6 @@ import { BENCHMARK_REJECTION_REASONS, type BenchmarkRejectionReason } from './ca
 const CALIBRATION_STATE_VERSION = 2;
 export const CALIBRATION_VERSION = 3;
 export const CALIBRATION_BENCHMARK_MS = 2_800;
-/** Legacy fixed warmup; v2 trials use the adaptive warmup gate from the workload constants. */
-export const CALIBRATION_WARMUP_MS = 650;
 export const CALIBRATION_MIN_SAMPLES = 45;
 export const CALIBRATION_SCORE_TIE_MINIMUM = 5;
 export const CALIBRATION_SCORE_MEANINGFUL_WIN_RATIO = 0.03;
@@ -354,6 +352,8 @@ export function createCalibrationState(
 
 	return {
 		...(preserveSelection ? { activeSelection: preserveSelection } : {}),
+		// One automatic rollback per signature (design §4.4): the marker survives same-signature resets.
+		...(sameSignature && previousState.autoRollbackUsed ? { autoRollbackUsed: true as const } : {}),
 		...(previousState?.calibrationOfferDeclinedAt !== undefined ? { calibrationOfferDeclinedAt: previousState.calibrationOfferDeclinedAt } : {}),
 		candidates,
 		competitiveModeWasEnabled,

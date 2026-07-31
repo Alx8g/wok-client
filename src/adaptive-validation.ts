@@ -127,6 +127,19 @@ export function parseAdaptiveValidationProfileIdentity(value: unknown): Adaptive
 	};
 }
 
+/**
+ * True when this validation state is watching the given applied profile. The main-process
+ * provisional-confirmation coordinator uses it to tell "confirmation evidence for the provisional
+ * selection" apart from evidence about some other profile (design §4.4); no schema change.
+ */
+export function adaptiveValidationWatchesProfile(
+	state: AdaptiveValidationState,
+	activeBackend: AppliedGraphicsBackend,
+	framePolicy: AdaptiveValidationFramePolicy
+): boolean {
+	return state.profile.activeBackend === activeBackend && state.profile.framePolicy === framePolicy;
+}
+
 export function adaptiveValidationProfileIdentitiesEqual(
 	left: AdaptiveValidationProfileIdentity,
 	right: AdaptiveValidationProfileIdentity

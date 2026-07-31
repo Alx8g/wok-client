@@ -22,6 +22,7 @@ import {
 	type CalibrationSignature,
 	type CalibrationState
 } from '../src/calibration.ts';
+import { WORKLOAD_VERSION } from '../src/calibration-workload.ts';
 
 const d3d11on12Renderer = 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, D3D11on12 vs_5_0 ps_5_0, D3D11)';
 const stableMetrics: CalibrationMetrics = {
@@ -283,6 +284,13 @@ test('uses a cap only as meaningful recovery evidence for severely unstable unca
 	state = finalizeCalibration(state);
 
 	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'capped');
+});
+
+test('v3 signatures stamp the current benchmark and workload versions', () => {
+	assert.equal(CALIBRATION_VERSION, 3);
+	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
+	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
+	assert.equal(WORKLOAD_VERSION, 1);
 });
 
 test('treats app version as informational while relevant signature fields invalidate', () => {

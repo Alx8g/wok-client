@@ -13,6 +13,21 @@ import {
 	WORKLOAD_VERSION,
 	type WorkloadGl
 } from '../src/calibration-workload.ts';
+import {
+	BENCHMARK_EVENT_LOOP_SAMPLE_MS,
+	BENCHMARK_FENCE_QUEUE_DEPTH,
+	BENCHMARK_FENCE_RING_SIZE,
+	BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO,
+	BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO,
+	BENCHMARK_GPU_QUERY_POOL_SIZE,
+	BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
+	BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+	BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
+	BENCHMARK_GPU_SAMPLE_MIN_MS,
+	BENCHMARK_LONG_FRAME_MS,
+	BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS,
+	runBenchmarkTrial
+} from '../src/calibration-benchmark.ts';
 
 interface RecordedCall {
 	args: unknown[];
@@ -199,6 +214,69 @@ test('static resources are game-shaped: programs, meshes, and seeded textures', 
 	assert.equal(mipmaps, WORKLOAD_CONSTANTS.sceneTextureCount);
 	const buffers = recording.calls.filter(call => call.method === 'createBuffer').length;
 	assert.ok(buffers >= WORKLOAD_CONSTANTS.meshVariants, 'expected static VBOs per mesh variant');
+});
+
+test('serialized modules evaluate as plain JavaScript exactly as the trial page embeds them', async () => {
+	// The page embeds these functions via .toString() after Node/Electron type stripping; this
+	// proves the serialized sources are valid JS and behave identically to the imported modules.
+	const constants: Record<string, unknown> = {
+		BENCHMARK_EVENT_LOOP_SAMPLE_MS,
+		BENCHMARK_FENCE_QUEUE_DEPTH,
+		BENCHMARK_FENCE_RING_SIZE,
+		BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO,
+		BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO,
+		BENCHMARK_GPU_QUERY_POOL_SIZE,
+		BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
+		BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+		BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
+		BENCHMARK_GPU_SAMPLE_MIN_MS,
+		BENCHMARK_LONG_FRAME_MS,
+		BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS
+	};
+	const script = `'use strict';
+		${Object.entries(constants).map(([name, value]) => `const ${name} = ${JSON.stringify(value)};`).join('\n')}
+		const mulberry32 = ${mulberry32.toString()};
+		const createWorkload = ${createWorkload.toString()};
+		const createWorkloadSpin = ${createWorkloadSpin.toString()};
+		const runBenchmarkTrial = ${runBenchmarkTrial.toString()};
+		return { createWorkload, createWorkloadSpin, mulberry32, runBenchmarkTrial };`;
+	const evaluated = new Function(script)() as {
+		createWorkload: typeof createWorkload;
+		createWorkloadSpin: typeof createWorkloadSpin;
+		mulberry32: typeof mulberry32;
+		runBenchmarkTrial: typeof runBenchmarkTrial;
+	};
+
+	assert.equal(evaluated.mulberry32(123)(), mulberry32(123)());
+	assert.equal(evaluated.createWorkloadSpin(WORKLOAD_SEED, 500)(), createWorkloadSpin(WORKLOAD_SEED, 500)());
+
+	const moduleRender = renderFrames(WORKLOAD_SEED, 2);
+	const recording = createRecordingGl();
+	const serializedWorkload = evaluated.createWorkload(recording.gl, createWorkloadSpec(WORKLOAD_SEED), 1_920, 1_080);
+	const perFrame: RecordedCall[][] = [];
+	for (let frameIndex = 0; frameIndex < 2; frameIndex++) {
+		const before = recording.calls.length;
+		serializedWorkload.renderFrame(frameIndex);
+		perFrame.push(recording.calls.slice(before));
+	}
+	assert.equal(serializedWorkload.drawCallsPerFrame, WORKLOAD_DRAWS_PER_FRAME);
+	assert.equal(commandStreamDigest(recording.calls), moduleRender.digest, 'serialized workload must emit the identical command stream');
+	assert.equal(perFrame.length, 2);
+
+	const trial = await evaluated.runBenchmarkTrial({
+		environment: { devicePixelRatio: 1, drawingBufferHeight: 0, drawingBufferWidth: 0 },
+		getTimerQueryExt: () => null,
+		gl: null,
+		now: () => 0,
+		renderFrame: () => {},
+		requestFrame: () => {},
+		spin: () => 0,
+		startSampler: () => () => {},
+		subscribeContamination: () => () => {},
+		webglRenderer: ''
+	}, { benchmarkMs: 100, minSamples: 5, warmupMaxMs: 50, warmupMinMs: 10, warmupSettleFrames: 2, warmupSettleRatio: 3 });
+	assert.equal(trial.success, false);
+	assert.equal(trial.gpuTimingStatus, 'unsupported');
 });
 
 test('the fixed-iteration spin is deterministic and stable across instances', () => {

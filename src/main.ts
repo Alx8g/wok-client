@@ -1,5 +1,5 @@
 ﻿import { createHash } from 'crypto';
-import { join as pathJoin, resolve as pathResolve } from 'path';
+import { isAbsolute as pathIsAbsolute, join as pathJoin, resolve as pathResolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
@@ -84,6 +84,22 @@ import {
 	type AdaptiveValidationProfileIdentity,
 	type AdaptiveValidationState
 } from './adaptive-validation.ts';
+
+// Diagnostic-only userData override for isolated test profiles. Inert unless WOK_USER_DATA_DIR is
+// set to an absolute path. Must run before any app.getPath('userData') use so config, caches, and
+// the single-instance lock all land in the override directory. sessionData is pointed there too:
+// it defaults to the original userData location and would otherwise keep writing Chromium caches
+// into the real profile.
+const userDataOverrideDir = process.env.WOK_USER_DATA_DIR;
+if (userDataOverrideDir) {
+	if (pathIsAbsolute(userDataOverrideDir)) {
+		mkdirSync(userDataOverrideDir, { recursive: true });
+		app.setPath('userData', userDataOverrideDir);
+		app.setPath('sessionData', userDataOverrideDir);
+	} else {
+		console.error(`Ignoring WOK_USER_DATA_DIR (not an absolute path): ${userDataOverrideDir}`);
+	}
+}
 
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);

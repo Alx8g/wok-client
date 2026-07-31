@@ -96,7 +96,7 @@ function dispatchHeadersReceived(state: FakeWebRequestState, responseHeaders?: R
 	return response;
 }
 
-test('empty swap trees avoid global request interception and keep BrowserFPS CORS scoped', async t => {
+test('empty swap trees register no webRequest listeners at all', async t => {
 	const { browserWindow, state } = createFakeBrowserWindow();
 	const { filtersPath, swapDir } = createTestPaths(t);
 	const handler = new RequestHandler(browserWindow, swapDir, true, false, false, '', filtersPath);
@@ -107,6 +107,19 @@ test('empty swap trees avoid global request interception and keep BrowserFPS COR
 	assert.equal(existsSync(swapDir), true);
 	assert.equal(state.beforeRequest, undefined);
 	assert.equal(state.beforeRequestRegistrations, 0);
+	assert.equal(state.headersReceived, undefined);
+	assert.equal(state.headersReceivedRegistrations, 0);
+});
+
+test('active request features keep the BrowserFPS CORS fixer scoped to its domains', async t => {
+	const { browserWindow, state } = createFakeBrowserWindow();
+	const { filtersPath, swapDir } = createTestPaths(t);
+	const handler = new RequestHandler(browserWindow, swapDir, false, true, false, '*://ads.example.com/*', filtersPath);
+
+	await handler.start();
+	await handler.start();
+
+	assert.equal(state.beforeRequestRegistrations, 1);
 	assert.equal(state.headersReceivedRegistrations, 1);
 	assert.deepEqual(state.headersReceived?.filter.urls, [
 		'*://browserfps.com/*',

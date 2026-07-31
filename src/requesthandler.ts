@@ -189,33 +189,37 @@ export default class RequestHandler {
 			} catch (error) {
 				console.error('Failed to register WOK Client request filters', error);
 			}
-		}
 
-		// Fix the CORS problem only for browserfps.com instead of processing every response.
-		this.browserWindow.webContents.session.webRequest.onHeadersReceived(BROWSER_FPS_CORS_FILTER, ({ responseHeaders }, callback) => {
-			if (!responseHeaders) return callback({});
+			// Fix the CORS problem only for browserfps.com instead of processing every response.
+			// Registering any webRequest listener makes Electron interpose every request in the
+			// session, so the mirror-domain CORS fixer only registers when a request feature has
+			// already forced that interposition. With every request feature disabled the session
+			// keeps Chromium's direct loading path.
+			this.browserWindow.webContents.session.webRequest.onHeadersReceived(BROWSER_FPS_CORS_FILTER, ({ responseHeaders }, callback) => {
+				if (!responseHeaders) return callback({});
 
-			let allowOriginKey: string | undefined;
-			for (const [key, values] of Object.entries(responseHeaders)) {
-				const lowercase = key.toLowerCase();
+				let allowOriginKey: string | undefined;
+				for (const [key, values] of Object.entries(responseHeaders)) {
+					const lowercase = key.toLowerCase();
 
-				// If the credentials mode is 'include', changing the origin to '*' would make the request fail CORS.
-				if (lowercase === 'access-control-allow-credentials' && values?.[0] === 'true') {
+					// If the credentials mode is 'include', changing the origin to '*' would make the request fail CORS.
+					if (lowercase === 'access-control-allow-credentials' && values?.[0] === 'true') {
+						return callback({ responseHeaders });
+					}
+
+					if (lowercase === 'access-control-allow-origin') allowOriginKey = key;
+				}
+
+				if (allowOriginKey && responseHeaders[allowOriginKey]?.[0] === '*') {
 					return callback({ responseHeaders });
 				}
 
-				if (lowercase === 'access-control-allow-origin') allowOriginKey = key;
-			}
-
-			if (allowOriginKey && responseHeaders[allowOriginKey]?.[0] === '*') {
-				return callback({ responseHeaders });
-			}
-
-			const updatedHeaders = { ...responseHeaders };
-			if (allowOriginKey) delete updatedHeaders[allowOriginKey];
-			updatedHeaders['access-control-allow-origin'] = ['*'];
-			return callback({ responseHeaders: updatedHeaders });
-		});
+				const updatedHeaders = { ...responseHeaders };
+				if (allowOriginKey) delete updatedHeaders[allowOriginKey];
+				updatedHeaders['access-control-allow-origin'] = ['*'];
+				return callback({ responseHeaders: updatedHeaders });
+			});
+		}
 
 		this.started = true;
 	}

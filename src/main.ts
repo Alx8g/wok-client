@@ -1312,23 +1312,38 @@ app.on('ready', async () => {
 	}
 
 	if (!calibrationBlocksStartup) {
+		// Refresh the complete GPU identity well after load: did-finish-load is the game's
+		// heaviest startup moment and nothing consumes the result until the next launch.
+		const GPU_IDENTITY_REFRESH_DELAY_MS = 15_000;
+		let gpuIdentityRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+		const clearGpuIdentityRefreshTimer = () => {
+			if (gpuIdentityRefreshTimer === undefined) return;
+			clearTimeout(gpuIdentityRefreshTimer);
+			gpuIdentityRefreshTimer = undefined;
+		};
+		app.on('before-quit', clearGpuIdentityRefreshTimer);
+		mainWindow.on('closed', clearGpuIdentityRefreshTimer);
 		mainWindow.webContents.once('did-finish-load', () => {
-			void refreshCompleteGraphicsInfo().then(gpuInfo => {
-				completeGraphicsIdentityReady = true;
-				const previousCalibrationState = calibrationState;
-				const preparedState = prepareCalibrationForGpuInfo(gpuInfo);
-				if (preparedState !== previousCalibrationState && preparedState.status === 'running') {
-					console.log('Graphics identity changed; calibration is staged for the next launch.');
-				}
+			gpuIdentityRefreshTimer = setTimeout(() => {
+				gpuIdentityRefreshTimer = undefined;
+				if (mainWindow.isDestroyed()) return;
+				void refreshCompleteGraphicsInfo().then(gpuInfo => {
+					completeGraphicsIdentityReady = true;
+					const previousCalibrationState = calibrationState;
+					const preparedState = prepareCalibrationForGpuInfo(gpuInfo);
+					if (preparedState !== previousCalibrationState && preparedState.status === 'running') {
+						console.log('Graphics identity changed; calibration is staged for the next launch.');
+					}
 
-				const currentAdaptiveValidationState = userPrefs.competitiveMode
-					? prepareCurrentAdaptiveValidationState()
-					: undefined;
-				if (!mainWindow.isDestroyed()) {
-					mainWindow.webContents.send('adaptiveValidation_stateUpdated', currentAdaptiveValidationState);
-				}
-				if (currentAdaptiveValidationState) void maybePromptAdaptiveRecalibration();
-			});
+					const currentAdaptiveValidationState = userPrefs.competitiveMode
+						? prepareCurrentAdaptiveValidationState()
+						: undefined;
+					if (!mainWindow.isDestroyed()) {
+						mainWindow.webContents.send('adaptiveValidation_stateUpdated', currentAdaptiveValidationState);
+					}
+					if (currentAdaptiveValidationState) void maybePromptAdaptiveRecalibration();
+				});
+			}, GPU_IDENTITY_REFRESH_DELAY_MS);
 		});
 	}
 

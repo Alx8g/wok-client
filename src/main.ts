@@ -1072,12 +1072,27 @@ app.on('ready', async () => {
 
 	clientUrlStartup ??= findClientUrl(process.argv) ?? null;
 
+	// Hand the preload everything it needs to inject CSS and mount the splash at document
+	// start instead of waiting for did-finish-load. The preload falls back to the
+	// injectClientCSS IPC message when the argument is missing or unparsable.
+	const bootPayloadArguments = (() => {
+		try {
+			const payload = encodeURIComponent(JSON.stringify({ cssPath, userPrefs, version: app.getVersion() }));
+			// Stay far below the Windows command-line length limit.
+			return payload.length <= 24_000 ? [`--wok-boot=${payload}`] : [];
+		} catch (error) {
+			console.error('Failed to serialize the preload boot payload', error);
+			return [];
+		}
+	})();
+
 	const mainWindowProps: BrowserWindowConstructorOptions = {
 		show: false,
 		width: screenSize.width * windowScale,
 		height: screenSize.height * windowScale,
 		center: true,
 		webPreferences: {
+			additionalArguments: bootPayloadArguments,
 			preload: pathJoin(import.meta.dirname, 'preload.ts'),
 			spellcheck: false,
 			backgroundThrottling: false,

@@ -398,120 +398,250 @@ ipcRenderer.on('matchmakerRedirect', async (_event, _userPrefs: UserPrefs) => {
 	await fetchGame(_userPrefs);
 });
 
-ipcRenderer.on('injectClientCSS', async (_event, _userPrefs: UserPrefs, version: string, cssPath: string) => {
-	const { matchmaker, matchmakerKey, overrideURL } = _userPrefs;
+interface WokBootPayload {
+	cssPath: string;
+	userPrefs: UserPrefs;
+	version: string;
+}
+
+/** Parse the boot payload main passes through webPreferences.additionalArguments. */
+function parseWokBootPayload(): WokBootPayload | undefined {
+	try {
+		const bootArgument = process.argv.find(argument => argument.startsWith('--wok-boot='));
+		if (!bootArgument) return undefined;
+		const parsed: unknown = JSON.parse(decodeURIComponent(bootArgument.slice('--wok-boot='.length)));
+		if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return undefined;
+		const payload = parsed as Record<string, unknown>;
+		if (typeof payload.cssPath !== 'string' || typeof payload.version !== 'string') return undefined;
+		if (!payload.userPrefs || typeof payload.userPrefs !== 'object' || Array.isArray(payload.userPrefs)) return undefined;
+		return { cssPath: payload.cssPath, userPrefs: payload.userPrefs as UserPrefs, version: payload.version };
+	} catch (_error) {
+		return undefined;
+	}
+}
+
+/** Run a callback immediately when the DOM is already parsed, otherwise at DOMContentLoaded. */
+function whenDOMReady(callback: () => void) {
+	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { callback(); }, { once: true });
+	else callback();
+}
+
+/** Resolve an element by id as soon as the parser creates it, giving up at DOMContentLoaded. */
+function waitForElementById(id: string): Promise<HTMLElement | null> {
+	return new Promise(resolve => {
+		const existing = document.getElementById(id);
+		if (existing) return resolve(existing);
+		if (document.readyState !== 'loading') return resolve(null);
+
+		const finish = () => {
+			observer.disconnect();
+			document.removeEventListener('DOMContentLoaded', finish);
+			resolve(document.getElementById(id));
+		};
+		const observer = new MutationObserver(() => {
+			if (document.getElementById(id)) finish();
+		});
+		observer.observe(document, { childList: true, subtree: true });
+		document.addEventListener('DOMContentLoaded', finish, { once: true });
+	});
+}
+
+interface ClientHotkeyConfig {
+	matchmakerEnabled: boolean;
+	matchmakerKey: KeybindUserPref;
+	overrideURL?: string;
+}
+
+let clientHotkeyConfig: ClientHotkeyConfig | undefined;
+
+/** Register the Escape/matchmaker keydown handler once; later calls only refresh its config. */
+function applyClientHotkeys(_userPrefs: UserPrefs) {
+	const alreadyRegistered = clientHotkeyConfig !== undefined;
+	clientHotkeyConfig = {
+		matchmakerEnabled: Boolean(_userPrefs.matchmaker),
+		matchmakerKey: _userPrefs.matchmakerKey as KeybindUserPref,
+		overrideURL: typeof _userPrefs.overrideURL === 'string' ? _userPrefs.overrideURL : undefined
+	};
+	if (alreadyRegistered) return;
 
 	document.addEventListener('keydown', event => {
 		if (event.code === 'Escape') document.exitPointerLock();
-		if (keyboardEventMatchesCustomSetting(matchmakerKey as KeybindUserPref, event)) {
-			if (matchmaker) {
-				event.preventDefault();
-				event.stopPropagation();
-				ipcRenderer.send('matchmaker_requests_userPrefs');
-			} else {
-				window.location.href = `${overrideURL || 'https://krunker.io'}`;
-			}
+		const config = clientHotkeyConfig;
+		if (!config || !keyboardEventMatchesCustomSetting(config.matchmakerKey, event)) return;
+		if (config.matchmakerEnabled) {
+			event.preventDefault();
+			event.stopPropagation();
+			ipcRenderer.send('matchmaker_requests_userPrefs');
+		} else {
+			window.location.href = `${config.overrideURL || 'https://krunker.io'}`;
 		}
 	});
+}
 
-	const { hideAds, menuTimer, quickClassPicker, clientSplash, immersiveSplash, immersiveSplashBackgroundColor, loadingSplashTitleCardBackgroundColor, cssSwapper } = _userPrefs;
+let splashMountAttempted = false;
 
-	const [settingsCSS, matchmakerCSS] = await Promise.all([
-		readFile(pathJoin($assets, 'settings.css'), { encoding: 'utf-8' }),
-		matchmaker ? readFile(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' }) : Promise.resolve(undefined)
+async function mountClientSplash(_userPrefs: UserPrefs, version: string): Promise<void> {
+	if (splashMountAttempted) return;
+	splashMountAttempted = true;
+	const { immersiveSplash, immersiveSplashBackgroundColor, loadingSplashTitleCardBackgroundColor } = _userPrefs;
+
+	const [{ splashFlavor }, splashCSS, logoSVGSource] = await Promise.all([
+		import('./splashscreen.ts'),
+		readFile(pathJoin($assets, 'splash.css'), { encoding: 'utf-8' }),
+		readFile(pathJoin($assets, 'full_logo.svg'), { encoding: 'utf-8' })
 	]);
-	webFrame.insertCSS(settingsCSS);
-	sendPerfMark('css-injected');
-	if (matchmakerCSS) webFrame.insertCSS(matchmakerCSS);
+	webFrame.insertCSS(splashCSS);
 
-	if (clientSplash) {
-		const [{ splashFlavor }, splashCSS, logoSVGSource] = await Promise.all([
-			import('./splashscreen.ts'),
-			readFile(pathJoin($assets, 'splash.css'), { encoding: 'utf-8' }),
-			readFile(pathJoin($assets, 'full_logo.svg'), { encoding: 'utf-8' })
-		]);
-		webFrame.insertCSS(splashCSS);
+	// Mount as soon as the parser creates #uiBase so the splash covers the page-load window.
+	const uiBaseElement = await waitForElementById('uiBase');
+	if (uiBaseElement === null) {
+		strippedConsole.error("Krunker didn't create #uiBase; skipping the client splash.");
+		return;
+	}
 
-		const splashMountElementID = 'uiBase';
-		const uiBaseElement = document.getElementById(splashMountElementID);
-		if (uiBaseElement === null) throw new Error(`Krunker didn't create #${splashMountElementID}`);
+	const splashBackground = createElement('div', { class: ['crankshaft-loading-background'] });
+	if (immersiveSplash) {
+		splashBackground.classList.add('immersive');
+		splashBackground.style.setProperty('background-color', `${immersiveSplashBackgroundColor}`);
+	}
 
-		const splashBackground = createElement('div', { class: ['crankshaft-loading-background'] });
-		if (immersiveSplash) {
-			splashBackground.classList.add('immersive');
-			splashBackground.style.setProperty("background-color", `${immersiveSplashBackgroundColor}`);
+	const logoSVG = createElement('div', {
+		id: 'crankshaft-logo-holder',
+		innerHTML: logoSVGSource
+	});
+	logoSVG.style.setProperty('background-color', `${loadingSplashTitleCardBackgroundColor}`);
+
+	uiBaseElement.appendChild(splashBackground);
+
+	// i am not sure if you should be injecting more elements into a svg element, but it seems to work. feel free to pr a better version tho.
+	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-l', id: 'loadInfoLHolder', text: `v${version}` }));
+	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-r', id: 'loadInfoRHolder', text: 'WOK Client • Based on Crankshaft' }));
+	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-splash', id: 'loadInfoSplashHolder', text: splashFlavor }));
+	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-loadingindicator', id: 'loadInfoLoadingIndicator', text: 'LOADING...' }));
+	splashBackground.appendChild(logoSVG);
+
+	const clearListeners = new AbortController();
+	const observer = new MutationObserver(mutationList => {
+		for (const mutation of mutationList) if (mutation.type === 'childList') clearSplash();
+	});
+	const clearSplash = () => {
+		try {
+			splashBackground.remove();
+			observer.disconnect();
+			clearListeners.abort();
+		} catch (_e) {
+			strippedConsole.log('splash screen was already cleared.');
 		}
-
-		const logoSVG = createElement('div', {
-			id: 'crankshaft-logo-holder',
-			innerHTML: logoSVGSource
-		});
-		logoSVG.style.setProperty('background-color', `${loadingSplashTitleCardBackgroundColor}`);
-
-		const clearSplash = (_observer: MutationObserver) => {
-			try {
-				splashBackground.remove();
-				_observer.disconnect();
-			} catch (_e) {
-				console.log('splash screen was already cleared.');
-			}
-		};
-
-		uiBaseElement.appendChild(splashBackground);
-
-		// i am not sure if you should be injecting more elements into a svg element, but it seems to work. feel free to pr a better version tho.
-		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-l', id: 'loadInfoLHolder', text: `v${version}` }));
-		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-r', id: 'loadInfoRHolder', text: 'WOK Client • Based on Crankshaft' }));
-		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-splash', id: 'loadInfoSplashHolder', text: splashFlavor }));
-		logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-loadingindicator', id: 'loadInfoLoadingIndicator', text: 'LOADING...' }));
-		splashBackground.appendChild(logoSVG);
-
-		const observerConfig = { childList: true, subtree: true };
-		const callback = (mutationList: MutationRecord[], observer: MutationObserver) => {
-			for (const mutation of mutationList) if (mutation.type === 'childList') clearSplash(observer);
-		};
-
-		const observer = new MutationObserver(callback);
-		document.addEventListener('pointerlockchange', () => { clearSplash(observer); }, { once: true });
-
-		const observeInstructions = () => {
-			observer.observe(document.getElementById('instructions'), observerConfig);
-		};
-
-		if(document.readyState === "loading") {
-			window.addEventListener("DOMContentLoaded", observeInstructions);
-		} else {
-			observeInstructions();
-		}
-	}
-
-	// Add the style element regardless because otherwise the hot-swap functionality doesn't work unless the page loaded with a CSS selected beforehand.
-	const styleElement = createElement('style', { id: 'crankshaftCustomCSS' });
-	document.body.appendChild(styleElement);
-	if (cssSwapper !== 'None') {
-		styleElement.textContent = await readFile(pathJoin(cssPath, `${cssSwapper}`), { encoding: 'utf-8' });
-	}
-
-	if (hideAds === 'block' || hideAds === 'hide') {
-		toggleSettingCSS(styleSettingsCSS.hideAds, 'hideAds', true);
-		document.getElementById('hiddenClasses').classList.add('hiddenClasses-hideAds-bottomOffset');
-	}
-	if (menuTimer) toggleSettingCSS(styleSettingsCSS.menuTimer, 'menuTimer', true);
-	if (quickClassPicker) toggleSettingCSS(styleSettingsCSS.quickClassPicker, 'quickClassPicker', true);
-
-	/*
-	 * Animate transforms instead of position properties
-	 * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
-	 */
-	const injectKeyframeFix = () => {
-		if (document.getElementById('crankshaftKeyframeFix')) return;
-		const keyframeStyle = createElement('style', { id: 'crankshaftKeyframeFix' });
-		keyframeStyle.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
-		document.body.appendChild(keyframeStyle);
 	};
-	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', injectKeyframeFix, { once: true });
-	else injectKeyframeFix();
+	document.addEventListener('pointerlockchange', () => { clearSplash(); }, { once: true, signal: clearListeners.signal });
+
+	// #instructions mutates while Krunker itself loads, so only watch it once the page has
+	// finished loading — the same point the pre-boot-payload code started observing.
+	const observeInstructions = () => {
+		const instructionsElement = document.getElementById('instructions');
+		if (instructionsElement) observer.observe(instructionsElement, { childList: true, subtree: true });
+	};
+	if (document.readyState === 'complete') observeInstructions();
+	else window.addEventListener('load', observeInstructions, { once: true, signal: clearListeners.signal });
+}
+
+let clientCSSInjected = false;
+let matchmakerCSSInjected = false;
+let hideAdsCSSApplied = false;
+let menuTimerCSSApplied = false;
+let quickClassPickerCSSApplied = false;
+let customCSSElement: HTMLElement | undefined;
+let appliedCustomCSSName: string | undefined;
+
+/** Keep the hot-swap style element mounted and synchronized with the selected CSS file. */
+async function applyCustomCSSSwap(cssSwapper: string, cssPath: string): Promise<void> {
+	// Add the style element regardless because otherwise the hot-swap functionality doesn't work unless the page loaded with a CSS selected beforehand.
+	if (!customCSSElement) {
+		customCSSElement = createElement('style', { id: 'crankshaftCustomCSS' });
+		document.body.appendChild(customCSSElement);
+	}
+	if (appliedCustomCSSName === cssSwapper) return;
+	appliedCustomCSSName = cssSwapper;
+	if (cssSwapper === 'None') {
+		customCSSElement.textContent = '';
+		return;
+	}
+	try {
+		customCSSElement.textContent = await readFile(pathJoin(cssPath, `${cssSwapper}`), { encoding: 'utf-8' });
+	} catch (error) {
+		strippedConsole.error(`Failed to load the CSS swapper file ${cssSwapper}`, error);
+	}
+}
+
+/*
+ * Animate transforms instead of position properties
+ * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
+ */
+function injectKeyframeFix() {
+	if (document.getElementById('crankshaftKeyframeFix')) return;
+	const keyframeStyle = createElement('style', { id: 'crankshaftKeyframeFix' });
+	keyframeStyle.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
+	document.body.appendChild(keyframeStyle);
+}
+
+/**
+ * Apply hotkeys, client CSS, and the splash screen. Runs at document start when the boot
+ * payload is available and again on the injectClientCSS IPC message; every step is
+ * idempotent per document and later calls reconcile preference changes (reload flow).
+ */
+async function applyClientVisuals(_userPrefs: UserPrefs, version: string, cssPath: string): Promise<void> {
+	applyClientHotkeys(_userPrefs);
+
+	const { matchmaker, hideAds, menuTimer, quickClassPicker, clientSplash, cssSwapper } = _userPrefs;
+
+	if (!clientCSSInjected) {
+		clientCSSInjected = true;
+		webFrame.insertCSS(await readFile(pathJoin($assets, 'settings.css'), { encoding: 'utf-8' }));
+		sendPerfMark('css-injected');
+	}
+	if (matchmaker && !matchmakerCSSInjected) {
+		matchmakerCSSInjected = true;
+		webFrame.insertCSS(await readFile(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' }));
+	}
+
+	if (clientSplash && !splashMountAttempted) {
+		void mountClientSplash(_userPrefs, version).catch(error => {
+			strippedConsole.error('Failed to mount the client splash screen', error);
+		});
+	}
+
+	const adsHidden = hideAds === 'block' || hideAds === 'hide';
+	if (adsHidden !== hideAdsCSSApplied) {
+		hideAdsCSSApplied = adsHidden;
+		toggleSettingCSS(styleSettingsCSS.hideAds, 'hideAds', adsHidden);
+	}
+	if (Boolean(menuTimer) !== menuTimerCSSApplied) {
+		menuTimerCSSApplied = Boolean(menuTimer);
+		toggleSettingCSS(styleSettingsCSS.menuTimer, 'menuTimer', menuTimerCSSApplied);
+	}
+	if (Boolean(quickClassPicker) !== quickClassPickerCSSApplied) {
+		quickClassPickerCSSApplied = Boolean(quickClassPicker);
+		toggleSettingCSS(styleSettingsCSS.quickClassPicker, 'quickClassPicker', quickClassPickerCSSApplied);
+	}
+
+	whenDOMReady(() => {
+		document.getElementById('hiddenClasses')?.classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
+		void applyCustomCSSSwap(`${cssSwapper}`, cssPath);
+		injectKeyframeFix();
+	});
+}
+
+// Kept for reloads and as the fallback when the boot payload is unavailable.
+ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: string, cssPath: string) => {
+	void applyClientVisuals(_userPrefs, version, cssPath)
+		.catch(error => { strippedConsole.error('Failed to apply client visuals', error); });
 });
+
+const wokBootPayload = parseWokBootPayload();
+if (wokBootPayload) {
+	void applyClientVisuals(wokBootPayload.userPrefs, wokBootPayload.version, wokBootPayload.cssPath)
+		.catch(error => { strippedConsole.error('Failed to apply early client visuals', error); });
+}
 
 // warning: timezone calculation may be slighty innacurate: no special logic for DST and approx. offsets for BRZ, BHN and AFR
 export const regionMappings = [

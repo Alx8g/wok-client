@@ -2,7 +2,7 @@
 import { join as pathJoin, resolve as pathResolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
-import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, dialog, ipcMain, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
@@ -82,6 +82,41 @@ if (perfMarksEnabled) {
 	});
 }
 logPerfMark('main-module-eval-start');
+
+// Diagnostic-only Chromium content tracing. Inert unless WOK_TRACE_MS is set in the environment.
+// WOK_TRACE_MS=<n> records a trace for n ms, starting WOK_TRACE_DELAY_MS (default 3000) after
+// did-finish-load, writes it to WOK_TRACE_OUT (or a temp file when unset), then quits the app.
+// WOK_TRACE_CATEGORIES optionally overrides the default comma-separated category list.
+const traceDurationMs = Number.parseInt(process.env.WOK_TRACE_MS ?? '', 10);
+const traceEnabled = Number.isFinite(traceDurationMs) && traceDurationMs > 0;
+const parsedTraceDelayMs = Number.parseInt(process.env.WOK_TRACE_DELAY_MS ?? '', 10);
+const traceDelayMs = Number.isFinite(parsedTraceDelayMs) && parsedTraceDelayMs >= 0 ? parsedTraceDelayMs : 3_000;
+const TRACE_DEFAULT_CATEGORIES = 'toplevel,v8,blink,cc,gpu,viz,latency,benchmark,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame';
+let traceScheduled = false;
+
+async function runDiagnosticTrace(): Promise<void> {
+	const categories = (process.env.WOK_TRACE_CATEGORIES ?? TRACE_DEFAULT_CATEGORIES)
+		.split(',')
+		.map(category => category.trim())
+		.filter(category => category.length > 0);
+	try {
+		const knownCategories = new Set(await contentTracing.getCategories());
+		for (const category of categories) {
+			if (!knownCategories.has(category)) console.log(`[wok-trace] category-not-listed ${category}`);
+		}
+		await contentTracing.startRecording({
+			recording_mode: 'record-until-full',
+			included_categories: categories
+		});
+		console.log(`[wok-trace] recording-started duration-ms=${traceDurationMs}`);
+		await new Promise(resolve => { setTimeout(resolve, traceDurationMs); });
+		const tracePath = await contentTracing.stopRecording(process.env.WOK_TRACE_OUT || undefined);
+		console.log(`[wok-trace] trace-written ${tracePath}`);
+	} catch (error) {
+		console.error('[wok-trace] failed', error);
+	}
+	app.quit();
+}
 
 const configPath = pathJoin(app.getPath('userData'), 'config');
 const legacyRoamingConfigPath = pathJoin(app.getPath('appData'), 'crankshaft', 'config');
@@ -1228,9 +1263,13 @@ app.on('ready', async () => {
 
 	mainWindow.webContents.on('did-finish-load', () => {
 		logPerfMark('did-finish-load');
-		if (Number.isFinite(perfExitAfterLoadMs) && perfExitAfterLoadMs > 0 && !perfExitScheduled) {
+		if (!traceEnabled && Number.isFinite(perfExitAfterLoadMs) && perfExitAfterLoadMs > 0 && !perfExitScheduled) {
 			perfExitScheduled = true;
 			setTimeout(() => { app.quit(); }, perfExitAfterLoadMs);
+		}
+		if (traceEnabled && !traceScheduled) {
+			traceScheduled = true;
+			setTimeout(() => { void runDiagnosticTrace(); }, traceDelayMs);
 		}
 		const currentAdaptiveValidationState = userPrefs.competitiveMode && completeGraphicsIdentityReady
 			? prepareCurrentAdaptiveValidationState()

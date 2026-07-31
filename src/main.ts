@@ -1547,12 +1547,7 @@ app.on('ready', async () => {
 			// not ideal, but preload does a lot of interaction w/ the page
 			// turning this on will also likely require transpiling the preload script to js
 			contextIsolation: false,
-			sandbox: false,
-			// Cache V8 code for Krunker's multi-MB bundle without waiting for Blink's
-			// seen-it-twice heat heuristic, shifting compile work off early relaunches.
-			// Diagnostic-only escape hatch: WOK_V8_CACHE=off omits the option (Chromium
-			// default heat heuristic) so fresh-profile A/B runs can measure the fix.
-			...(process.env.WOK_V8_CACHE === 'off' ? {} : { v8CacheOptions: 'bypassHeatCheck' as const })
+			sandbox: false
 		},
 		backgroundColor: '#000000'
 	};

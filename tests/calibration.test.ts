@@ -16,9 +16,11 @@ import {
 	prepareCalibrationState,
 	recordCalibrationResult,
 	requestCalibrationRerun,
+	startCalibrationRun,
 	verifyEffectiveRendererBackend,
 	type CalibrationMetrics,
-	type CalibrationSignature
+	type CalibrationSignature,
+	type CalibrationState
 } from '../src/calibration.ts';
 
 const d3d11on12Renderer = 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, D3D11on12 vs_5_0 ps_5_0, D3D11)';
@@ -63,6 +65,15 @@ function signatureWith(overrides: Partial<CalibrationSignature>): CalibrationSig
 	return { ...signature, ...overrides };
 }
 
+/** Starts the run with a plan-creation time whose counterbalancing coin flip stages the wanted candidate first. */
+function startRunWithOrder(state: CalibrationState, firstCandidateId: string): CalibrationState {
+	for (let now = 1_000; now < 1_200; now++) {
+		const started = startCalibrationRun(state, now);
+		if (started.plan[0]?.candidateId === firstCandidateId) return started;
+	}
+	throw new Error(`Could not stage ${firstCandidateId} first`);
+}
+
 test('driver invalidation ignores backend-dependent GL renderer strings', () => {
 	const d3d11 = collectStableGraphicsDriverFields({
 		driverVendor: 'Intel',
@@ -90,24 +101,31 @@ test('stages a short uncapped-first Windows candidate plan', () => {
 
 test('stages a capped recovery only after clean severe uncapped instability', () => {
 	const candidates = createWindowsCandidates();
-	let healthyState = prepareCalibrationState(undefined, signature, candidates, false);
+	let healthyState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	healthyState = recordCalibrationResult(healthyState, candidates[0], stableMetrics);
 	assert.equal(healthyState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 
-	let contaminatedState = prepareCalibrationState(undefined, signature, candidates, false);
+	let contaminatedState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	contaminatedState = recordCalibrationResult(contaminatedState, candidates[0], unstableMetrics({
 		lowConfidenceReasons: ['window-blurred']
 	}));
 	assert.equal(contaminatedState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 
-	let unstableState = prepareCalibrationState(undefined, signature, candidates, false);
+	let unstableState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	unstableState = recordCalibrationResult(unstableState, candidates[0], unstableMetrics());
 	assert.deepEqual(unstableState.candidates.map(candidate => candidate.id), [
 		'd3d11on12:uncapped',
 		'd3d11on12:capped',
 		'default:uncapped'
 	]);
-	assert.equal(getPendingCalibrationCandidate(unstableState)?.id, 'd3d11on12:capped');
+	// Recovery slots are appended as their own late stage; the screen stage finishes first (design §3.2).
+	assert.deepEqual(unstableState.plan.map(slot => `${slot.candidateId}:${slot.stage}`), [
+		'd3d11on12:uncapped:screen',
+		'default:uncapped:screen',
+		'd3d11on12:capped:recovery',
+		'd3d11on12:capped:recovery'
+	]);
+	assert.equal(getPendingCalibrationCandidate(unstableState)?.id, 'default:uncapped');
 });
 
 test('never schedules blocked or Windows-only profiles where unsupported', () => {
@@ -180,7 +198,7 @@ test('scores factual throughput and consistency without a frame-policy penalty',
 
 test('records every first-pass trial and recommends the strongest measured backend', () => {
 	const candidates = createWindowsCandidates();
-	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	assert.equal(getPendingCalibrationCandidate(state)?.id, candidates[0].id);
 
 	state = recordCalibrationResult(state, candidates[0], stableMetrics);
@@ -201,7 +219,7 @@ test('records every first-pass trial and recommends the strongest measured backe
 
 test('does not accept an explicit candidate whose renderer reports another backend', () => {
 	const candidates = createWindowsCandidates();
-	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], {
 		...stableMetrics,
 		averageFps: 400,
@@ -222,7 +240,7 @@ test('does not accept an explicit candidate whose renderer reports another backe
 
 test('does not trade a healthy uncapped profile for synchronized frame pacing', () => {
 	const candidates = createWindowsCandidates();
-	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
 	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
 	assert.ok(cappedCandidate);
@@ -249,7 +267,7 @@ test('does not trade a healthy uncapped profile for synchronized frame pacing', 
 
 test('uses a cap only as meaningful recovery evidence for severely unstable uncapped rendering', () => {
 	const candidates = createWindowsCandidates();
-	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
 	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
 	assert.ok(cappedCandidate);
@@ -271,6 +289,7 @@ test('treats app version as informational while relevant signature fields invali
 	const appOnlyChange = signatureWith({ appVersion: '2.1.0' });
 	assert.equal(calibrationSignaturesEqual(signature, appOnlyChange), true);
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ benchmarkVersion: CALIBRATION_VERSION + 1 })), false);
+	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ workloadVersion: signature.workloadVersion + 1 })), false);
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ electronVersion: '45.0.0' })), false);
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ hardwareFingerprint: '10de:2684' })), false);
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ driverFingerprint: 'driver-b' })), false);
@@ -290,7 +309,7 @@ test('treats app version as informational while relevant signature fields invali
 
 test('preserves a known-good selection for an explicit rerun but not a relevant signature change', () => {
 	const candidates = createWindowsCandidates();
-	let completed = prepareCalibrationState(undefined, signature, candidates, true);
+	let completed = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
 	assert.ok(completed.activeSelection);
@@ -309,7 +328,7 @@ test('preserves a known-good selection for an explicit rerun but not a relevant 
 
 test('preserves backward-compatible parsing while an old benchmark version reruns', () => {
 	const candidates = createWindowsCandidates();
-	let state = prepareCalibrationState(undefined, signature, candidates, false);
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], stableMetrics);
 	const legacyState = {
 		...state,
@@ -345,7 +364,7 @@ test('uses a meaningful-win threshold and keeps known-good active selection on m
 	assert.equal(isMeaningfulCalibrationScoreWin(106, 100), true);
 
 	const candidates = createWindowsCandidates();
-	let completed = prepareCalibrationState(undefined, signature, candidates, true);
+	let completed = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
 	assert.equal(completed.activeSelection?.candidate.id, candidates[0].id);
@@ -371,7 +390,7 @@ test('uses a meaningful-win threshold and keeps known-good active selection on m
 
 test('allows warn-and-continue evidence to win only when the measured gain is meaningful', () => {
 	const candidates = createWindowsCandidates();
-	let completed = prepareCalibrationState(undefined, signature, candidates, true);
+	let completed = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
 

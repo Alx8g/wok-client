@@ -255,6 +255,10 @@ export function buildCalibrationTrialPage(
 
 const lowConfidenceLabels: Record<CalibrationLowConfidenceReason, string> = {
 	'document-visibility-changed': 'document visibility changed',
+	'gpu-disjoint-excessive': 'excessive GPU timer disruption',
+	'gpu-queue-exceeds-frame-budget': 'queued GPU work exceeded the frame budget',
+	'insufficient-samples': 'too few frame samples',
+	'power-state-changed': 'AC/battery power changed',
 	'severe-event-loop-disturbance': 'severe event-loop disturbance',
 	'webgl-context-lost': 'WebGL context loss',
 	'window-blurred': 'window lost focus',

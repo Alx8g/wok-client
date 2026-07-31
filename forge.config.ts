@@ -70,8 +70,9 @@ export default {
         appCategoryType: "public.app-category.games",
         appCopyright: "Copyright © 2026 WOK contributors; based on Crankshaft contributors",
         ignore: [
-            /^\/(?!(src|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
-            /^\/src\/global\.d\.ts$/,
+            // The app ships the bundled runtime (scripts/bundle.mjs output), not src/.
+            /^\/(?!(bundle|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
+            /^\/bundle\/metafile\.json$/,
             /^\/assets\/(?!(?:blockFilters\.txt|full_logo\.svg|wok-mark\.svg|wok-mark-favicon\.svg|hideAds\.css|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash\.css)$)/
         ],
         prune: true,

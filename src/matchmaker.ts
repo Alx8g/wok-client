@@ -8,6 +8,7 @@ export const MATCHMAKER_MAP_ICON_INDICES = ['Burg', 'Littletown', 'Sandstorm', '
 // Hacky, but needed (?) until there's a better system to store state
 let openServerWindow: boolean;
 let matchmakerRequest: AbortController | undefined;
+let matchmakerBindListener: AbortController | undefined;
 
 // https://greasyfork.org/en/scripts/468482-kraxen-s-krunker-utils
 
@@ -16,6 +17,10 @@ let matchmakerRequest: AbortController | undefined;
  * @param accept whether or not the new game was accepted
  */
 function decideMatchmakerDecision(accept: boolean) {
+	// Detach the keydown handler on every dismissal path (keybind, click, or popup replacement)
+	// so a later keypress cannot act on a stale currentMatch.
+	matchmakerBindListener?.abort();
+	matchmakerBindListener = undefined;
 	window.playSelect();
 	if (accept && currentMatch !== 'none') {
 		window.location.href = `https://krunker.io/?game=${currentMatch}`;
@@ -79,14 +84,7 @@ function handleMatchmakerBind(event: KeyboardEvent) {
 	if (document.pointerLockElement) return; // Don't fire while in-game
 	const matchesAcceptKey = keyboardEventMatchesCustomSetting(confirmKey, event);
 	const matchesCancelKey = keyboardEventMatchesCustomSetting(cancelKey, event);
-	if (matchesAcceptKey || matchesCancelKey) {
-		document.removeEventListener('keydown', handleMatchmakerBind, true);
-		if (matchesAcceptKey) {
-			decideMatchmakerDecision(true);
-		} else if (matchesCancelKey) {
-			decideMatchmakerDecision(false);
-		}
-	}
+	if (matchesAcceptKey || matchesCancelKey) decideMatchmakerDecision(matchesAcceptKey);
 }
 
 /**
@@ -107,7 +105,9 @@ function createFetchedGamePopup(game: IMatchmakerGame) {
 		popupConfirmOption.style.display = "block";
 	}
 
-	document.addEventListener('keydown', handleMatchmakerBind, true);
+	matchmakerBindListener?.abort();
+	matchmakerBindListener = new AbortController();
+	document.addEventListener('keydown', handleMatchmakerBind, { capture: true, signal: matchmakerBindListener.signal });
 	document.getElementById("uiBase").appendChild(popupElement);
 }
 

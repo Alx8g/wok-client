@@ -1543,7 +1543,9 @@ app.on('ready', async () => {
 		center: true,
 		webPreferences: {
 			additionalArguments: bootPayloadArguments,
-			preload: pathJoin(import.meta.dirname, 'preload.ts'),
+			// The bundled runtime (scripts/bundle.mjs) emits this module as bundle/main.mjs with
+			// the compiled preload beside it; running from src/ loads the raw TypeScript preload.
+			preload: pathJoin(import.meta.dirname, import.meta.url.endsWith('.mjs') ? 'preload.mjs' : 'preload.ts'),
 			spellcheck: false,
 			backgroundThrottling: false,
 			nodeIntegration: false,

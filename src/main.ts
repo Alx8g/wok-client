@@ -131,7 +131,7 @@ const traceDelayMs = Number.isFinite(parsedTraceDelayMs) && parsedTraceDelayMs >
 const TRACE_DEFAULT_CATEGORIES = 'toplevel,v8,blink,cc,gpu,viz,latency,benchmark,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame';
 let traceScheduled = false;
 
-async function runDiagnosticTrace(): Promise<void> {
+async function recordDiagnosticTrace(): Promise<void> {
 	const categories = (process.env.WOK_TRACE_CATEGORIES ?? TRACE_DEFAULT_CATEGORIES)
 		.split(',')
 		.map(category => category.trim())
@@ -152,6 +152,10 @@ async function runDiagnosticTrace(): Promise<void> {
 	} catch (error) {
 		console.error('[wok-trace] failed', error);
 	}
+}
+
+async function runDiagnosticTrace(): Promise<void> {
+	await recordDiagnosticTrace();
 	app.quit();
 }
 
@@ -1312,7 +1316,18 @@ async function runCalibrationTuningHarness(): Promise<void> {
 			framePolicy: effectiveFramePolicy,
 			id: calibrationCandidateId(graphicsSelection.backend, effectiveFramePolicy)
 		};
+		// Lane acceptance (design §1.4) needs trace evidence of the workload itself: with
+		// WOK_TRACE_MS set, record a Chromium trace concurrently with the trial. There is no
+		// did-finish-load in tuning mode, so WOK_TRACE_DELAY_MS counts from trial start — set it
+		// past warmup so the recording covers only the measurement window.
+		const tracePromise = traceEnabled
+			? (async () => {
+				await new Promise(resolve => { setTimeout(resolve, traceDelayMs); });
+				await recordDiagnosticTrace();
+			})()
+			: Promise.resolve();
 		const metrics = await runCalibrationTrial(candidate, 1, 1, 1);
+		await tracePromise;
 		console.log(`[wok-tune] backend ${candidate.backend}`);
 		console.log(`[wok-tune] framePolicy ${candidate.framePolicy}`);
 		console.log(`[wok-tune] workloadVersion ${WORKLOAD_VERSION}`);

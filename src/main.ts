@@ -1499,10 +1499,13 @@ app.on('ready', async () => {
 	// calibration window only to resume a flow the user already consented to.
 	const calibrationBlocksStartup = calibrationResumeRequired(calibrationState);
 
-	// Overlap DNS/TCP/TLS setup for the game origin with the rest of startup.
+	// Overlap DNS/TCP/TLS setup for the game origin with the rest of startup. One socket:
+	// krunker.io negotiates h2 and every request multiplexes over a single session, so Chromium
+	// clamps larger asks to 1 once it knows the origin (net-log verified); asking for 1 keeps
+	// fresh profiles from dialing a second connection that h2 makes permanently idle.
 	if (!calibrationBlocksStartup && !process.argv.includes('--safe-graphics')) {
 		try {
-			session.defaultSession.preconnect({ numSockets: 2, url: 'https://krunker.io' });
+			session.defaultSession.preconnect({ numSockets: 1, url: 'https://krunker.io' });
 		} catch (error) {
 			console.error('Failed to preconnect to the game origin', error);
 		}

@@ -724,9 +724,16 @@ app.on('before-quit', event => {
 
 const graphicsFailureReasons = new Set(['abnormal-exit', 'crashed', 'oom', 'launch-failed', 'integrity-failure']);
 let activeCalibrationFailureReason: string | undefined;
+
+// GPU-process teardown during an app quit is shutdown noise, not evidence against the
+// backend. Without this guard a crash while quitting quarantines a healthy backend.
+let appQuitting = false;
+app.on('before-quit', () => { appQuitting = true; });
+
 app.on('child-process-gone', (_event, details) => {
 	if (
-		details.type !== 'GPU'
+		appQuitting
+		|| details.type !== 'GPU'
 		|| !graphicsFailureReasons.has(details.reason)
 		|| !['auto', 'calibration', 'retained'].includes(graphicsSelection.source)
 	) return;

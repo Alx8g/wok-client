@@ -64,6 +64,25 @@ import {
 	type AdaptiveValidationState
 } from './adaptive-validation.ts';
 
+// Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
+const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
+const perfProcessStartWallClockMs = perfMarksEnabled ? Date.now() - process.uptime() * 1_000 : 0;
+const perfExitAfterLoadMs = Number.parseInt(process.env.WOK_PERF_EXIT_MS ?? '', 10);
+let perfExitScheduled = false;
+
+function logPerfMark(name: string, wallClockMs = Date.now()) {
+	if (!perfMarksEnabled) return;
+	console.log(`[wok-mark] ${name} ${(wallClockMs - perfProcessStartWallClockMs).toFixed(1)}`);
+}
+
+if (perfMarksEnabled) {
+	ipcMain.on('wok_perf_mark', (_event, name: unknown, wallClockMs: unknown) => {
+		if (typeof name !== 'string' || name.length > 64 || typeof wallClockMs !== 'number' || !Number.isFinite(wallClockMs)) return;
+		logPerfMark(name, wallClockMs);
+	});
+}
+logPerfMark('main-module-eval-start');
+
 const configPath = pathJoin(app.getPath('userData'), 'config');
 const legacyRoamingConfigPath = pathJoin(app.getPath('appData'), 'crankshaft', 'config');
 const legacyDocumentsConfigPath = pathJoin(app.getPath('documents'), 'Crankshaft');
@@ -1036,6 +1055,7 @@ async function refreshCompleteGraphicsInfo(): Promise<unknown> {
 
 // Listen for app to get ready
 app.on('ready', async () => {
+	logPerfMark('app-ready');
 	app.setAppUserModelId(APP_ID);
 
 	const calibrationBlocksStartup = calibrationState === undefined
@@ -1096,6 +1116,7 @@ app.on('ready', async () => {
 	}
 
 	mainWindow = new BrowserWindow(mainWindowProps);
+	logPerfMark('window-created');
 	if (userPrefs.fullscreen === 'borderless') mainWindow.moveTop();
 
 	let discordRPCReady = false;
@@ -1162,6 +1183,7 @@ app.on('ready', async () => {
 	});
 
 	mainWindow.webContents.on('dom-ready', () => {
+		logPerfMark('dom-ready');
 		if (!graphicsProfileState.launchPending) return;
 		graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
 		persistGraphicsProfile();
@@ -1177,6 +1199,11 @@ app.on('ready', async () => {
 	});
 
 	mainWindow.webContents.on('did-finish-load', () => {
+		logPerfMark('did-finish-load');
+		if (Number.isFinite(perfExitAfterLoadMs) && perfExitAfterLoadMs > 0 && !perfExitScheduled) {
+			perfExitScheduled = true;
+			setTimeout(() => { app.quit(); }, perfExitAfterLoadMs);
+		}
 		const currentAdaptiveValidationState = userPrefs.competitiveMode && completeGraphicsIdentityReady
 			? prepareCurrentAdaptiveValidationState()
 			: undefined;
@@ -1280,6 +1307,7 @@ app.on('ready', async () => {
 		});
 	}
 
+	logPerfMark('loadurl-called');
 	await mainWindow.loadURL('https://krunker.io');
 });
 }

@@ -5,6 +5,13 @@ import { ipcRenderer, webFrame } from 'electron';
 import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
 import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
 
+// Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
+const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
+function sendPerfMark(name: string) {
+	if (perfMarksEnabled) ipcRenderer.send('wok_perf_mark', name, Date.now());
+}
+sendPerfMark('preload-start');
+
 // get rid of client unsupported message
 window.OffCliV = true;
 window.closeClient = () => ipcRenderer.send('closeClient');
@@ -414,6 +421,7 @@ ipcRenderer.on('injectClientCSS', async (_event, _userPrefs: UserPrefs, version:
 		matchmaker ? readFile(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' }) : Promise.resolve(undefined)
 	]);
 	webFrame.insertCSS(settingsCSS);
+	sendPerfMark('css-injected');
 	if (matchmakerCSS) webFrame.insertCSS(matchmakerCSS);
 
 	if (clientSplash) {

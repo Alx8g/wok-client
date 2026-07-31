@@ -1192,7 +1192,11 @@ app.on('ready', async () => {
 	let discordRPCReady = false;
 	let updateDiscordRPC: ((data: RPCargs) => void) | undefined;
 	let destroyDiscordRPC: (() => Promise<void>) | undefined;
+	let pendingDiscordActivity: RPCargs | undefined;
 
+	// The receiver stays registered from window creation (cheap); only the RPC client
+	// itself is deferred. While it is not ready yet, keep just the latest activity update
+	// and flush it once the client connects.
 	ipcMain.on('preload_updates_DiscordRPC', (event, value: unknown) => {
 		if (!isTrustedGameIpcSender(event) || !value || typeof value !== 'object' || Array.isArray(value)) return;
 		const data = value as Record<string, unknown>;
@@ -1202,40 +1206,71 @@ app.on('ready', async () => {
 			|| typeof data.state !== 'string'
 			|| data.state.length > 128
 		) return;
-		updateDiscordRPC?.({ details: data.details, state: data.state });
+		if (discordRPCReady) {
+			updateDiscordRPC?.({ details: data.details, state: data.state });
+			return;
+		}
+		if (userPrefs.discordRPC) pendingDiscordActivity = { details: data.details, state: data.state };
 	});
 
 	if (userPrefs.discordRPC) {
-		void import('./discord-rpc.ts').then(({ DiscordRpcClient }) => {
-			const rpc = new DiscordRpcClient('988529967220523068');
-			const startTimestamp = new Date();
-			destroyDiscordRPC = () => rpc.destroy();
+		const startDiscordRPC = () => {
+			void import('./discord-rpc.ts').then(({ DiscordRpcClient }) => {
+				const rpc = new DiscordRpcClient('988529967220523068');
+				const startTimestamp = new Date();
+				destroyDiscordRPC = () => rpc.destroy();
 
-			updateDiscordRPC = ({ details, state }: RPCargs) => {
-				const data: Parameters<typeof rpc.setActivity>[0] = {
-					details,
-					state,
-					timestamps: { start: Math.floor(startTimestamp.getTime() / 1000) },
-					assets: {
-						large_image: 'logo',
-						large_text: 'Playing Krunker'
+				updateDiscordRPC = ({ details, state }: RPCargs) => {
+					const data: Parameters<typeof rpc.setActivity>[0] = {
+						details,
+						state,
+						timestamps: { start: Math.floor(startTimestamp.getTime() / 1000) },
+						assets: {
+							large_image: 'logo',
+							large_text: 'Playing Krunker'
+						}
+					};
+					if (userPrefs.extendedRPC) {
+						data.buttons = [
+							{ label: 'WOK Client', url: WEBSITE_URL },
+							{ label: 'Crankshaft upstream', url: UPSTREAM_REPO_URL }
+						];
 					}
+					void rpc.setActivity(data).catch(console.error);
 				};
-				if (userPrefs.extendedRPC) {
-					data.buttons = [
-						{ label: 'WOK Client', url: WEBSITE_URL },
-						{ label: 'Crankshaft upstream', url: UPSTREAM_REPO_URL }
-					];
-				}
-				void rpc.setActivity(data).catch(console.error);
-			};
 
-			rpc.on('ready', () => {
-				discordRPCReady = true;
-				if (!mainWindow.webContents.isLoading()) mainWindow.webContents.send('initDiscordRPC');
-			});
-			void rpc.login().catch(console.error);
-		}).catch(error => { console.error('Failed to initialize Discord RPC', error); });
+				rpc.on('ready', () => {
+					discordRPCReady = true;
+					if (pendingDiscordActivity) {
+						const latestActivity = pendingDiscordActivity;
+						pendingDiscordActivity = undefined;
+						updateDiscordRPC?.(latestActivity);
+					}
+					if (!mainWindow.webContents.isLoading()) mainWindow.webContents.send('initDiscordRPC');
+				});
+				void rpc.login().catch(console.error);
+			}).catch(error => { console.error('Failed to initialize Discord RPC', error); });
+		};
+
+		// RPC has no need to be ready before the page can provide activity data, so keep
+		// its dynamic import, client construction, and IPC login off the navigation/load
+		// burst: start it a short fixed delay after the first did-finish-load.
+		const DISCORD_RPC_START_DELAY_MS = 2_000;
+		let discordRpcStartTimer: ReturnType<typeof setTimeout> | undefined;
+		const clearDiscordRpcStartTimer = () => {
+			if (discordRpcStartTimer === undefined) return;
+			clearTimeout(discordRpcStartTimer);
+			discordRpcStartTimer = undefined;
+		};
+		app.on('before-quit', clearDiscordRpcStartTimer);
+		mainWindow.on('closed', clearDiscordRpcStartTimer);
+		mainWindow.webContents.once('did-finish-load', () => {
+			discordRpcStartTimer = setTimeout(() => {
+				discordRpcStartTimer = undefined;
+				if (mainWindow.isDestroyed()) return;
+				startDiscordRPC();
+			}, DISCORD_RPC_START_DELAY_MS);
+		});
 	}
 
 	app.on('before-quit', () => {

@@ -1,4 +1,28 @@
 import type { CalibrationCandidate, CalibrationLowConfidenceReason, CalibrationResult, EffectiveBackendVerification } from './calibration.ts';
+import { CALIBRATION_BENCHMARK_MS, CALIBRATION_MIN_SAMPLES } from './calibration.ts';
+import {
+	createWorkload,
+	createWorkloadSpec,
+	createWorkloadSpin,
+	mulberry32,
+	WORKLOAD_CONSTANTS,
+	WORKLOAD_CONTEXT_ATTRIBUTES
+} from './calibration-workload.ts';
+import {
+	BENCHMARK_EVENT_LOOP_SAMPLE_MS,
+	BENCHMARK_FENCE_QUEUE_DEPTH,
+	BENCHMARK_FENCE_RING_SIZE,
+	BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO,
+	BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO,
+	BENCHMARK_GPU_QUERY_POOL_SIZE,
+	BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
+	BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+	BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
+	BENCHMARK_GPU_SAMPLE_MIN_MS,
+	BENCHMARK_LONG_FRAME_MS,
+	BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS,
+	runBenchmarkTrial
+} from './calibration-benchmark.ts';
 
 function escapeHtml(value: string): string {
 	return value
@@ -9,13 +33,47 @@ function escapeHtml(value: string): string {
 		.replaceAll("'", '&#39;');
 }
 
+function embedJson(value: unknown): string {
+	return JSON.stringify(value).replaceAll('<', '\\u003c');
+}
+
+/**
+ * The measurement logic lives in `calibration-workload.ts` / `calibration-benchmark.ts` (unit
+ * tested with injected fakes); the page embeds those exact functions by serialization, together
+ * with the constants they reference, so page and tests can never drift apart.
+ */
+function embeddedModulesScript(): string {
+	const constants: Record<string, unknown> = {
+		BENCHMARK_EVENT_LOOP_SAMPLE_MS,
+		BENCHMARK_FENCE_QUEUE_DEPTH,
+		BENCHMARK_FENCE_RING_SIZE,
+		BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO,
+		BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO,
+		BENCHMARK_GPU_QUERY_POOL_SIZE,
+		BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
+		BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+		BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
+		BENCHMARK_GPU_SAMPLE_MIN_MS,
+		BENCHMARK_LONG_FRAME_MS,
+		BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS
+	};
+	const constantLines = Object.entries(constants)
+		.map(([name, value]) => `const ${name} = ${JSON.stringify(value)};`)
+		.join('\n\t\t\t');
+	return `${constantLines}
+			const mulberry32 = ${mulberry32.toString()};
+			const createWorkload = ${createWorkload.toString()};
+			const createWorkloadSpin = ${createWorkloadSpin.toString()};
+			const runBenchmarkTrial = ${runBenchmarkTrial.toString()};`;
+}
+
 function sharedStyles(): string {
 	return `
 			:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
 			* { box-sizing: border-box; }
 			html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #0A0A0A; color: #FFFFFF; }
 			body { display: grid; place-items: center; }
-			.shell { position: relative; width: min(880px, calc(100vw - 48px)); border: 1px solid #343434; background: #111111; }
+			.shell { position: relative; z-index: 30; width: min(880px, calc(100vw - 48px)); border: 1px solid #343434; background: rgba(17, 17, 17, .92); }
 			.accent { height: 4px; background: #FBC02D; }
 			.content { position: relative; padding: 32px; }
 			.brand { display: flex; align-items: center; gap: 14px; margin-bottom: 28px; }
@@ -27,6 +85,7 @@ function sharedStyles(): string {
 			p { color: #B8B8B8; line-height: 1.6; }
 			.meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 18px; }
 			.pill { padding: 7px 10px; border: 1px solid #383838; background: #181818; color: #D7D7D7; font: 600 12px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; }
+			.pill.retry { border-color: #725F1A; color: #E6D083; }
 			.progress-track { height: 10px; border: 1px solid #3A3A3A; background: #080808; overflow: hidden; }
 			.progress-fill { width: 0; height: 100%; background: #FBC02D; transition: width 80ms linear; }
 			.status { display: flex; justify-content: space-between; gap: 20px; margin-top: 10px; color: #8F8F8F; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
@@ -47,7 +106,27 @@ function sharedStyles(): string {
 			.result-note { grid-column: 1 / -1; color: #999999; font-size: 11px; line-height: 1.45; }
 			.result-note.low-confidence { color: #E6D083; }
 			.result-note.failure { color: #E08A8A; }
-			canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; opacity: .13; image-rendering: auto; pointer-events: none; }
+			.trial-list { grid-column: 1 / -1; margin: 2px 0 0; padding: 0 0 0 16px; color: #8F8F8F; font: 500 11px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace; }
+			canvas { position: fixed; inset: 0; z-index: 0; width: 100vw; height: 100vh; image-rendering: auto; pointer-events: none; }
+		`;
+}
+
+/**
+ * DOM/UI compositing overlay (design §1.2): the game composites a large HTML UI over its canvas,
+ * so the workload does too. Panel and HUD animate through compositor-driven CSS keyframes only;
+ * the feed text updates at most 5 Hz through the throttled updater. Zero per-frame JS DOM writes.
+ */
+function overlayStyles(): string {
+	return `
+			.overlay-gradient { position: fixed; inset: -12vh -12vw; z-index: 10; pointer-events: none; opacity: .06; background: linear-gradient(115deg, #FBC02D 0%, #202840 45%, #7B3131 100%); animation: wok-pan 7s linear infinite alternate; }
+			@keyframes wok-pan { from { transform: translate3d(-3%, -2%, 0) scale(1.05); } to { transform: translate3d(3%, 2%, 0) scale(1.12); } }
+			.hud { position: fixed; left: 24px; right: 24px; bottom: 20px; z-index: 20; display: flex; gap: 6px; pointer-events: none; }
+			.hud span { flex: 1; height: 14px; border: 1px solid #3A3A3A; background: #181818; animation: wok-pulse 1.8s ease-in-out infinite; }
+			.hud span:nth-child(3n) { animation-delay: .45s; }
+			.hud span:nth-child(3n + 1) { animation-delay: .9s; }
+			@keyframes wok-pulse { 0%, 100% { opacity: .25; } 50% { opacity: .8; } }
+			.feed { position: fixed; top: 24px; right: 24px; z-index: 20; width: 230px; display: grid; gap: 4px; pointer-events: none; }
+			.feed div { padding: 5px 8px; border: 1px solid #2C2C2C; background: rgba(20, 20, 20, .8); color: #9A9A9A; font: 600 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; }
 		`;
 }
 
@@ -55,13 +134,40 @@ function brandMarkup(markSvg: string): string {
 	return `<div class="brand">${markSvg}<div class="brand-copy"><div class="brand-name">WOK CLIENT</div><div class="brand-subtitle">Competitive calibration</div></div></div>`;
 }
 
+function overlayMarkup(): string {
+	const hudCells = Array.from({ length: 24 }, () => '<span></span>').join('');
+	const feedRows = Array.from({ length: 6 }, (_unused, index) => `<div data-feed-row="${index}">standby</div>`).join('');
+	return `<div class="overlay-gradient"></div><div class="hud">${hudCells}</div><div class="feed" id="feed">${feedRows}</div>`;
+}
+
+export interface CalibrationTrialPageExtras {
+	/** 1-based attempt number; 2 renders the retry messaging (design §2.4). */
+	attempt?: number;
+	onBattery?: boolean;
+	refreshRateHz?: number;
+}
+
 export function buildCalibrationTrialPage(
 	candidate: CalibrationCandidate,
 	step: number,
 	total: number,
-	markSvg: string
+	markSvg: string,
+	extras: CalibrationTrialPageExtras = {}
 ): string {
-	const candidateJson = JSON.stringify(candidate).replaceAll('<', '\\u003c');
+	const attempt = extras.attempt ?? 1;
+	const isRetry = attempt > 1;
+	const trialDefaults = {
+		benchmarkMs: CALIBRATION_BENCHMARK_MS,
+		minSamples: CALIBRATION_MIN_SAMPLES,
+		warmupMaxMs: WORKLOAD_CONSTANTS.warmupMaxMs,
+		warmupMinMs: WORKLOAD_CONSTANTS.warmupMinMs,
+		warmupSettleFrames: WORKLOAD_CONSTANTS.warmupSettleFrames,
+		warmupSettleRatio: WORKLOAD_CONSTANTS.warmupSettleRatio
+	};
+	const pageEnvironment = {
+		onBattery: extras.onBattery ?? null,
+		refreshRateHz: extras.refreshRateHz ?? null
+	};
 
 	return `<!doctype html>
 	<html lang="en">
@@ -69,184 +175,166 @@ export function buildCalibrationTrialPage(
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1">
 		<title>WOK Client Calibration</title>
-		<style>${sharedStyles()}</style>
+		<style>${sharedStyles()}${overlayStyles()}</style>
 	</head>
 	<body>
-		<canvas id="benchmark" width="480" height="270"></canvas>
+		<canvas id="benchmark"></canvas>
+		${overlayMarkup()}
 		<main class="shell">
 			<div class="accent"></div>
 			<section class="content">
 				${brandMarkup(markSvg)}
 				<h1>Comparing renderer profiles</h1>
-				<p>WOK Client is measuring frame throughput, 1% lows, frame pacing, and event-loop disturbance. Avoid moving, hiding, or covering this window. If that happens, the trial continues but is reported as lower confidence.</p>
+				<p>WOK Client is rendering a representative scene to measure frame delivery, 1% lows, frame pacing, GPU completion, and event-loop disturbance. Avoid moving, hiding, or covering this window: an interfered trial is retried once, then reported as lower confidence.</p>
 				<div class="meta">
 					<span class="pill">TEST ${step} / ${total}</span>
+					${isRetry ? '<span class="pill retry">RETRY</span>' : ''}
 					<span class="pill">${escapeHtml(candidate.backend.toUpperCase())}</span>
 					<span class="pill">${escapeHtml(candidate.framePolicy.toUpperCase())}</span>
 				</div>
 				<div class="progress-track"><div class="progress-fill" id="progress"></div></div>
 				<div class="status"><span id="phase">Preparing renderer</span><span id="live">Collecting samples</span></div>
-				<div class="warning" id="warning">This trial has lower-confidence evidence. Measurement will continue and the reason will be shown with the result.</div>
+				<div class="warning${isRetry ? ' visible' : ''}" id="warning">${isRetry
+					? 'Interference was detected, so this trial is running again. If it is interfered with once more, the better attempt is kept as lower-confidence evidence.'
+					: 'This trial has lower-confidence evidence. Measurement will continue and the reason will be shown with the result.'}</div>
 				<div class="privacy">This calibration is local. The private test build does not transmit benchmark results.</div>
 			</section>
 		</main>
 		<script>
 			'use strict';
-			const candidate = ${candidateJson};
+			const candidate = ${embedJson(candidate)};
+			const TRIAL_DEFAULTS = ${embedJson(trialDefaults)};
+			const WORKLOAD_SPEC = ${embedJson(createWorkloadSpec())};
+			const CONTEXT_ATTRIBUTES = ${embedJson(WORKLOAD_CONTEXT_ATTRIBUTES)};
+			const PAGE_ENVIRONMENT = ${embedJson(pageEnvironment)};
 			const UI_UPDATE_INTERVAL_MS = 200;
-			const SEVERE_EVENT_LOOP_DELAY_MS = 100;
-			const percentile = (sorted, ratio) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))] : 0;
-			const average = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
-			const round = value => Math.round(value * 100) / 100;
+			${embeddedModulesScript()}
 
-			window.wokRunBenchmark = async ({ warmupMs, benchmarkMs }) => {
+			window.wokRunBenchmark = async config => {
+				const settings = Object.assign({}, TRIAL_DEFAULTS, config || {});
 				const canvas = document.getElementById('benchmark');
 				const progress = document.getElementById('progress');
 				const phase = document.getElementById('phase');
 				const live = document.getElementById('live');
-				const warning = document.getElementById('warning');
-				const lowConfidenceReasons = new Set();
-				const markLowConfidence = reason => {
-					lowConfidenceReasons.add(reason);
-					warning.classList.add('visible');
-				};
-				const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, desynchronized: true, failIfMajorPerformanceCaveat: false, powerPreference: 'high-performance', preserveDrawingBuffer: false })
-					|| canvas.getContext('webgl', { alpha: false, antialias: false, depth: false, desynchronized: true, failIfMajorPerformanceCaveat: false, powerPreference: 'high-performance', preserveDrawingBuffer: false });
-				if (!gl) return { success: false, sampleCount: 0, averageFps: 0, onePercentLowFps: 0, p95FrameTimeMs: 0, worstFrameTimeMs: 0, eventLoopP95Ms: 0, eventLoopWorstMs: 0, longFrameRatio: 1, lowConfidenceReasons: [], webglRenderer: '' };
+				const feedRows = Array.from(document.querySelectorAll('#feed div'));
+				const round = value => Math.round(value * 100) / 100;
 
-				let contextLost = false;
-				const onBlur = () => markLowConfidence('window-blurred');
-				const onVisibilityChange = () => markLowConfidence('document-visibility-changed');
-				const onResize = () => markLowConfidence('window-resized');
-				const onContextLost = event => {
-					event.preventDefault();
-					contextLost = true;
-					markLowConfidence('webgl-context-lost');
-				};
-				const onContextRestored = () => { contextLost = false; };
-				window.addEventListener('blur', onBlur);
-				document.addEventListener('visibilitychange', onVisibilityChange);
-				window.addEventListener('resize', onResize);
-				canvas.addEventListener('webglcontextlost', onContextLost);
-				canvas.addEventListener('webglcontextrestored', onContextRestored);
+				// Full-window canvas at the real window dimensions x devicePixelRatio (design §1.2).
+				const devicePixelRatioValue = window.devicePixelRatio || 1;
+				canvas.width = Math.max(1, Math.round(window.innerWidth * devicePixelRatioValue));
+				canvas.height = Math.max(1, Math.round(window.innerHeight * devicePixelRatioValue));
 
-				const compile = (type, source) => {
-					const shader = gl.createShader(type);
-					gl.shaderSource(shader, source);
-					gl.compileShader(shader);
-					if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(shader) || 'Shader compilation failed');
-					return shader;
-				};
-				const vertexShader = compile(gl.VERTEX_SHADER, 'attribute vec2 position; varying vec2 uv; void main(){ uv=position*0.5+0.5; gl_Position=vec4(position,0.0,1.0); }');
-				const fragmentShader = compile(gl.FRAGMENT_SHADER, 'precision mediump float; varying vec2 uv; uniform float tick; void main(){ vec2 p=uv*2.0-1.0; float wave=sin((p.x+tick)*13.0)*cos((p.y-tick)*11.0); float ring=sin(length(p)*24.0-tick*7.0); float value=0.5+0.25*wave+0.25*ring; gl_FragColor=vec4(value*0.98,value*0.74,value*0.12,1.0); }');
-				const program = gl.createProgram();
-				gl.attachShader(program, vertexShader);
-				gl.attachShader(program, fragmentShader);
-				gl.linkProgram(program);
-				if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || 'Program linking failed');
-				gl.useProgram(program);
-				const buffer = gl.createBuffer();
-				gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-				gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
-				const position = gl.getAttribLocation(program, 'position');
-				gl.enableVertexAttribArray(position);
-				gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
-				const tick = gl.getUniformLocation(program, 'tick');
-				gl.viewport(0, 0, canvas.width, canvas.height);
+				const gl = canvas.getContext('webgl2', CONTEXT_ATTRIBUTES);
+				const failedTrial = () => ({
+					averageFps: 0, contaminationFlags: [], cpuSubmitP50Ms: 0, cpuSubmitP95Ms: 0,
+					environment: { devicePixelRatio: devicePixelRatioValue, drawingBufferHeight: 0, drawingBufferWidth: 0 },
+					eventLoopP95Ms: 0, eventLoopWorstMs: 0, gpuDisjointDiscardCount: 0, gpuImplausibleCount: 0,
+					gpuSampleCount: 0, gpuTimingStatus: 'unsupported', longFrameRatio: 1, lowConfidenceReasons: [],
+					onePercentLowFps: 0, p95FrameTimeMs: 0, rejected: false, rejectionReasons: [], sampleCount: 0,
+					stallRatio: 0, stalledTicks: 0, success: false, totalTicks: 0, webglRenderer: '', worstFrameTimeMs: 0
+				});
+				if (!gl) return failedTrial();
 
 				let renderer = '';
 				const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
 				if (debugInfo) renderer = String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '');
 
-				const frameTimes = [];
-				const eventLoopDelays = [];
-				const start = performance.now();
-				const warmupEnd = start + warmupMs;
-				const end = warmupEnd + benchmarkMs;
-				let lastFrame = 0;
-				let frameTimeSum = 0;
-				let longFrameCount = 0;
-				let eventLoopWorstMs = 0;
-				let lastUiUpdate = Number.NEGATIVE_INFINITY;
-				let expectedTimer = performance.now() + 16;
-				const timer = setInterval(() => {
-					const now = performance.now();
-					if (now >= warmupEnd) {
-						const delay = Math.max(0, now - expectedTimer);
-						eventLoopDelays.push(delay);
-						eventLoopWorstMs = Math.max(eventLoopWorstMs, delay);
-						if (delay >= SEVERE_EVENT_LOOP_DELAY_MS) markLowConfidence('severe-event-loop-disturbance');
+				let onBattery = PAGE_ENVIRONMENT.onBattery === null ? undefined : PAGE_ENVIRONMENT.onBattery;
+				try {
+					if (navigator.getBattery) {
+						const battery = await navigator.getBattery();
+						onBattery = !battery.charging;
 					}
-					expectedTimer = now + 16;
-				}, 16);
+				} catch (_error) { /* battery status is diagnostic only */ }
 
-				const updateUi = (now, force = false) => {
+				let workload;
+				let spin;
+				try {
+					workload = createWorkload(gl, WORKLOAD_SPEC, canvas.width, canvas.height);
+					spin = createWorkloadSpin(WORKLOAD_SPEC.seed, WORKLOAD_SPEC.constants.jsSpinIterations);
+				} catch (_error) {
+					return failedTrial();
+				}
+				let spinSink = 0;
+
+				let lastUiUpdate = Number.NEGATIVE_INFINITY;
+				let feedTick = 0;
+				const updateUi = (update, force) => {
+					const now = performance.now();
 					if (!force && now - lastUiUpdate < UI_UPDATE_INTERVAL_MS) return;
 					lastUiUpdate = now;
-					const elapsed = Math.min(end - start, Math.max(0, now - start));
-					progress.style.width = Math.round(elapsed / (end - start) * 100) + '%';
-					phase.textContent = now < warmupEnd ? 'Warming up renderer' : 'Measuring frame delivery';
-					live.textContent = now < warmupEnd ? 'Preparing samples' : 'Collecting samples';
+					if (update.phase === 'warmup') {
+						progress.style.width = Math.round(update.ratio * 12) + '%';
+						phase.textContent = 'Warming up renderer (adaptive)';
+						live.textContent = 'Waiting for steady state';
+					} else {
+						progress.style.width = Math.round(12 + update.ratio * 88) + '%';
+						phase.textContent = 'Measuring frame delivery';
+						live.textContent = 'Collecting samples';
+					}
+					// Feed text updates at most 5 Hz through this throttled updater (design §1.2).
+					feedTick++;
+					const row = feedRows[feedTick % feedRows.length];
+					if (row) row.textContent = 'evt ' + feedTick + ' \\u00b7 ' + update.phase;
 				};
 
-				try {
-					await new Promise((resolve, reject) => {
-						const frame = now => {
-							try {
-								if (now >= warmupEnd && lastFrame > 0) {
-									const frameTime = now - lastFrame;
-									if (frameTime > 0 && frameTime < 1_000) {
-										frameTimes.push(frameTime);
-										frameTimeSum += frameTime;
-										if (frameTime > 33.34) longFrameCount++;
-									}
-								}
-								lastFrame = now;
-								updateUi(now);
-								if (!contextLost) {
-									for (let draw = 0; draw < 12; draw++) {
-										gl.uniform1f(tick, now * 0.001 + draw * 0.071);
-										gl.drawArrays(gl.TRIANGLES, 0, 3);
-									}
-									gl.flush();
-								}
-								if (now < end) requestAnimationFrame(frame);
-								else resolve();
-							} catch (error) {
-								reject(error);
-							}
+				let contextLost = false;
+				const trial = await runBenchmarkTrial({
+					environment: {
+						devicePixelRatio: devicePixelRatioValue,
+						drawingBufferHeight: gl.drawingBufferHeight,
+						drawingBufferWidth: gl.drawingBufferWidth,
+						...(typeof onBattery === 'boolean' ? { onBattery } : {}),
+						...(PAGE_ENVIRONMENT.refreshRateHz === null ? {} : { refreshRateHz: PAGE_ENVIRONMENT.refreshRateHz })
+					},
+					getTimerQueryExt: () => gl.getExtension('EXT_disjoint_timer_query_webgl2'),
+					gl,
+					now: () => performance.now(),
+					onProgress: update => updateUi(update, false),
+					renderFrame: frameIndex => { if (!contextLost) workload.renderFrame(frameIndex); },
+					requestFrame: callback => requestAnimationFrame(callback),
+					spin: () => { spinSink += spin(); return spinSink; },
+					startSampler: (callback, intervalMs) => {
+						const timer = setInterval(callback, intervalMs);
+						return () => clearInterval(timer);
+					},
+					subscribeContamination: notify => {
+						const onBlur = () => notify('window-blurred');
+						const onVisibilityChange = () => { if (document.visibilityState !== 'visible') notify('document-visibility-changed'); };
+						const onResize = () => notify('window-resized');
+						const onContextLost = event => {
+							event.preventDefault();
+							contextLost = true;
+							notify('webgl-context-lost');
 						};
-						requestAnimationFrame(frame);
-					});
-				} finally {
-					clearInterval(timer);
-					window.removeEventListener('blur', onBlur);
-					document.removeEventListener('visibilitychange', onVisibilityChange);
-					window.removeEventListener('resize', onResize);
-					canvas.removeEventListener('webglcontextlost', onContextLost);
-					canvas.removeEventListener('webglcontextrestored', onContextRestored);
-				}
-				updateUi(end, true);
+						window.addEventListener('blur', onBlur);
+						document.addEventListener('visibilitychange', onVisibilityChange);
+						window.addEventListener('resize', onResize);
+						canvas.addEventListener('webglcontextlost', onContextLost);
+						return () => {
+							window.removeEventListener('blur', onBlur);
+							document.removeEventListener('visibilitychange', onVisibilityChange);
+							window.removeEventListener('resize', onResize);
+							canvas.removeEventListener('webglcontextlost', onContextLost);
+						};
+					},
+					webglRenderer: renderer
+				}, {
+					benchmarkMs: settings.benchmarkMs,
+					minSamples: settings.minSamples,
+					warmupMaxMs: settings.warmupMaxMs,
+					warmupMinMs: settings.warmupMinMs,
+					warmupSettleFrames: settings.warmupSettleFrames,
+					warmupSettleRatio: settings.warmupSettleRatio
+				});
+				updateUi({ phase: 'measure', ratio: 1 }, true);
+				phase.textContent = 'Trial complete';
+				live.textContent = 'Reporting (' + round(trial.stallRatio * 100) + '% stalled ticks)';
 
-				const sortedFrames = [...frameTimes].sort((left, right) => left - right);
-				const sortedDelays = [...eventLoopDelays].sort((left, right) => left - right);
-				const slowFrameCount = Math.max(1, Math.ceil(sortedFrames.length * 0.01));
-				const slowFrames = sortedFrames.slice(-slowFrameCount);
-				const meanFrameTime = frameTimes.length ? frameTimeSum / frameTimes.length : 0;
-				const meanSlowFrameTime = average(slowFrames);
-				return {
-					averageFps: round(meanFrameTime > 0 ? 1000 / meanFrameTime : 0),
-					eventLoopP95Ms: round(percentile(sortedDelays, 0.95)),
-					eventLoopWorstMs: round(eventLoopWorstMs),
-					longFrameRatio: round(frameTimes.length ? longFrameCount / frameTimes.length : 1),
-					lowConfidenceReasons: [...lowConfidenceReasons],
-					onePercentLowFps: round(meanSlowFrameTime > 0 ? 1000 / meanSlowFrameTime : 0),
-					p95FrameTimeMs: round(percentile(sortedFrames, 0.95)),
-					sampleCount: frameTimes.length,
-					success: frameTimes.length > 0,
-					webglRenderer: renderer,
-					worstFrameTimeMs: round(sortedFrames.at(-1) || 0)
-				};
+				// Round-1 compatible warn-and-continue field; the main process decides rejection/retry.
+				const lowConfidenceReasons = trial.rejectionReasons.slice();
+				if (trial.contaminationFlags.indexOf(BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG) >= 0) lowConfidenceReasons.push(BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG);
+				return Object.assign({}, trial, { lowConfidenceReasons });
 			};
 		</script>
 	</body>
@@ -276,23 +364,69 @@ function backendVerificationText(verification: EffectiveBackendVerification): st
 	return `The effective ${verification.candidateBackend} backend could not be verified from the renderer string.`;
 }
 
-function resultMarkup(result: CalibrationResult, recommendedId?: string): string {
-	const { candidate, metrics } = result;
+function gpuTimingText(result: CalibrationResult): string {
+	const status = result.metrics.gpuTimingStatus;
+	if (status === 'measured' && typeof result.metrics.gpuTimeP95Ms === 'number') {
+		return `GPU completion measured directly (p95 ${result.metrics.gpuTimeP95Ms.toFixed(2)} ms).`;
+	}
+	if (status === 'unreliable') return 'GPU timer queries were unreliable on this backend; completion inferred from bounded-queue frame delivery.';
+	return 'GPU completion inferred from bounded-queue frame delivery.';
+}
+
+interface CandidateResultGroup {
+	candidate: CalibrationCandidate;
+	representative: CalibrationResult;
+	trials: CalibrationResult[];
+}
+
+function groupResultsByCandidate(results: CalibrationResult[]): CandidateResultGroup[] {
+	const groups: CandidateResultGroup[] = [];
+	for (const result of results) {
+		const existing = groups.find(group => group.candidate.id === result.candidate.id);
+		if (existing) existing.trials.push(result);
+		else groups.push({ candidate: result.candidate, representative: result, trials: [result] });
+	}
+	for (const group of groups) {
+		const scores = [...group.trials].sort((left, right) => left.score - right.score);
+		const median = scores[Math.floor((scores.length - 1) / 2)].score;
+		group.representative = group.trials.reduce((closest, trial) => (
+			Math.abs(trial.score - median) < Math.abs(closest.score - median) ? trial : closest
+		), group.trials[0]);
+	}
+	return groups;
+}
+
+function trialListMarkup(group: CandidateResultGroup): string {
+	if (group.trials.length < 2) return '';
+	const rows = group.trials.map((trial, index) => {
+		const label = trial.metrics.success
+			? `${trial.metrics.averageFps.toFixed(1)} FPS avg · ${trial.metrics.onePercentLowFps.toFixed(1)} 1% low · score ${trial.score.toFixed(2)}`
+			: 'failed';
+		const flags = (trial.metrics.lowConfidenceReasons ?? []).length > 0 ? ' · lower confidence' : '';
+		return `<li>Trial ${index + 1}: ${escapeHtml(label)}${flags}</li>`;
+	}).join('');
+	return `<ul class="trial-list">${rows}</ul>`;
+}
+
+function resultMarkup(group: CandidateResultGroup, recommendedId?: string): string {
+	const { candidate, representative } = group;
+	const metrics = representative.metrics;
 	const recommended = candidate.id === recommendedId;
 	const lowConfidenceReasons = metrics.lowConfidenceReasons ?? [];
 	const lowConfidenceMarkup = lowConfidenceReasons.length > 0
 		? `<div class="result-note low-confidence">Lower confidence: ${escapeHtml(lowConfidenceReasons.map(reason => lowConfidenceLabels[reason]).join(', '))}. The trial was retained as warn-and-continue evidence.</div>`
 		: '';
-	const failureMarkup = result.failureReason
-		? `<div class="result-note failure">${escapeHtml(result.failureReason)}</div>`
+	const failureMarkup = representative.failureReason
+		? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>`
 		: '';
 	return `<div class="result${recommended ? ' recommended' : ''}">
-			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(candidate.framePolicy)}${recommended ? '<span class="label">Recommended</span>' : ''}</div>
+			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(candidate.framePolicy)}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
 			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS` : 'Failed'}</div>
 			<div class="metric"><span class="label">1% low</span>${metrics.success ? `${metrics.onePercentLowFps.toFixed(1)} FPS` : 'N/A'}</div>
 			<div class="metric"><span class="label">p95 frame</span>${metrics.success ? `${metrics.p95FrameTimeMs.toFixed(2)} ms` : 'N/A'}</div>
-			<div class="metric"><span class="label">Relative score</span>${metrics.success ? result.score.toFixed(2) : 'N/A'}</div>
-			<div class="result-note">${escapeHtml(backendVerificationText(result.backendVerification))}</div>
+			<div class="metric"><span class="label">Relative score</span>${metrics.success ? representative.score.toFixed(2) : 'N/A'}</div>
+			<div class="result-note">${escapeHtml(backendVerificationText(representative.backendVerification))} ${escapeHtml(gpuTimingText(representative))}</div>
+			${trialListMarkup(group)}
 			${lowConfidenceMarkup}
 			${failureMarkup}
 		</div>`;
@@ -305,13 +439,12 @@ export function buildCalibrationResultPage(
 	wasCompetitiveModeEnabled: boolean
 ): string {
 	const hasRecommendation = Boolean(recommended);
-	const displayedResults = recommended && !results.some(result => result.candidate.id === recommended.candidate.id)
-		? [recommended, ...results]
-		: results;
-	const resultsHtml = displayedResults.map(result => resultMarkup(result, recommended?.candidate.id)).join('');
+	const groups = groupResultsByCandidate(results);
+	const retainedKnownGood = Boolean(recommended && !results.some(result => result.candidate.id === recommended.candidate.id));
+	if (recommended && retainedKnownGood) groups.unshift({ candidate: recommended.candidate, representative: recommended, trials: [recommended] });
+	const resultsHtml = groups.map(group => resultMarkup(group, recommended?.candidate.id)).join('');
 	const applyLabel = wasCompetitiveModeEnabled ? 'Apply new profile' : 'Enable Competitive mode';
 	const keepLabel = wasCompetitiveModeEnabled ? 'Keep previous profile' : 'Keep current settings';
-	const retainedKnownGood = Boolean(recommended && !results.some(result => result.candidate.id === recommended.candidate.id));
 	const summary = recommended
 		? retainedKnownGood
 			? `The new evidence did not meaningfully beat the existing known-good <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it remains recommended.`
@@ -338,6 +471,7 @@ export function buildCalibrationResultPage(
 					<button class="primary" id="apply" ${hasRecommendation ? '' : 'disabled'}>${applyLabel}</button>
 					<button id="keep">${keepLabel}</button>
 				</div>
+				<div class="result-note">Applying uses the new profile provisionally: your next three clean play sessions confirm it, and WOK automatically reverts to the previous profile if it underperforms in real play.</div>
 				<div class="privacy">Game settings changed by Competitive mode are backed up before modification and restored when the mode is disabled.</div>
 			</section>
 		</main>

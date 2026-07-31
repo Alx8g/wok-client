@@ -422,10 +422,40 @@ test('benchmark page reports contamination and keeps measured-loop UI work bound
 	assert.match(page, /window\.addEventListener\('resize'/);
 	assert.match(page, /webglcontextlost/);
 	assert.match(page, /severe-event-loop-disturbance/);
+	assert.match(page, /sortedFrames = \[\.\.\.frameTimes\]\.sort/);
 	assert.doesNotMatch(page, /average\(frameTimes\)/);
 	assert.doesNotMatch(page, /\.toFixed\(/);
 	assert.doesNotMatch(page, /gl\.finish\(/);
-	assert.ok(page.indexOf('sortedFrames = [...frameTimes].sort') > page.indexOf('updateUi(end, true)'));
+});
+
+test('trial page embeds the workload and completion-honest measurement modules', () => {
+	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
+
+	// The unit-tested modules are serialized into the page, so page and tests cannot drift.
+	assert.match(page, /const createWorkload = /);
+	assert.match(page, /const createWorkloadSpin = /);
+	assert.match(page, /const runBenchmarkTrial = /);
+	assert.match(page, /"jsSpinIterations":150000/);
+	assert.match(page, /EXT_disjoint_timer_query_webgl2/);
+	assert.match(page, /fenceSync/);
+	assert.match(page, /"desynchronized":false/);
+	assert.match(page, /"depth":true/);
+	// Full-window canvas at real dimensions x devicePixelRatio, plus the CSS-only DOM overlay.
+	assert.match(page, /window\.innerWidth \* devicePixelRatioValue/);
+	assert.match(page, /overlay-gradient/);
+	assert.match(page, /data-feed-row/);
+	assert.doesNotMatch(page, /desynchronized: true/);
+});
+
+test('trial page renders retry messaging only for a second attempt', () => {
+	const candidate = createWindowsCandidates()[0];
+	const firstAttempt = buildCalibrationTrialPage(candidate, 1, 2, '<svg></svg>');
+	const retryAttempt = buildCalibrationTrialPage(candidate, 1, 2, '<svg></svg>', { attempt: 2 });
+
+	assert.doesNotMatch(firstAttempt, /class="pill retry"/);
+	assert.match(retryAttempt, /class="pill retry"/);
+	assert.match(retryAttempt, /running again/);
+	assert.match(retryAttempt, /warning visible/);
 });
 
 test('result page displays low-confidence and backend-verification evidence without a latency claim', () => {
@@ -453,4 +483,27 @@ test('result page displays low-confidence and backend-verification evidence with
 	assert.match(page, /Effective renderer verified as d3d11on12/);
 	assert.match(page, /not an end-to-end input-latency measurement/);
 	assert.doesNotMatch(page, /renderer-response estimate/);
+});
+
+test('result page reports GPU-timing status honestly and lists repeated trials', () => {
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], {
+		...stableMetrics,
+		gpuTimeP50Ms: 3.1,
+		gpuTimeP95Ms: 4.2,
+		gpuTimingStatus: 'measured'
+	});
+	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 280, webglRenderer: 'Unknown renderer' });
+	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 282, webglRenderer: 'Unknown renderer' });
+	const finalized = finalizeCalibration(state);
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+
+	assert.match(page, /GPU completion measured directly \(p95 4\.20 ms\)/);
+	assert.match(page, /GPU completion inferred from bounded-queue frame delivery/);
+	assert.match(page, /2 trials, median shown/);
+	assert.match(page, /Trial 1:/);
+	assert.match(page, /Trial 2:/);
+	assert.match(page, /provisionally/);
+	assert.match(page, /automatically reverts to the previous profile/);
 });

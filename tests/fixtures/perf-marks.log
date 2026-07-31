@@ -1,0 +1,18 @@
+Graphics profile: Using the Chromium default backend.
+[wok-mark] main-module-eval-start 12.0
+[wok-mark] app-ready 120.5
+[wok-mark] window-created 155.0
+[wok-mark] loadurl-called 190.0
+[wok-mark] did-finish-load 1201.5
+a noise line that mentions wok-mark without being one
+[wok-mark] bad-value notanumber
+[wok-mark] trailing-garbage 12.5 extra tokens
+[wok-mark] main-module-eval-start 14.0
+[wok-mark] app-ready 118.5
+[wok-mark] window-created 149.0
+[wok-mark] loadurl-called 210.0
+[wok-mark] did-finish-load 1400.0
+[wok-mark] main-module-eval-start 10.0
+[wok-mark] app-ready 131.0
+[wok-mark] window-created 161.0
+[wok-mark] did-finish-load 1150.0

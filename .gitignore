@@ -4,6 +4,7 @@ node_modules/
 .working/
 coverage/
 *.log
+!tests/fixtures/*.log
 *.AppImage
 *.deb
 *.dmg

@@ -47,3 +47,100 @@ jobs:
 
       - name: Validate source
         run: pnpm run validate
+
+  # Observe-only performance job. This job exists to collect signal, not to gate:
+  # continue-on-error keeps any failure from blocking the workflow, and it must NOT be
+  # added to branch-protection required checks until run-to-run variance on hosted
+  # runners is understood. It builds nothing heavy and launches nothing.
+  perf-observe:
+    name: Perf unit checks (observe-only)
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.13.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install source dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Validate source
+        run: pnpm run validate
+
+      - name: Perf-unit assertions
+        # Cheap perf-adjacent unit tests only: rollover/reset residue guards and
+        # histogram-accuracy bounds for the frame-time stats, adaptive-validation
+        # runtime lifecycle, and the startup-marks parser. No app launch, no packaging.
+        run: node --test tests/performance-stats.test.ts tests/performance-monitor.test.ts tests/adaptive-validation.test.ts tests/adaptive-validation-runtime.test.ts tests/parse-perf-marks.test.ts
+
+  # Future packaged startup-marks smoke job — intentionally disabled scaffolding.
+  # TODO(perf-gate): enable (remove `if: false`) only once a runner pool with understood
+  # frame/IO variance exists and the medians have been baselined. Planned flow: make the
+  # Windows package, launch it with WOK_PERF_MARKS=1 and WOK_PERF_EXIT_MS so it quits
+  # itself after load, repeat a handful of runs, feed the concatenated log to
+  # scripts/parse-perf-marks.mjs, and upload the JSON medians as an artifact.
+  # Even when enabled this stays observe-only by design: it publishes data for humans
+  # and dashboards and must not gate merges.
+  packaged-smoke:
+    name: Packaged perf smoke (disabled scaffolding)
+    if: false
+    runs-on: windows-latest
+    continue-on-error: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6
+
+      - name: Setup Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: 24.13.0
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies and verified patched Electron
+        run: pnpm install --frozen-lockfile
+
+      - name: Build platform package
+        run: pnpm run make -- --arch=x64
+
+      - name: Capture startup marks from the packaged app
+        shell: pwsh
+        run: |
+          # TODO(perf-gate): confirm the packaged exe name/path once the job is enabled.
+          $exe = Get-ChildItem -Recurse dist -Filter '*.exe' |
+            Where-Object { $_.FullName -notmatch 'make' } |
+            Select-Object -First 1
+          if (-not $exe) { throw 'No packaged executable found under dist/.' }
+          $env:WOK_PERF_MARKS = '1'
+          $env:WOK_PERF_EXIT_MS = '10000'
+          for ($run = 1; $run -le 5; $run++) {
+            & $exe.FullName 2>&1 | Out-File -Append -Encoding utf8 perf-marks.log
+          }
+
+      - name: Summarize startup marks
+        run: node scripts/parse-perf-marks.mjs perf-marks.log > perf-marks-summary.json
+
+      - name: Upload startup-mark medians
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wok-client-perf-marks
+          path: |
+            perf-marks.log
+            perf-marks-summary.json
+          if-no-files-found: error

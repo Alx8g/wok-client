@@ -2,7 +2,7 @@
 import { join as pathJoin, resolve as pathResolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
-import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, dialog, ipcMain, protocol, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, dialog, ipcMain, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
@@ -1061,6 +1061,16 @@ app.on('ready', async () => {
 	const calibrationBlocksStartup = calibrationState === undefined
 		|| calibrationState.status !== 'complete'
 		|| calibrationState.rerunRequested;
+
+	// Overlap DNS/TCP/TLS setup for the game origin with the rest of startup.
+	if (!calibrationBlocksStartup && !process.argv.includes('--safe-graphics')) {
+		try {
+			session.defaultSession.preconnect({ numSockets: 2, url: 'https://krunker.io' });
+		} catch (error) {
+			console.error('Failed to preconnect to the game origin', error);
+		}
+	}
+
 	let completeGraphicsIdentityReady = false;
 	if (calibrationBlocksStartup) {
 		const gpuInfo = await refreshCompleteGraphicsInfo();

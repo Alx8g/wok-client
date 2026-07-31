@@ -27,7 +27,7 @@ import {
 	type GraphicsSelection
 } from './graphics-profile.ts';
 import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
-import { migrateLegacyConfigs } from './config-migration.ts';
+import { migrateLegacyConfigsPhaseOne, migrateLegacyConfigsPhaseTwo, type LegacyConfigSource } from './config-migration.ts';
 import {
 	CALIBRATION_BENCHMARK_MS,
 	CALIBRATION_LOW_CONFIDENCE_REASONS,
@@ -220,13 +220,18 @@ if (!gotTheLock) {
 		}
 	});
 
+// Phase 1 copies only the small top-level legacy files (settings.json, filters.txt, ...)
+// that this module reads or seeds before command-line switches and window creation.
+// The bulky trees (swapper/, css/, scripts/) migrate in phase 2 once a window exists.
+let deferredMigrationSources: LegacyConfigSource[] = [];
 try {
-	const migration = migrateLegacyConfigs(configPath, [
+	const migration = migrateLegacyConfigsPhaseOne(configPath, [
 		{ label: 'Crankshaft AppData', path: legacyRoamingConfigPath },
 		{ label: 'Crankshaft Documents', path: legacyDocumentsConfigPath }
 	]);
+	deferredMigrationSources = migration.deferredSources;
 	if (migration.foundSources.length > 0) {
-		console.log(`Migrated ${migration.copiedFiles} legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files.`);
+		console.log(`Migrated ${migration.copiedFiles} legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files. Legacy folders migrate in the background after the game window opens.`);
 	}
 } catch (error) {
 	console.error('Failed to migrate legacy Crankshaft configuration. The original files were left untouched.', error);
@@ -1189,6 +1194,26 @@ app.on('ready', async () => {
 	logPerfMark('window-created');
 	if (userPrefs.fullscreen === 'borderless') mainWindow.moveTop();
 
+	// Phase 2 of the legacy migration: copy the bulky trees in the background now that a
+	// window exists. The request handler indexes the resource swapper before these files
+	// land, so migrated resources are only served after its next indexing pass (next launch).
+	let requestHandlerStarted = false;
+	if (deferredMigrationSources.length > 0) {
+		const migrationSources = deferredMigrationSources;
+		deferredMigrationSources = [];
+		console.log(`Migrating legacy Crankshaft folders from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
+		void migrateLegacyConfigsPhaseTwo(configPath, migrationSources).then(migration => {
+			if (!migration.completed) {
+				console.error('Legacy folder migration did not finish cleanly; it will resume on the next launch.');
+				return;
+			}
+			console.log(`Finished migrating ${migration.copiedFiles} legacy files in the background; preserved ${migration.skippedConflicts} existing WOK Client files.`);
+			if (requestHandlerStarted && migration.copiedFiles > 0) {
+				console.log('Migrated legacy folders finished after resource indexing; swapped resources and CSS files appear after the next launch.');
+			}
+		}).catch(error => { console.error('Failed to migrate legacy Crankshaft folders. The original files were left untouched.', error); });
+	}
+
 	let discordRPCReady = false;
 	let updateDiscordRPC: ((data: RPCargs) => void) | undefined;
 	let destroyDiscordRPC: (() => Promise<void>) | undefined;
@@ -1388,6 +1413,7 @@ app.on('ready', async () => {
 		filtersPath
 	);
 	await crankshaftFilterHandler.start();
+	requestHandlerStarted = true;
 	if (userPrefs.resourceSwapper) {
 		protocol.registerFileProtocol('krunker-resource-swapper', (request, callback) => {
 			const localPath = crankshaftFilterHandler.resolveSwapProtocolRequest(request.url);

@@ -1,4 +1,4 @@
-import { isAbsolute } from 'node:path';
+import { win32 } from 'node:path';
 import type { WindowsProcessIdentity } from './windows-process-monitor.ts';
 
 function assertProcessId(value: number): void {
@@ -24,7 +24,7 @@ export function findWindowsProcessImageMismatches(
 	processes: readonly WindowsProcessIdentity[],
 	expectedExecutablePath: string
 ): WindowsProcessIdentity[] {
-	if (!isAbsolute(expectedExecutablePath)) {
+	if (!win32.isAbsolute(expectedExecutablePath)) {
 		throw new TypeError('expectedExecutablePath must be absolute.');
 	}
 	const expected = normalizeWindowsPath(expectedExecutablePath);

@@ -5,6 +5,7 @@ import type { ProcessTreeResourceSample } from '../host/process-resources.ts';
 
 const execFileAsync = promisify(execFile);
 const MAX_DOTNET_DATE_TIME_TICKS = 3_155_378_975_999_999_999n;
+const PROCESS_ID_QUERY_BATCH_SIZE = 128;
 
 export interface WindowsProcessIdentity {
 	commandLine: string;
@@ -170,16 +171,28 @@ export async function listWindowsProcessesById(processIds: readonly number[]): P
 	if (ids.length === 0) return [];
 	if (ids.length > 4_096) throw new RangeError('No more than 4,096 process IDs can be queried at once.');
 	const command = [
-		'$wanted = [System.Collections.Generic.HashSet[int]]::new();',
-		"foreach ($value in ($env:WOK_RUNTIME_PROCESS_IDS -split ',')) { [void]$wanted.Add([int]$value) };",
-		'$items = @(Get-CimInstance Win32_Process |',
-		'Where-Object { $wanted.Contains([int]$_.ProcessId) } |',
+		'$items = @(Get-CimInstance',
+		'-ClassName Win32_Process',
+		'-Filter $env:WOK_RUNTIME_PROCESS_FILTER',
+		'-Property CommandLine,CreationDate,ExecutablePath,Name,ParentProcessId,ProcessId |',
 		PROCESS_IDENTITY_PROJECTION,
 		');',
 		'ConvertTo-Json -InputObject @($items) -Compress -Depth 3'
 	].join(' ');
-	return runWindowsProcessIdentityQuery(command, {
-		WOK_RUNTIME_PROCESS_IDS: ids.join(',')
-	});
+	const identities: WindowsProcessIdentity[] = [];
+	for (
+		let offset = 0;
+		offset < ids.length;
+		offset += PROCESS_ID_QUERY_BATCH_SIZE
+	) {
+		const filter = ids
+			.slice(offset, offset + PROCESS_ID_QUERY_BATCH_SIZE)
+			.map(processId => `ProcessId = ${processId}`)
+			.join(' OR ');
+		identities.push(...await runWindowsProcessIdentityQuery(command, {
+			WOK_RUNTIME_PROCESS_FILTER: filter
+		}));
+	}
+	return identities;
 }
 

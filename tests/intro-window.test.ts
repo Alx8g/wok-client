@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { join as pathJoin } from 'node:path';
 import test from 'node:test';
 import type {
 	BrowserWindow,
@@ -259,7 +260,7 @@ test('intro startup, playback, visual handoff and audio-tail completion run once
 				visualMs: '3000'
 			}
 		},
-		path: 'C:\\client\\assets\\intro.html'
+		path: pathJoin('C:\\client\\assets', 'intro.html')
 	});
 
 	harness.introWindow.emit('ready-to-show');

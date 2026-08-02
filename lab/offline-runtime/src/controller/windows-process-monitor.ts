@@ -5,7 +5,6 @@ import type { ProcessTreeResourceSample } from '../host/process-resources.ts';
 
 const execFileAsync = promisify(execFile);
 const MAX_DOTNET_DATE_TIME_TICKS = 3_155_378_975_999_999_999n;
-const PROCESS_ID_QUERY_BATCH_SIZE = 128;
 
 export interface WindowsProcessIdentity {
 	commandLine: string;
@@ -164,45 +163,5 @@ export async function listWindowsProcessesByExecutableName(executableName: strin
 	return runWindowsProcessIdentityQuery(command, {
 		WOK_RUNTIME_PROCESS_NAME: executableName
 	});
-}
-
-export async function listWindowsProcessesById(processIds: readonly number[]): Promise<WindowsProcessIdentity[]> {
-	const ids = [...new Set(processIds.map(processId => expectInteger(processId, 'processId', 1, 0xffff_ffff)))];
-	if (ids.length === 0) return [];
-	if (ids.length > 4_096) throw new RangeError('No more than 4,096 process IDs can be queried at once.');
-	const command = [
-		"$ids = @($env:WOK_RUNTIME_PROCESS_IDS.Split(',') | ForEach-Object { [int]$_ });",
-		'$items = @(Get-Process -Id $ids -ErrorAction SilentlyContinue |',
-		'ForEach-Object {',
-		'try {',
-		'$path = [string]$_.Path;',
-		'$started = $_.StartTime;',
-		'if (-not [string]::IsNullOrWhiteSpace($path)) {',
-		'$ticks = [long]$started.ToUniversalTime().Ticks;',
-		'[PSCustomObject]@{',
-		"commandLine = '';",
-		'creationTimeUtcTicks = [string]($ticks - ($ticks % 10));',
-		'executableName = [System.IO.Path]::GetFileName($path);',
-		'executablePath = $path;',
-		'parentProcessId = 0;',
-		'processId = [int]$_.Id',
-		'}',
-		'}',
-		'} catch {}',
-		'});',
-		'ConvertTo-Json -InputObject @($items) -Compress -Depth 3'
-	].join(' ');
-	const identities: WindowsProcessIdentity[] = [];
-	for (
-		let offset = 0;
-		offset < ids.length;
-		offset += PROCESS_ID_QUERY_BATCH_SIZE
-	) {
-		const batch = ids.slice(offset, offset + PROCESS_ID_QUERY_BATCH_SIZE);
-		identities.push(...await runWindowsProcessIdentityQuery(command, {
-			WOK_RUNTIME_PROCESS_IDS: batch.join(',')
-		}));
-	}
-	return identities;
 }
 

@@ -20,10 +20,7 @@ import {
 	type WindowsJobProcessStart
 } from '../src/controller/windows-job.ts';
 import { sameWindowsProcessIdentity } from '../src/controller/windows-process-control.ts';
-import {
-	listWindowsProcessesById,
-	type WindowsProcessIdentity
-} from '../src/controller/windows-process-monitor.ts';
+import type { WindowsProcessIdentity } from '../src/controller/windows-process-monitor.ts';
 import { sha256Hex } from '../src/shared/hash.ts';
 
 const execFileAsync = promisify(execFile);
@@ -33,11 +30,57 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
 public static class WokWindowsJobFixture
 {
+	private const uint PROCESS_QUERY_LIMITED_INFORMATION = 0x1000;
+	private const uint SYNCHRONIZE = 0x00100000;
+	private const uint WAIT_OBJECT_0 = 0;
+	private const uint WAIT_TIMEOUT = 258;
+
+	[StructLayout(LayoutKind.Sequential)]
+	private struct NativeFileTime
+	{
+		public uint Low;
+		public uint High;
+	}
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern IntPtr OpenProcess(
+		uint desiredAccess,
+		bool inheritHandle,
+		uint processId
+	);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern bool GetProcessTimes(
+		IntPtr process,
+		out NativeFileTime creation,
+		out NativeFileTime exit,
+		out NativeFileTime kernel,
+		out NativeFileTime user
+	);
+
+	[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+	private static extern bool QueryFullProcessImageName(
+		IntPtr process,
+		uint flags,
+		StringBuilder executablePath,
+		ref uint executablePathLength
+	);
+
+	[DllImport("kernel32.dll", SetLastError = true)]
+	private static extern uint WaitForSingleObject(
+		IntPtr handle,
+		uint milliseconds
+	);
+
+	[DllImport("kernel32.dll")]
+	private static extern bool CloseHandle(IntPtr handle);
+
 	private static void AppendMarker(string path, string value)
 	{
 		for (int attempt = 0; attempt < 200; attempt++)
@@ -65,6 +108,90 @@ public static class WokWindowsJobFixture
 		throw new IOException("Could not write fixture marker.");
 	}
 
+	private static long IdentityTicks(NativeFileTime value)
+	{
+		long fileTime = ((long)value.High << 32) | value.Low;
+		long ticks = DateTime.FromFileTimeUtc(fileTime).Ticks;
+		return ticks - (ticks % 10);
+	}
+
+	private static int RunWitness(string[] arguments)
+	{
+		if (arguments.Length != 5) return 64;
+		string markerPath = arguments[1];
+		uint processId;
+		long expectedCreationTicks;
+		if (
+			!UInt32.TryParse(arguments[2], out processId)
+			|| processId == 0
+			|| !Int64.TryParse(arguments[3], out expectedCreationTicks)
+			|| expectedCreationTicks <= 0
+		) return 65;
+		string expectedPath;
+		try
+		{
+			expectedPath = Encoding.UTF8.GetString(
+				Convert.FromBase64String(arguments[4])
+			);
+		}
+		catch
+		{
+			return 66;
+		}
+
+		IntPtr process = OpenProcess(
+			PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
+			false,
+			processId
+		);
+		if (process == IntPtr.Zero) return 67;
+		try
+		{
+			if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) return 68;
+			NativeFileTime creation;
+			NativeFileTime exit;
+			NativeFileTime kernel;
+			NativeFileTime user;
+			if (!GetProcessTimes(
+				process,
+				out creation,
+				out exit,
+				out kernel,
+				out user
+			)) return 69;
+			var actualPath = new StringBuilder(32768);
+			uint actualPathLength = checked((uint)actualPath.Capacity);
+			if (!QueryFullProcessImageName(
+				process,
+				0,
+				actualPath,
+				ref actualPathLength
+			)) return 70;
+			long actualCreationTicks = IdentityTicks(creation);
+			if (actualCreationTicks != expectedCreationTicks) return 71;
+			if (!String.Equals(
+				Path.GetFullPath(actualPath.ToString()),
+				Path.GetFullPath(expectedPath),
+				StringComparison.OrdinalIgnoreCase
+			)) return 72;
+			if (WaitForSingleObject(process, 0) != WAIT_TIMEOUT) return 73;
+			AppendMarker(
+				markerPath,
+				"READY|" + processId + "|" + actualCreationTicks
+			);
+			if (WaitForSingleObject(process, 15000) != WAIT_OBJECT_0) return 74;
+			AppendMarker(
+				markerPath,
+				"EXITED|" + processId + "|" + actualCreationTicks
+			);
+			return 0;
+		}
+		finally
+		{
+			CloseHandle(process);
+		}
+	}
+
 	private static Process StartChild(string mode, string markerPath)
 	{
 		string executablePath = Assembly.GetExecutingAssembly().Location;
@@ -78,6 +205,10 @@ public static class WokWindowsJobFixture
 
 	public static int Main(string[] arguments)
 	{
+		if (arguments.Length >= 1 && arguments[0] == "witness")
+		{
+			return RunWitness(arguments);
+		}
 		if (arguments.Length < 2) return 64;
 		string mode = arguments[0];
 		string markerPath = arguments[1];
@@ -352,32 +483,58 @@ function startIdentity(
 	};
 }
 
-async function exactIdentityIsActive(
-	identity: WindowsProcessIdentity
-): Promise<boolean> {
-	const current = await listWindowsProcessesById([
-		identity.processId
-	]);
-	return current.some(processIdentity =>
-		sameWindowsProcessIdentity(identity, processIdentity)
+async function assertStableRootIdentity(
+	job: WindowsJobProcess,
+	started: WindowsJobProcessStart,
+	minimumSampleIndex: number
+): Promise<void> {
+	const expectedIdentity = startIdentity(started);
+	const expectedMembership = [started.processId];
+	const membershipBefore = await job.snapshotProcessIds();
+	assert.deepEqual(
+		[...membershipBefore].sort((left, right) => left - right),
+		expectedMembership
+	);
+	const sample = await waitFor(async () =>
+		job.samples.slice(minimumSampleIndex).find(candidate =>
+			candidate.processes.some(processIdentity =>
+				sameWindowsProcessIdentity(
+					expectedIdentity,
+					processIdentity
+				)
+			)
+		)
+	);
+	const membershipAfter = await job.snapshotProcessIds();
+	assert.deepEqual(
+		[...membershipAfter].sort((left, right) => left - right),
+		expectedMembership
+	);
+	assert.deepEqual(
+		sample.processes.map(identity => identity.processId),
+		expectedMembership
 	);
 }
 
-async function waitForExactIdentitiesToExit(
-	identities: readonly WindowsProcessIdentity[]
-): Promise<void> {
-	await waitFor(async () => {
-		const processIds = [
-			...new Set(identities.map(identity => identity.processId))
-		];
-		const current = await listWindowsProcessesById(processIds);
-		const active = identities.filter(identity =>
-			current.some(processIdentity =>
-				sameWindowsProcessIdentity(identity, processIdentity)
-			)
-		);
-		return active.length === 0 ? true : undefined;
-	});
+function launchIdentityWitness(
+	started: WindowsJobProcessStart,
+	markerPath: string
+): ChildProcess {
+	return spawn(
+		fixturePath,
+		[
+			'witness',
+			markerPath,
+			String(started.processId),
+			started.creationTimeUtcTicks,
+			Buffer.from(started.executablePath, 'utf8').toString('base64')
+		],
+		{
+			cwd: fixtureDirectory,
+			stdio: 'ignore',
+			windowsHide: true
+		}
+	);
 }
 
 async function waitForChildExit(child: ChildProcess): Promise<void> {
@@ -440,6 +597,7 @@ test(
 			await new Promise(resolve => setTimeout(resolve, 250));
 			assert.equal(await markerExists(markerPath), false);
 
+			const runningSampleIndex = job.samples.length;
 			const resume = job.resume();
 			assert.equal(job.state, 'resume-requested');
 			await resume;
@@ -447,20 +605,21 @@ test(
 			await waitFor(async () =>
 				(await markerExists(markerPath)) ? true : undefined
 			);
-			assert.equal(
-				await exactIdentityIsActive(startIdentity(started)),
-				true
+			await assertStableRootIdentity(
+				job,
+				started,
+				runningSampleIndex
 			);
 			const termination = job.terminate();
 			assert.equal(job.state, 'termination-requested');
 			const exit = await termination;
 			assert.equal(job.state, 'closed');
+			assert.equal(exit.terminationRequested, true);
 			assert.equal(exit.jobClean, true);
 			assert.deepEqual(exit.membership, {
 				processIds: [],
 				status: 'reconciled'
 			});
-			await waitForExactIdentitiesToExit([startIdentity(started)]);
 		} finally {
 			if (job.child.exitCode === null) await stopJob(job);
 		}
@@ -963,7 +1122,10 @@ test(
 			const exit = await job.terminate();
 			assert.equal(exit.terminationRequested, true);
 			assert.equal(exit.jobClean, true);
-			await waitForExactIdentitiesToExit(identities);
+			assert.deepEqual(exit.membership, {
+				processIds: [],
+				status: 'reconciled'
+			});
 		} finally {
 			if (job.child.exitCode === null) await stopJob(job);
 		}
@@ -980,15 +1142,19 @@ test(
 			await job.started;
 			await job.firstSample;
 			await job.resume();
-			const identities = await waitFor(async () => {
+			await waitFor(async () => {
 				const latest = job.samples.at(-1);
 				return latest && latest.processes.length >= 3
-					? latest.processes
+					? true
 					: undefined;
 			});
 			const exit = await job.terminate();
+			assert.equal(exit.terminationRequested, true);
 			assert.equal(exit.jobClean, true);
-			await waitForExactIdentitiesToExit(identities);
+			assert.deepEqual(exit.membership, {
+				processIds: [],
+				status: 'reconciled'
+			});
 		} finally {
 			if (job.child.exitCode === null) await stopJob(job);
 		}
@@ -1000,28 +1166,72 @@ test(
 	{ skip: process.platform !== 'win32', timeout: WINDOWS_TEST_TIMEOUT_MS },
 	async () => {
 		const markerPath = join(fixtureDirectory, 'owner-death.marker');
+		const witnessMarkerPath = join(
+			fixtureDirectory,
+			'owner-death-witness.marker'
+		);
 		const job = launchFixture('wait', markerPath);
-		const started = await job.started;
-		await job.firstSample;
-		await job.resume();
-		await waitFor(async () =>
-			(await markerExists(markerPath)) ? true : undefined
-		);
-		job.child.kill();
-		const exit = await job.completed;
-		assert.equal(exit.jobClean, false);
-		assert.equal(exit.membership.status, 'unreconciled');
-		assert.match(
-			exit.membership.status === 'unreconciled'
-				? exit.membership.reason
-				: '',
-			/without a terminal record/u
-		);
-		assert.match(
-			exit.launchError ?? '',
-			/without a terminal record/u
-		);
-		await waitForExactIdentitiesToExit([startIdentity(started)]);
+		let witness: ChildProcess | undefined;
+		try {
+			const started = await job.started;
+			await job.firstSample;
+			await job.resume();
+			await waitFor(async () =>
+				(await markerExists(markerPath)) ? true : undefined
+			);
+			witness = launchIdentityWitness(started, witnessMarkerPath);
+			await waitFor(async () =>
+				(await markerLines(witnessMarkerPath)).includes(
+					`READY|${started.processId}|${started.creationTimeUtcTicks}`
+				) ? true : undefined
+			);
+			const witnessProcessId = witness.pid;
+			assert.ok(witnessProcessId !== undefined);
+			const membership = await job.snapshotProcessIds();
+			assert.deepEqual(
+				[...membership].sort((left, right) => left - right),
+				[started.processId]
+			);
+			assert.equal(membership.includes(witnessProcessId), false);
+
+			job.child.kill();
+			const exit = await job.completed;
+			assert.equal(exit.jobClean, false);
+			assert.equal(exit.membership.status, 'unreconciled');
+			assert.match(
+				exit.membership.status === 'unreconciled'
+					? exit.membership.reason
+					: '',
+				/without a terminal record/u
+			);
+			assert.match(
+				exit.launchError ?? '',
+				/without a terminal record/u
+			);
+			await waitForChildExit(witness);
+			assert.equal(witness.exitCode, 0);
+			assert.equal(
+				(await markerLines(witnessMarkerPath)).includes(
+					`EXITED|${started.processId}|${started.creationTimeUtcTicks}`
+				),
+				true
+			);
+		} finally {
+			if (
+				job.child.exitCode === null
+				&& job.child.signalCode === null
+			) {
+				await stopJob(job);
+			}
+			if (
+				witness !== undefined
+				&& witness.exitCode === null
+				&& witness.signalCode === null
+			) {
+				witness.kill();
+				await waitForChildExit(witness);
+			}
+		}
 	}
 );
 

@@ -478,8 +478,23 @@ export async function createAttestedNoiseFloorFixture(
 					parseEtlRecorderStatusSidecar(statusBytes),
 					recorderExpectedIdentity
 				);
+				const inspectorProcessIdentity = {
+					creationTimeUtcTicks:
+						inspectorCreationTimeUtcTicks,
+					executable: {
+						fileIdHex: sequenceOffset
+							.toString(16)
+							.padStart(16, '0'),
+						finalPath: etlRecorderPath,
+						sha256: sha256Hex(etlRecorderBytes),
+						sizeBytes: etlRecorderBytes.byteLength,
+						volumeSerialNumberHex: '00000001'
+					},
+					executablePath: etlRecorderPath,
+					processId: inspectorProcessId
+				};
 				const processEventBytes = Buffer.from(`${JSON.stringify({
-					version: 1,
+					version: 2,
 					phase: 'etl-process-events',
 					etlPath: operationalEtlPath,
 					etlVolumeSerialNumber,
@@ -487,6 +502,20 @@ export async function createAttestedNoiseFloorFixture(
 					etlSizeBytes: etlBytes.byteLength,
 					etlSha256,
 					targetProcessId: processId,
+					inspectionInvocation: {
+						candidateId: plannedRun.candidateId,
+						etlFileIndex,
+						etlPath: operationalEtlPath,
+						etlSha256,
+						etlSizeBytes: etlBytes.byteLength,
+						etlVolumeSerialNumber,
+						outputArtifactRelativePath:
+							'captures/etl-process-events.json',
+						role: 'etl-process-inspector',
+						runId: plannedRun.runId,
+						targetProcessId: processId
+					},
+					inspectorProcessIdentity,
 					events: [{
 						kind: 'start',
 						sequence: 0,
@@ -612,21 +641,8 @@ export async function createAttestedNoiseFloorFixture(
 					},
 					etlProcessLifetimeEvidence,
 					executionIdentities: {
-						etlProcessInspector: {
-							creationTimeUtcTicks:
-								inspectorCreationTimeUtcTicks,
-							executable: {
-								fileIdHex: sequenceOffset
-									.toString(16)
-									.padStart(32, '0'),
-								finalPath: etlRecorderPath,
-								sha256: sha256Hex(etlRecorderBytes),
-								sizeBytes: etlRecorderBytes.byteLength,
-								volumeSerialNumberHex: '00000001'
-							},
-							executablePath: etlRecorderPath,
-							processId: inspectorProcessId
-						},
+						etlProcessInspector:
+							inspectorProcessIdentity,
 						presentingProcessSample: {
 							commandLine: candidate.executablePath,
 							creationTimeUtcTicks,

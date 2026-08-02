@@ -339,7 +339,7 @@ function successfulRunResult(
 			etlProcessInspector: {
 				creationTimeUtcTicks: '638900000001000000',
 				executable: {
-					fileIdHex: '0'.repeat(32),
+					fileIdHex: '0'.repeat(16),
 					finalPath: options.etlRecorderPath,
 					sha256: options.etlRecorderSha256,
 					sizeBytes: 1_024,

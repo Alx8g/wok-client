@@ -72,6 +72,8 @@ import {
 	bindSelectedPresentMonFramesToProcessLifetime,
 	deriveEtlProcessLifetimes,
 	parseEtlProcessEventEvidence,
+	sameEtlProcessInspectionInvocation,
+	sameEtlProcessInspectorIdentity,
 	type EtlProcessEventEvidenceArtifact,
 	type EtlProcessLifetimeArtifact,
 	type PresentMonProcessLifetimeBinding,
@@ -1742,6 +1744,26 @@ async function executeEtlProcessInspection(
 	run.evidence = parseEtlProcessEventEvidence(
 		capture.outputContents
 	);
+	if (
+		!sameEtlProcessInspectorIdentity(
+			run.evidence.inspectorProcessIdentity,
+			processIdentity
+		)
+	) {
+		throw new Error(
+			'Native ETL process-event evidence does not match the verified inspector process lifetime.'
+		);
+	}
+	if (
+		!sameEtlProcessInspectionInvocation(
+			run.evidence.inspectionInvocation,
+			run.launch.invocation
+		)
+	) {
+		throw new Error(
+			'Native ETL process-event evidence does not match the accepted inspection invocation.'
+		);
+	}
 }
 
 function decodeOfflineReplayOutput(
@@ -2813,6 +2835,8 @@ export async function runRuntimeLabSingleRun(options: RuntimeLabSingleRunOptions
 		const etlProcessInspectionLaunch =
 			buildEtlProcessEventInspectionArguments({
 				acceptedCapture: recorderRun.acceptedCapture,
+				candidateId: candidate.manifest.id,
+				runId,
 				targetProcessId: presentingProcessId
 			});
 		etlProcessInspection = {

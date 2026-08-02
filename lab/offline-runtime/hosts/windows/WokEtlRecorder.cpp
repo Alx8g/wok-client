@@ -162,6 +162,19 @@ struct InspectOptions {
     std::string expectedEtlSha256;
     uintmax_t expectedEtlSizeBytes = 0;
     DWORD targetProcessId = 0;
+    std::wstring runId;
+    std::wstring candidateId;
+};
+
+struct InspectorProcessIdentity {
+    UniqueHandle executableLease;
+    DWORD processId = 0;
+    ULONGLONG creationTimeUtcTicks = 0;
+    std::filesystem::path executablePath;
+    std::filesystem::path finalPath;
+    ArtifactFileIdentity executableIdentity;
+    std::string executableSha256;
+    uintmax_t executableSizeBytes = 0;
 };
 
 struct ProcessEventEvidence {
@@ -573,6 +586,26 @@ bool IsValidReleaseToken(std::wstring_view value)
     });
 }
 
+bool IsRuntimeIdentifier(std::wstring_view value)
+{
+    if (value.empty() || value.size() > 128) return false;
+    auto acceptedFirst = [](wchar_t character) {
+        return (character >= L'a' && character <= L'z') ||
+            (character >= L'A' && character <= L'Z') ||
+            (character >= L'0' && character <= L'9');
+    };
+    if (!acceptedFirst(value.front())) return false;
+    return std::all_of(
+        value.begin() + 1,
+        value.end(),
+        [&](wchar_t character) {
+            return acceptedFirst(character) ||
+                character == L'.' ||
+                character == L'_' ||
+                character == L'-';
+        });
+}
+
 bool EqualOrdinalIgnoreCase(std::wstring_view left, std::wstring_view right)
 {
     if (left.size() > static_cast<size_t>(std::numeric_limits<int>::max()) ||
@@ -691,6 +724,37 @@ std::string FileIndexHex(ArtifactFileIdentity const& identity)
         value >>= 4;
     }
     return result;
+}
+
+std::string VolumeSerialHex(ArtifactFileIdentity const& identity)
+{
+    constexpr char hex[] = "0123456789abcdef";
+    std::string result(8, '0');
+    auto value = identity.volumeSerialNumber;
+    for (size_t index = result.size(); index > 0; --index) {
+        result[index - 1] = hex[value & 0x0f];
+        value >>= 4;
+    }
+    return result;
+}
+
+std::optional<std::filesystem::path> FinalFilePath(HANDLE file)
+{
+    auto required = GetFinalPathNameByHandleW(
+        file,
+        nullptr,
+        0,
+        FILE_NAME_NORMALIZED | VOLUME_NAME_GUID);
+    if (required == 0) return std::nullopt;
+    std::wstring buffer(static_cast<size_t>(required), L'\0');
+    auto written = GetFinalPathNameByHandleW(
+        file,
+        buffer.data(),
+        required,
+        FILE_NAME_NORMALIZED | VOLUME_NAME_GUID);
+    if (written == 0 || written >= required) return std::nullopt;
+    buffer.resize(written);
+    return std::filesystem::path(buffer);
 }
 
 ULONGLONG FileTimeTicksUtc()
@@ -902,6 +966,8 @@ std::optional<InspectOptions> ParseInspectOptions(int argc, wchar_t** argv)
     bool etlFileIndexSeen = false;
     bool etlVolumeSeen = false;
     bool targetProcessIdSeen = false;
+    bool runIdSeen = false;
+    bool candidateIdSeen = false;
     for (int i = 1; i < argc; i += 2) {
         if (i + 1 >= argc) return std::nullopt;
         std::wstring_view name(argv[i]);
@@ -951,6 +1017,18 @@ std::optional<InspectOptions> ParseInspectOptions(int argc, wchar_t** argv)
                 false);
             if (!processId.has_value()) return std::nullopt;
             options.targetProcessId = static_cast<DWORD>(*processId);
+        } else if (name == L"--inspection-run-id") {
+            if (runIdSeen || !IsRuntimeIdentifier(value)) {
+                return std::nullopt;
+            }
+            runIdSeen = true;
+            options.runId = value;
+        } else if (name == L"--inspection-candidate-id") {
+            if (candidateIdSeen || !IsRuntimeIdentifier(value)) {
+                return std::nullopt;
+            }
+            candidateIdSeen = true;
+            options.candidateId = value;
         } else {
             return std::nullopt;
         }
@@ -962,6 +1040,8 @@ std::optional<InspectOptions> ParseInspectOptions(int argc, wchar_t** argv)
         !etlFileIndexSeen ||
         !etlVolumeSeen ||
         !targetProcessIdSeen ||
+        !runIdSeen ||
+        !candidateIdSeen ||
         !options.etlPath.is_absolute() ||
         !IsSafeArtifactFilename(options.etlPath, L".etl")) {
         return std::nullopt;
@@ -1519,6 +1599,86 @@ std::optional<ULONGLONG> IdentityTicksFromFileTime(ULONGLONG fileTime)
     return ticks - ticks % 10;
 }
 
+std::optional<InspectorProcessIdentity> InspectCurrentProcessIdentity()
+{
+    std::wstring executablePath(32768, L'\0');
+    DWORD executablePathLength = static_cast<DWORD>(executablePath.size());
+    if (!QueryFullProcessImageNameW(
+            GetCurrentProcess(),
+            0,
+            executablePath.data(),
+            &executablePathLength) ||
+        executablePathLength == 0 ||
+        executablePathLength >= executablePath.size()) {
+        return std::nullopt;
+    }
+    executablePath.resize(executablePathLength);
+
+    FILETIME creation{};
+    FILETIME exit{};
+    FILETIME kernel{};
+    FILETIME user{};
+    if (!GetProcessTimes(
+            GetCurrentProcess(),
+            &creation,
+            &exit,
+            &kernel,
+            &user)) {
+        return std::nullopt;
+    }
+    auto creationFileTime = FileTimeValue(creation);
+    if (!creationFileTime.has_value()) return std::nullopt;
+    auto creationTimeUtcTicks = IdentityTicksFromFileTime(
+        *creationFileTime);
+    if (!creationTimeUtcTicks.has_value()) return std::nullopt;
+
+    UniqueHandle executableLease(CreateFileW(
+        executablePath.c_str(),
+        GENERIC_READ | FILE_READ_ATTRIBUTES,
+        FILE_SHARE_READ,
+        nullptr,
+        OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_SEQUENTIAL_SCAN,
+        nullptr));
+    if (!executableLease) return std::nullopt;
+    auto identityBefore = GetArtifactFileIdentity(executableLease.Get());
+    auto inspectionBefore = InspectFinalizedEtl(executableLease.Get());
+    auto finalPathBefore = FinalFilePath(executableLease.Get());
+    if (!identityBefore.has_value() ||
+        !inspectionBefore.first ||
+        inspectionBefore.second == 0 ||
+        !finalPathBefore.has_value()) {
+        return std::nullopt;
+    }
+    auto sha256 = Sha256File(
+        executableLease.Get(),
+        inspectionBefore.second);
+    auto identityAfter = GetArtifactFileIdentity(executableLease.Get());
+    auto inspectionAfter = InspectFinalizedEtl(executableLease.Get());
+    auto finalPathAfter = FinalFilePath(executableLease.Get());
+    if (!sha256.has_value() ||
+        *sha256 == kUnavailableSha256 ||
+        !identityAfter.has_value() ||
+        !SameArtifactFileIdentity(*identityBefore, *identityAfter) ||
+        !inspectionAfter.first ||
+        inspectionAfter.second != inspectionBefore.second ||
+        !finalPathAfter.has_value() ||
+        finalPathAfter->native() != finalPathBefore->native()) {
+        return std::nullopt;
+    }
+
+    InspectorProcessIdentity result;
+    result.executableLease = std::move(executableLease);
+    result.processId = GetCurrentProcessId();
+    result.creationTimeUtcTicks = *creationTimeUtcTicks;
+    result.executablePath = std::filesystem::path(executablePath);
+    result.finalPath = std::move(*finalPathAfter);
+    result.executableIdentity = *identityAfter;
+    result.executableSha256 = std::move(*sha256);
+    result.executableSizeBytes = inspectionAfter.second;
+    return result;
+}
+
 std::optional<std::wstring> ExecutableBasename(std::wstring imageName)
 {
     auto separator = imageName.find_last_of(L"\\/");
@@ -1648,10 +1808,11 @@ std::string ProcessEventsJson(
     InspectOptions const& options,
     FinalizedEtlEvidence const& etl,
     ArtifactFileIdentity const& identity,
+    InspectorProcessIdentity const& inspector,
     std::vector<ProcessEventEvidence> const& events)
 {
     std::ostringstream out;
-    out << "{\"version\":1,\"phase\":\"etl-process-events\","
+    out << "{\"version\":2,\"phase\":\"etl-process-events\","
         << "\"etlPath\":" << JsonPath(options.etlPath) << ','
         << "\"etlVolumeSerialNumber\":\""
         << identity.volumeSerialNumber << "\","
@@ -1659,6 +1820,32 @@ std::string ProcessEventsJson(
         << "\"etlSizeBytes\":" << etl.sizeBytes << ','
         << "\"etlSha256\":\"" << etl.sha256 << "\","
         << "\"targetProcessId\":" << options.targetProcessId << ','
+        << "\"inspectionInvocation\":{"
+        << "\"candidateId\":" << JsonString(options.candidateId) << ','
+        << "\"etlFileIndex\":\"" << FileIndexHex(identity) << "\","
+        << "\"etlPath\":" << JsonPath(options.etlPath) << ','
+        << "\"etlSha256\":\"" << etl.sha256 << "\","
+        << "\"etlSizeBytes\":" << etl.sizeBytes << ','
+        << "\"etlVolumeSerialNumber\":\""
+        << identity.volumeSerialNumber << "\","
+        << "\"outputArtifactRelativePath\":"
+        << "\"captures/etl-process-events.json\","
+        << "\"role\":\"etl-process-inspector\","
+        << "\"runId\":" << JsonString(options.runId) << ','
+        << "\"targetProcessId\":" << options.targetProcessId << "},"
+        << "\"inspectorProcessIdentity\":{"
+        << "\"creationTimeUtcTicks\":\""
+        << inspector.creationTimeUtcTicks << "\","
+        << "\"executable\":{"
+        << "\"fileIdHex\":\""
+        << FileIndexHex(inspector.executableIdentity) << "\","
+        << "\"finalPath\":" << JsonPath(inspector.finalPath) << ','
+        << "\"sha256\":\"" << inspector.executableSha256 << "\","
+        << "\"sizeBytes\":" << inspector.executableSizeBytes << ','
+        << "\"volumeSerialNumberHex\":\""
+        << VolumeSerialHex(inspector.executableIdentity) << "\"},"
+        << "\"executablePath\":" << JsonPath(inspector.executablePath) << ','
+        << "\"processId\":" << inspector.processId << "},"
         << "\"events\":[";
     for (size_t index = 0; index < events.size(); ++index) {
         if (index != 0) out << ',';
@@ -1717,6 +1904,11 @@ bool WriteStandardOutput(std::string_view contents)
 
 int RunInspection(InspectOptions const& options)
 {
+    auto inspector = InspectCurrentProcessIdentity();
+    if (!inspector.has_value()) {
+        std::wcerr << L"failed to acquire inspector process identity\n";
+        return 46;
+    }
     auto etl = AcquireFinalizedEtlEvidence(
         options.etlPath,
         options.expectedEtlIdentity);
@@ -1783,6 +1975,7 @@ int RunInspection(InspectOptions const& options)
         options,
         etl,
         *identityAfterReplay,
+        *inspector,
         state.events);
     if (!WriteStandardOutput(output)) {
         std::wcerr << L"failed to write process inspection evidence\n";
@@ -2189,7 +2382,9 @@ int wmain(int argc, wchar_t** argv)
                 << L"--expected-etl-size-bytes positive-safe-integer "
                 << L"--expected-etl-file-index 16-lowercase-hex "
                 << L"--expected-etl-volume-serial-number canonical-uint32 "
-                << L"--target-process-id positive-uint32\n";
+                << L"--target-process-id positive-uint32 "
+                << L"--inspection-run-id identifier "
+                << L"--inspection-candidate-id identifier\n";
             return 40;
         }
         return RunInspection(*options);

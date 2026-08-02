@@ -106,7 +106,7 @@ function stopEvent(options: {
 
 function evidenceBytes(events: readonly Record<string, unknown>[]): Buffer {
 	return Buffer.from(`${JSON.stringify({
-		version: 1,
+		version: 2,
 		phase: 'etl-process-events',
 		etlPath: ETL_PATH,
 		etlVolumeSerialNumber: '123456789',
@@ -114,6 +114,33 @@ function evidenceBytes(events: readonly Record<string, unknown>[]): Buffer {
 		etlSizeBytes: 4096,
 		etlSha256: ETL_SHA256,
 		targetProcessId: PROCESS_ID,
+		inspectionInvocation: {
+			candidateId: 'candidate-a',
+			etlFileIndex: '0000000000000042',
+			etlPath: ETL_PATH,
+			etlSha256: ETL_SHA256,
+			etlSizeBytes: 4096,
+			etlVolumeSerialNumber: '123456789',
+			outputArtifactRelativePath:
+				'captures/etl-process-events.json',
+			role: 'etl-process-inspector',
+			runId: 'run-a',
+			targetProcessId: PROCESS_ID
+		},
+		inspectorProcessIdentity: {
+			creationTimeUtcTicks: creationTicksFromUnixMs(
+				CAPTURE_START_MS - 1_000
+			),
+			executable: {
+				fileIdHex: '0000000000000001',
+				finalPath: 'C:/runtime-lab/WokEtlRecorder.exe',
+				sha256: '3'.repeat(64),
+				sizeBytes: 8192,
+				volumeSerialNumberHex: '00000001'
+			},
+			executablePath: 'C:/runtime-lab/WokEtlRecorder.exe',
+			processId: 9001
+		},
 		events
 	})}\r\n`, 'utf8');
 }
@@ -362,6 +389,70 @@ test('process-event parser rejects noncanonical and internally inconsistent evid
 			Buffer.from(`${JSON.stringify(valid)}\r\n`, 'utf8')
 		),
 		/does not match its FILETIME evidence/iu
+	);
+});
+
+test('process-event parser rejects forged inspector and invocation bindings', () => {
+	const valid = JSON.parse(
+		evidenceBytes([
+			startEvent({ eventMs: PROCESS_CREATION_MS, sequence: 0 })
+		]).toString('utf8')
+	) as {
+		etlSha256: string;
+		inspectionInvocation: {
+			etlSha256: string;
+			outputArtifactRelativePath: string;
+		};
+		inspectorProcessIdentity: {
+			creationTimeUtcTicks: string;
+			executable: {
+				fileIdHex: string;
+				unexpected?: boolean;
+			};
+		};
+	};
+	const parseMutation = (mutation: (artifact: typeof valid) => void) => {
+		const artifact = structuredClone(valid);
+		mutation(artifact);
+		return () => parseEtlProcessEventEvidence(
+			Buffer.from(`${JSON.stringify(artifact)}\r\n`, 'utf8')
+		);
+	};
+
+	assert.throws(
+		parseMutation(artifact => {
+			artifact.inspectionInvocation.etlSha256 = 'f'.repeat(64);
+		}),
+		/invocation does not identify its root evidence/iu
+	);
+	assert.throws(
+		parseMutation(artifact => {
+			artifact.inspectorProcessIdentity.creationTimeUtcTicks =
+				(BigInt(
+					artifact.inspectorProcessIdentity.creationTimeUtcTicks
+				) + 1n).toString(10);
+		}),
+		/not a canonical process creation time/iu
+	);
+	assert.throws(
+		parseMutation(artifact => {
+			artifact.inspectorProcessIdentity.executable.fileIdHex =
+				'0'.repeat(32);
+		}),
+		/fileIdHex is not canonical lowercase hexadecimal/iu
+	);
+	assert.throws(
+		parseMutation(artifact => {
+			artifact.inspectorProcessIdentity.executable.unexpected = true;
+		}),
+		/inspectorProcessIdentity\.executable does not match the closed schema/iu
+	);
+	assert.throws(
+		parseMutation(artifact => {
+			artifact.inspectionInvocation.outputArtifactRelativePath =
+				'captures/copied-process-events.json';
+		}),
+		/outputArtifactRelativePath must equal captures\/etl-process-events\.json/iu
 	);
 });
 

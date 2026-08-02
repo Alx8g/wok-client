@@ -17,9 +17,12 @@ import {
 import {
 	bindSelectedPresentMonFramesToProcessLifetime,
 	deriveEtlProcessLifetimes,
+	ETL_PROCESS_EVENT_OUTPUT_ARTIFACT,
 	parseEtlProcessEventEvidence,
 	parseEtlProcessLifetimeArtifact,
 	parsePresentMonProcessLifetimeBinding,
+	sameEtlProcessInspectionInvocation,
+	sameEtlProcessInspectorIdentity,
 	type EtlProcessLifetimeArtifact,
 	type EtlProcessLifetimeEnd,
 	type EtlProcessLifetimeStart,
@@ -497,7 +500,7 @@ async function verifyRunRecordLifetimeEvidence(options: {
 	expectedRecorderDurationMs: number;
 	record: RuntimeTournamentRunRecord;
 	tournamentDirectory: string;
-}): Promise<void> {
+}): Promise<string> {
 	const {
 		dryRun,
 		expectedRecorderDurationMs,
@@ -633,6 +636,33 @@ async function verifyRunRecordLifetimeEvidence(options: {
 	const processEventArtifact = parseEtlProcessEventEvidence(
 		processEventBytes
 	);
+	const presentingProcessId = expectPositiveUint32(
+		record.presentingProcessId,
+		`Run ${record.runId} presentingProcessId`
+	);
+	if (
+		!sameEtlProcessInspectionInvocation(
+			processEventArtifact.inspectionInvocation,
+			{
+				candidateId: record.candidateId,
+				etlFileIndex: acceptedCapture.etlFileIndex,
+				etlPath: acceptedCapture.operationalEtlPath,
+				etlSha256: acceptedCapture.etlSha256,
+				etlSizeBytes: acceptedCapture.etlSizeBytes,
+				etlVolumeSerialNumber:
+					acceptedCapture.etlVolumeSerialNumber,
+				outputArtifactRelativePath:
+					ETL_PROCESS_EVENT_OUTPUT_ARTIFACT,
+				role: 'etl-process-inspector',
+				runId: record.runId,
+				targetProcessId: presentingProcessId
+			}
+		)
+	) {
+		throw new Error(
+			`Run ${record.runId} ETL process inspection invocation is not bound to the planned run, accepted ETL, and target process.`
+		);
+	}
 	const lifetimeArtifact: EtlProcessLifetimeArtifact =
 		parseEtlProcessLifetimeArtifact(lifetimeBytes);
 	const binding: PresentMonProcessLifetimeBinding =
@@ -646,10 +676,6 @@ async function verifyRunRecordLifetimeEvidence(options: {
 			`Run ${record.runId} embedded PresentMon binding does not match its exact artifact.`
 		);
 	}
-	const presentingProcessId = expectPositiveUint32(
-		record.presentingProcessId,
-		`Run ${record.runId} presentingProcessId`
-	);
 	const headlineStreamKey = expectString(
 		record.headlineStreamKey,
 		`Run ${record.runId} headlineStreamKey`
@@ -725,18 +751,21 @@ async function verifyRunRecordLifetimeEvidence(options: {
 			`Run ${record.runId} PresentMon binding does not match the planned candidate and sampled presenting process.`
 		);
 	}
+	const persistedInspectorIdentity =
+		record.executionIdentities?.etlProcessInspector;
 	const inspector = expectRecord(
 		executionIdentities.etlProcessInspector,
 		`Run ${record.runId} ETL process inspector identity`
 	);
-	expectPositiveUint32(
+	const inspectorProcessId = expectPositiveUint32(
 		inspector.processId,
 		`Run ${record.runId} ETL process inspector processId`
 	);
-	expectCreationTimeUtcTicks(
-		inspector.creationTimeUtcTicks,
-		`Run ${record.runId} ETL process inspector creationTimeUtcTicks`
-	);
+	const inspectorCreationTimeUtcTicks =
+		expectCreationTimeUtcTicks(
+			inspector.creationTimeUtcTicks,
+			`Run ${record.runId} ETL process inspector creationTimeUtcTicks`
+		);
 	const inspectorExecutablePath = expectString(
 		inspector.executablePath,
 		`Run ${record.runId} ETL process inspector executablePath`
@@ -745,6 +774,19 @@ async function verifyRunRecordLifetimeEvidence(options: {
 		inspector.executable,
 		`Run ${record.runId} ETL process inspector executable`
 	);
+	if (
+		persistedInspectorIdentity === undefined
+		|| !sameEtlProcessInspectorIdentity(
+			processEventArtifact.inspectorProcessIdentity,
+			persistedInspectorIdentity
+		)
+		|| canonicalJson(processEventArtifact.inspectorProcessIdentity)
+			!== canonicalJson(inspector)
+	) {
+		throw new Error(
+			`Run ${record.runId} ETL process-event evidence does not match its executed inspector identity.`
+		);
+	}
 	const expectedRecorderPath = await realpath(
 		resolve(dryRun.report.etlRecorder.path)
 	);
@@ -842,6 +884,7 @@ async function verifyRunRecordLifetimeEvidence(options: {
 			`Run ${record.runId} PresentMon frames are not bound to the selected ETL lifetime.`
 		);
 	}
+	return `${inspectorProcessId}|${inspectorCreationTimeUtcTicks}`;
 }
 
 function runRecordMatchesPlan(
@@ -1128,14 +1171,21 @@ export async function resolveRuntimeTournamentResultEvidence(
 		);
 	}
 	await verifyPersistedRunRecords(result, tournamentDirectory);
-	await Promise.all(result.runRecords.map(record =>
-		verifyRunRecordLifetimeEvidence({
-			dryRun,
-			expectedRecorderDurationMs,
-			record,
-			tournamentDirectory
-		})
-	));
+	const inspectorLifetimeKeys = await Promise.all(
+		result.runRecords.map(record =>
+			verifyRunRecordLifetimeEvidence({
+				dryRun,
+				expectedRecorderDurationMs,
+				record,
+				tournamentDirectory
+			})
+		)
+	);
+	if (new Set(inspectorLifetimeKeys).size !== inspectorLifetimeKeys.length) {
+		throw new Error(
+			'Tournament runs reuse a creation-qualified ETL process inspector identity.'
+		);
+	}
 	const expectedAnalyses =
 		buildRuntimeTournamentPairAnalyses({
 			analysisControls: dryRun.report.analysisControls,

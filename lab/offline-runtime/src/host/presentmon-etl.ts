@@ -1,5 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { win32 } from 'node:path';
+import {
+	ETL_PROCESS_EVENT_OUTPUT_ARTIFACT,
+	type EtlProcessInspectionInvocation
+} from './etl-process-lifetimes.ts';
 import { parsePresentMonCsv } from './presentmon-csv.ts';
 import { sha256Hex } from '../shared/hash.ts';
 import { assertRuntimeLabIdentifier } from '../shared/protocol.ts';
@@ -175,12 +179,15 @@ export interface OfflinePresentMonArguments {
 
 export interface EtlProcessEventInspectionOptions {
 	acceptedCapture: AcceptedEtlRecorderCapture;
+	candidateId: string;
+	runId: string;
 	targetProcessId: number;
 }
 
 export interface EtlProcessEventInspectionArguments {
 	args: string[];
 	etlPath: string;
+	invocation: EtlProcessInspectionInvocation;
 	targetProcessId: number;
 }
 
@@ -712,6 +719,8 @@ export function buildEtlProcessEventInspectionArguments(
 	) {
 		throw new TypeError('acceptedCapture must come from acceptEtlRecorderPair().');
 	}
+	assertRuntimeLabIdentifier(options.runId, 'runId');
+	assertRuntimeLabIdentifier(options.candidateId, 'candidateId');
 	if (
 		!Number.isInteger(options.targetProcessId)
 		|| options.targetProcessId < 1
@@ -721,6 +730,19 @@ export function buildEtlProcessEventInspectionArguments(
 	}
 	const etlPath = options.acceptedCapture.operationalEtlPath;
 	assertOperationalEtlPath(etlPath, 'acceptedCapture.operationalEtlPath');
+	const invocation: EtlProcessInspectionInvocation = Object.freeze({
+		candidateId: options.candidateId,
+		etlFileIndex: options.acceptedCapture.etlFileIndex,
+		etlPath,
+		etlSha256: options.acceptedCapture.etlSha256,
+		etlSizeBytes: options.acceptedCapture.etlSizeBytes,
+		etlVolumeSerialNumber:
+			options.acceptedCapture.etlVolumeSerialNumber,
+		outputArtifactRelativePath: ETL_PROCESS_EVENT_OUTPUT_ARTIFACT,
+		role: 'etl-process-inspector',
+		runId: options.runId,
+		targetProcessId: options.targetProcessId
+	});
 	return {
 		args: [
 			'--inspect-etl', etlPath,
@@ -728,9 +750,12 @@ export function buildEtlProcessEventInspectionArguments(
 			'--expected-etl-size-bytes', String(options.acceptedCapture.etlSizeBytes),
 			'--expected-etl-file-index', options.acceptedCapture.etlFileIndex,
 			'--expected-etl-volume-serial-number', options.acceptedCapture.etlVolumeSerialNumber,
-			'--target-process-id', String(options.targetProcessId)
+			'--target-process-id', String(options.targetProcessId),
+			'--inspection-run-id', options.runId,
+			'--inspection-candidate-id', options.candidateId
 		],
 		etlPath,
+		invocation,
 		targetProcessId: options.targetProcessId
 	};
 }

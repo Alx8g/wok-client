@@ -727,10 +727,28 @@ test('noise-floor evidence independently verifies process lifetimes and executed
 	const inspectorMismatchResult = structuredClone(
 		inspectorMismatchFixture.tournamentResult
 	);
-	const inspectorIdentity = inspectorMismatchResult.runRecords[0]
+	const inspectorMismatchRecord = inspectorMismatchResult.runRecords[0];
+	const inspectorIdentity = inspectorMismatchRecord
 		?.executionIdentities?.etlProcessInspector;
-	assert.ok(inspectorIdentity);
+	assert.ok(inspectorIdentity && inspectorMismatchRecord.etlEvidence);
 	inspectorIdentity.executable.sha256 = 'f'.repeat(64);
+	const inspectorProcessEvents = JSON.parse(
+		await readFile(
+			inspectorMismatchRecord.etlEvidence.processEventArtifact.path,
+			'utf8'
+		)
+	) as {
+		inspectorProcessIdentity: {
+			executable: { sha256: string };
+		};
+	};
+	inspectorProcessEvents.inspectorProcessIdentity.executable.sha256 =
+		'f'.repeat(64);
+	inspectorMismatchRecord.etlEvidence.processEventArtifact =
+		await rewriteCompactCrLfJsonArtifact(
+			inspectorMismatchRecord.etlEvidence.processEventArtifact.path,
+			inspectorProcessEvents
+		);
 	await persistFixtureResult(
 		inspectorMismatchFixture,
 		inspectorMismatchResult
@@ -742,6 +760,244 @@ test('noise-floor evidence independently verifies process lifetimes and executed
 				inspectorMismatchFixture.tournamentResultPath
 		}),
 		/does not match the dry-run recorder attestation/iu
+	);
+
+	const embeddedInspectorMismatchFixture =
+		await createAttestedNoiseFloorFixture(
+			join(directory, 'embedded-inspector-mismatch')
+		);
+	const embeddedInspectorMismatchResult = structuredClone(
+		embeddedInspectorMismatchFixture.tournamentResult
+	);
+	const embeddedInspectorMismatchRecord =
+		embeddedInspectorMismatchResult.runRecords[0];
+	assert.ok(embeddedInspectorMismatchRecord?.etlEvidence);
+	const embeddedInspectorProcessEvents = JSON.parse(
+		await readFile(
+			embeddedInspectorMismatchRecord.etlEvidence
+				.processEventArtifact.path,
+			'utf8'
+		)
+	) as {
+		inspectorProcessIdentity: {
+			executable: { sha256: string };
+		};
+	};
+	embeddedInspectorProcessEvents.inspectorProcessIdentity
+		.executable.sha256 = 'f'.repeat(64);
+	embeddedInspectorMismatchRecord.etlEvidence.processEventArtifact =
+		await rewriteCompactCrLfJsonArtifact(
+			embeddedInspectorMismatchRecord.etlEvidence
+				.processEventArtifact.path,
+			embeddedInspectorProcessEvents
+		);
+	await persistFixtureResult(
+		embeddedInspectorMismatchFixture,
+		embeddedInspectorMismatchResult
+	);
+	await assert.rejects(
+		deriveRuntimeTournamentNoiseFloorFile({
+			outputPath: join(
+				directory,
+				'embedded-inspector-mismatch.json'
+			),
+			tournamentResultPath:
+				embeddedInspectorMismatchFixture.tournamentResultPath
+		}),
+		/does not match its executed inspector identity/iu
+	);
+
+	const swappedInspectorFixture = await createAttestedNoiseFloorFixture(
+		join(directory, 'swapped-inspector-identity')
+	);
+	const swappedInspectorResult = structuredClone(
+		swappedInspectorFixture.tournamentResult
+	);
+	const swappedInspectorTarget = swappedInspectorResult.runRecords[0];
+	const swappedInspectorSource = swappedInspectorResult.runRecords[1];
+	assert.ok(
+		swappedInspectorTarget?.executionIdentities
+			?.etlProcessInspector
+		&& swappedInspectorSource?.executionIdentities
+			?.etlProcessInspector
+	);
+	swappedInspectorTarget.executionIdentities.etlProcessInspector =
+		structuredClone(
+			swappedInspectorSource.executionIdentities.etlProcessInspector
+		);
+	await persistFixtureResult(
+		swappedInspectorFixture,
+		swappedInspectorResult
+	);
+	await assert.rejects(
+		deriveRuntimeTournamentNoiseFloorFile({
+			outputPath: join(directory, 'swapped-inspector-identity.json'),
+			tournamentResultPath:
+				swappedInspectorFixture.tournamentResultPath
+		}),
+		/does not match its executed inspector identity/iu
+	);
+
+	const inspectorInvocationMismatchFixture =
+		await createAttestedNoiseFloorFixture(
+			join(directory, 'inspector-invocation-mismatch')
+		);
+	const inspectorInvocationMismatchResult = structuredClone(
+		inspectorInvocationMismatchFixture.tournamentResult
+	);
+	const inspectorInvocationMismatchRecord =
+		inspectorInvocationMismatchResult.runRecords[0];
+	assert.ok(inspectorInvocationMismatchRecord?.etlEvidence);
+	const inspectorInvocationProcessEvents = JSON.parse(
+		await readFile(
+			inspectorInvocationMismatchRecord.etlEvidence
+				.processEventArtifact.path,
+			'utf8'
+		)
+	) as { inspectionInvocation: { runId: string } };
+	inspectorInvocationProcessEvents.inspectionInvocation.runId =
+		'different-run';
+	inspectorInvocationMismatchRecord.etlEvidence.processEventArtifact =
+		await rewriteCompactCrLfJsonArtifact(
+			inspectorInvocationMismatchRecord.etlEvidence
+				.processEventArtifact.path,
+			inspectorInvocationProcessEvents
+		);
+	await persistFixtureResult(
+		inspectorInvocationMismatchFixture,
+		inspectorInvocationMismatchResult
+	);
+	await assert.rejects(
+		deriveRuntimeTournamentNoiseFloorFile({
+			outputPath: join(
+				directory,
+				'inspector-invocation-mismatch.json'
+			),
+			tournamentResultPath:
+				inspectorInvocationMismatchFixture.tournamentResultPath
+		}),
+		/inspection invocation is not bound to the planned run, accepted ETL, and target process/iu
+	);
+
+	const inspectorTargetMismatchFixture =
+		await createAttestedNoiseFloorFixture(
+			join(directory, 'inspector-target-mismatch')
+		);
+	const inspectorTargetMismatchResult = structuredClone(
+		inspectorTargetMismatchFixture.tournamentResult
+	);
+	const inspectorTargetMismatchRecord =
+		inspectorTargetMismatchResult.runRecords[0];
+	assert.ok(inspectorTargetMismatchRecord?.etlEvidence);
+	const inspectorTargetProcessEvents = JSON.parse(
+		await readFile(
+			inspectorTargetMismatchRecord.etlEvidence
+				.processEventArtifact.path,
+			'utf8'
+		)
+	) as {
+		events: Array<{ processId: number }>;
+		inspectionInvocation: { targetProcessId: number };
+		targetProcessId: number;
+	};
+	inspectorTargetProcessEvents.targetProcessId += 1;
+	inspectorTargetProcessEvents.inspectionInvocation.targetProcessId =
+		inspectorTargetProcessEvents.targetProcessId;
+	for (const event of inspectorTargetProcessEvents.events) {
+		event.processId = inspectorTargetProcessEvents.targetProcessId;
+	}
+	inspectorTargetMismatchRecord.etlEvidence.processEventArtifact =
+		await rewriteCompactCrLfJsonArtifact(
+			inspectorTargetMismatchRecord.etlEvidence
+				.processEventArtifact.path,
+			inspectorTargetProcessEvents
+		);
+	await persistFixtureResult(
+		inspectorTargetMismatchFixture,
+		inspectorTargetMismatchResult
+	);
+	await assert.rejects(
+		deriveRuntimeTournamentNoiseFloorFile({
+			outputPath: join(directory, 'inspector-target-mismatch.json'),
+			tournamentResultPath:
+				inspectorTargetMismatchFixture.tournamentResultPath
+		}),
+		/inspection invocation is not bound to the planned run, accepted ETL, and target process/iu
+	);
+
+	const reusedInspectorFixture = await createAttestedNoiseFloorFixture(
+		join(directory, 'reused-inspector-lifetime')
+	);
+	const reusedInspectorResult = structuredClone(
+		reusedInspectorFixture.tournamentResult
+	);
+	const reusedInspectorSource = reusedInspectorResult.runRecords[0];
+	const reusedInspectorTarget = reusedInspectorResult.runRecords[1];
+	const reusedInspectorIdentity = reusedInspectorSource
+		?.executionIdentities?.etlProcessInspector;
+	assert.ok(
+		reusedInspectorIdentity
+		&& reusedInspectorTarget?.executionIdentities?.etlProcessInspector
+		&& reusedInspectorTarget.etlEvidence
+	);
+	reusedInspectorTarget.executionIdentities.etlProcessInspector =
+		structuredClone(reusedInspectorIdentity);
+	const reusedInspectorProcessEvents = JSON.parse(
+		await readFile(
+			reusedInspectorTarget.etlEvidence.processEventArtifact.path,
+			'utf8'
+		)
+	) as { inspectorProcessIdentity: typeof reusedInspectorIdentity };
+	reusedInspectorProcessEvents.inspectorProcessIdentity =
+		structuredClone(reusedInspectorIdentity);
+	reusedInspectorTarget.etlEvidence.processEventArtifact =
+		await rewriteCompactCrLfJsonArtifact(
+			reusedInspectorTarget.etlEvidence.processEventArtifact.path,
+			reusedInspectorProcessEvents
+		);
+	assert.ok(
+		reusedInspectorTarget.etlProcessLifetimeEvidence
+		&& reusedInspectorTarget.presentMonProcessLifetimeBinding
+		&& reusedInspectorTarget.presentMonProcessLifetimeBindingEvidence
+	);
+	const reusedInspectorProcessEventSha256 =
+		reusedInspectorTarget.etlEvidence.processEventArtifact.sha256;
+	const reusedInspectorLifetime = JSON.parse(
+		await readFile(
+			reusedInspectorTarget.etlProcessLifetimeEvidence.path,
+			'utf8'
+		)
+	) as { processEventEvidenceSha256: string };
+	reusedInspectorLifetime.processEventEvidenceSha256 =
+		reusedInspectorProcessEventSha256;
+	reusedInspectorTarget.etlProcessLifetimeEvidence =
+		await rewriteJsonArtifact(
+			reusedInspectorTarget.etlProcessLifetimeEvidence.path,
+			reusedInspectorLifetime
+		);
+	const reusedInspectorBinding = {
+		...reusedInspectorTarget.presentMonProcessLifetimeBinding,
+		processEventEvidenceSha256: reusedInspectorProcessEventSha256
+	};
+	reusedInspectorTarget.presentMonProcessLifetimeBinding =
+		reusedInspectorBinding;
+	reusedInspectorTarget.presentMonProcessLifetimeBindingEvidence =
+		await rewriteJsonArtifact(
+			reusedInspectorTarget
+				.presentMonProcessLifetimeBindingEvidence.path,
+			reusedInspectorBinding
+		);
+	await persistFixtureResult(
+		reusedInspectorFixture,
+		reusedInspectorResult
+	);
+	await assert.rejects(
+		deriveRuntimeTournamentNoiseFloorFile({
+			outputPath: join(directory, 'reused-inspector-lifetime.json'),
+			tournamentResultPath:
+				reusedInspectorFixture.tournamentResultPath
+		}),
+		/reuse a creation-qualified ETL process inspector identity/iu
 	);
 
 	const divergentRecordsFixture =

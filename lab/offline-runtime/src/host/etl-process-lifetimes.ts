@@ -8,6 +8,37 @@ const MAX_FILETIME_TICKS =
 	MAX_DOTNET_DATE_TIME_TICKS - DOTNET_FILETIME_EPOCH_OFFSET_TICKS;
 const MAX_PROCESS_EVENT_COUNT = 100_000;
 
+export const ETL_PROCESS_EVENT_OUTPUT_ARTIFACT =
+	'captures/etl-process-events.json' as const;
+
+export interface EtlProcessInspectorExecutableIdentity {
+	fileIdHex: string;
+	finalPath: string;
+	sha256: string;
+	sizeBytes: number;
+	volumeSerialNumberHex: string;
+}
+
+export interface EtlProcessInspectorIdentity {
+	creationTimeUtcTicks: string;
+	executable: EtlProcessInspectorExecutableIdentity;
+	executablePath: string;
+	processId: number;
+}
+
+export interface EtlProcessInspectionInvocation {
+	candidateId: string;
+	etlFileIndex: string;
+	etlPath: string;
+	etlSha256: string;
+	etlSizeBytes: number;
+	etlVolumeSerialNumber: string;
+	outputArtifactRelativePath: typeof ETL_PROCESS_EVENT_OUTPUT_ARTIFACT;
+	role: 'etl-process-inspector';
+	runId: string;
+	targetProcessId: number;
+}
+
 export interface EtlProcessStartEventEvidence {
 	createTimeFileTimeUtc: string;
 	creationTimeUtcTicks: string;
@@ -42,9 +73,11 @@ export interface EtlProcessEventEvidenceArtifact {
 	etlSizeBytes: number;
 	etlVolumeSerialNumber: string;
 	events: readonly EtlProcessEventEvidence[];
+	inspectionInvocation: EtlProcessInspectionInvocation;
+	inspectorProcessIdentity: EtlProcessInspectorIdentity;
 	phase: 'etl-process-events';
 	targetProcessId: number;
-	version: 1;
+	version: 2;
 }
 
 export interface EtlProcessLifetimeStart {
@@ -252,6 +285,183 @@ function canonicalExecutableName(value: unknown, label: string): string {
 	return value;
 }
 
+function canonicalRuntimeIdentifier(value: unknown, label: string): string {
+	if (
+		typeof value !== 'string'
+		|| !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/u.test(value)
+	) {
+		throw new TypeError(`${label} is not a canonical runtime identifier.`);
+	}
+	return value;
+}
+
+function canonicalBoundedPath(value: unknown, label: string): string {
+	if (
+		typeof value !== 'string'
+		|| value.length < 1
+		|| value.length > 32_767
+		|| value.includes('\0')
+	) {
+		throw new TypeError(`${label} is not a bounded path.`);
+	}
+	return value;
+}
+
+function canonicalLowerHex(
+	value: unknown,
+	length: number,
+	label: string
+): string {
+	if (
+		typeof value !== 'string'
+		|| value.length !== length
+		|| !/^[0-9a-f]+$/u.test(value)
+	) {
+		throw new TypeError(`${label} is not canonical lowercase hexadecimal.`);
+	}
+	return value;
+}
+
+function parseInspectorProcessIdentity(
+	value: unknown
+): EtlProcessInspectorIdentity {
+	if (!isRecord(value)) {
+		throw new TypeError('inspectorProcessIdentity must be an object.');
+	}
+	const label = 'inspectorProcessIdentity';
+	assertExactKeys(value, [
+		'creationTimeUtcTicks',
+		'executable',
+		'executablePath',
+		'processId'
+	], label);
+	if (!isRecord(value.executable)) {
+		throw new TypeError(`${label}.executable must be an object.`);
+	}
+	assertExactKeys(value.executable, [
+		'fileIdHex',
+		'finalPath',
+		'sha256',
+		'sizeBytes',
+		'volumeSerialNumberHex'
+	], `${label}.executable`);
+	return Object.freeze({
+		creationTimeUtcTicks: canonicalCreationTimeUtcTicks(
+			value.creationTimeUtcTicks,
+			`${label}.creationTimeUtcTicks`
+		),
+		executable: Object.freeze({
+			fileIdHex: canonicalLowerHex(
+				value.executable.fileIdHex,
+				16,
+				`${label}.executable.fileIdHex`
+			),
+			finalPath: canonicalBoundedPath(
+				value.executable.finalPath,
+				`${label}.executable.finalPath`
+			),
+			sha256: canonicalLowerHex(
+				value.executable.sha256,
+				64,
+				`${label}.executable.sha256`
+			),
+			sizeBytes: requiredInteger(
+				value.executable,
+				'sizeBytes',
+				`${label}.executable`,
+				1,
+				Number.MAX_SAFE_INTEGER
+			),
+			volumeSerialNumberHex: canonicalLowerHex(
+				value.executable.volumeSerialNumberHex,
+				8,
+				`${label}.executable.volumeSerialNumberHex`
+			)
+		}),
+		executablePath: canonicalBoundedPath(
+			value.executablePath,
+			`${label}.executablePath`
+		),
+		processId: requiredInteger(
+			value,
+			'processId',
+			label,
+			1,
+			0xffff_ffff
+		)
+	});
+}
+
+function parseInspectionInvocation(
+	value: unknown
+): EtlProcessInspectionInvocation {
+	if (!isRecord(value)) {
+		throw new TypeError('inspectionInvocation must be an object.');
+	}
+	const label = 'inspectionInvocation';
+	assertExactKeys(value, [
+		'candidateId',
+		'etlFileIndex',
+		'etlPath',
+		'etlSha256',
+		'etlSizeBytes',
+		'etlVolumeSerialNumber',
+		'outputArtifactRelativePath',
+		'role',
+		'runId',
+		'targetProcessId'
+	], label);
+	return Object.freeze({
+		candidateId: canonicalRuntimeIdentifier(
+			value.candidateId,
+			`${label}.candidateId`
+		),
+		etlFileIndex: canonicalLowerHex(
+			value.etlFileIndex,
+			16,
+			`${label}.etlFileIndex`
+		),
+		etlPath: canonicalBoundedPath(value.etlPath, `${label}.etlPath`),
+		etlSha256: canonicalLowerHex(
+			value.etlSha256,
+			64,
+			`${label}.etlSha256`
+		),
+		etlSizeBytes: requiredInteger(
+			value,
+			'etlSizeBytes',
+			label,
+			1,
+			Number.MAX_SAFE_INTEGER
+		),
+		etlVolumeSerialNumber: canonicalUnsignedDecimal(
+			value.etlVolumeSerialNumber,
+			`${label}.etlVolumeSerialNumber`,
+			0xffff_ffffn
+		),
+		outputArtifactRelativePath: requiredLiteral(
+			value,
+			'outputArtifactRelativePath',
+			ETL_PROCESS_EVENT_OUTPUT_ARTIFACT,
+			label
+		),
+		role: requiredLiteral(
+			value,
+			'role',
+			'etl-process-inspector',
+			label
+		),
+		runId: canonicalRuntimeIdentifier(value.runId, `${label}.runId`),
+		targetProcessId: requiredInteger(
+			value,
+			'targetProcessId',
+			label,
+			1,
+			0xffff_ffff
+		)
+	});
+}
+
 function parseProcessEvent(
 	value: unknown,
 	index: number,
@@ -409,9 +619,11 @@ export function parseEtlProcessEventEvidence(
 		'etlSizeBytes',
 		'etlSha256',
 		'targetProcessId',
+		'inspectionInvocation',
+		'inspectorProcessIdentity',
 		'events'
 	], 'ETL process-event evidence');
-	requiredLiteral(parsed, 'version', 1, 'ETL process-event evidence');
+	requiredLiteral(parsed, 'version', 2, 'ETL process-event evidence');
 	requiredLiteral(
 		parsed,
 		'phase',
@@ -450,50 +662,95 @@ export function parseEtlProcessEventEvidence(
 			);
 		}
 	}
-	const etlSha256 = requiredString(
-		parsed,
-		'etlSha256',
-		'ETL process-event evidence',
-		64
+	const etlSha256 = canonicalLowerHex(
+		parsed.etlSha256,
+		64,
+		'ETL process-event evidence.etlSha256'
 	);
-	if (!/^[0-9a-f]{64}$/u.test(etlSha256)) {
-		throw new TypeError('ETL process-event evidence SHA-256 is invalid.');
-	}
-	const etlFileIndex = requiredString(
-		parsed,
-		'etlFileIndex',
-		'ETL process-event evidence',
-		16
+	const etlFileIndex = canonicalLowerHex(
+		parsed.etlFileIndex,
+		16,
+		'ETL process-event evidence.etlFileIndex'
 	);
-	if (!/^[0-9a-f]{16}$/u.test(etlFileIndex)) {
-		throw new TypeError('ETL process-event evidence file index is invalid.');
+	const etlPath = canonicalBoundedPath(
+		parsed.etlPath,
+		'ETL process-event evidence.etlPath'
+	);
+	const etlSizeBytes = requiredInteger(
+		parsed,
+		'etlSizeBytes',
+		'ETL process-event evidence',
+		1,
+		Number.MAX_SAFE_INTEGER
+	);
+	const etlVolumeSerialNumber = canonicalUnsignedDecimal(
+		parsed.etlVolumeSerialNumber,
+		'ETL process-event evidence.etlVolumeSerialNumber',
+		0xffff_ffffn
+	);
+	const inspectionInvocation = parseInspectionInvocation(
+		parsed.inspectionInvocation
+	);
+	if (
+		inspectionInvocation.etlFileIndex !== etlFileIndex
+		|| inspectionInvocation.etlPath !== etlPath
+		|| inspectionInvocation.etlSha256 !== etlSha256
+		|| inspectionInvocation.etlSizeBytes !== etlSizeBytes
+		|| inspectionInvocation.etlVolumeSerialNumber
+			!== etlVolumeSerialNumber
+		|| inspectionInvocation.targetProcessId !== targetProcessId
+	) {
+		throw new TypeError(
+			'ETL process-event invocation does not identify its root evidence.'
+		);
 	}
 	return Object.freeze({
 		etlFileIndex,
-		etlPath: requiredString(
-			parsed,
-			'etlPath',
-			'ETL process-event evidence',
-			32_767
-		),
+		etlPath,
 		etlSha256,
-		etlSizeBytes: requiredInteger(
-			parsed,
-			'etlSizeBytes',
-			'ETL process-event evidence',
-			1,
-			Number.MAX_SAFE_INTEGER
-		),
-		etlVolumeSerialNumber: canonicalUnsignedDecimal(
-			parsed.etlVolumeSerialNumber,
-			'ETL process-event evidence.etlVolumeSerialNumber',
-			0xffff_ffffn
-		),
+		etlSizeBytes,
+		etlVolumeSerialNumber,
 		events: Object.freeze(events),
+		inspectionInvocation,
+		inspectorProcessIdentity: parseInspectorProcessIdentity(
+			parsed.inspectorProcessIdentity
+		),
 		phase: 'etl-process-events',
 		targetProcessId,
-		version: 1
+		version: 2
 	});
+}
+
+export function sameEtlProcessInspectorIdentity(
+	left: EtlProcessInspectorIdentity,
+	right: EtlProcessInspectorIdentity
+): boolean {
+	return left.processId === right.processId
+		&& left.creationTimeUtcTicks === right.creationTimeUtcTicks
+		&& left.executablePath === right.executablePath
+		&& left.executable.fileIdHex === right.executable.fileIdHex
+		&& left.executable.finalPath === right.executable.finalPath
+		&& left.executable.sha256 === right.executable.sha256
+		&& left.executable.sizeBytes === right.executable.sizeBytes
+		&& left.executable.volumeSerialNumberHex
+			=== right.executable.volumeSerialNumberHex;
+}
+
+export function sameEtlProcessInspectionInvocation(
+	left: EtlProcessInspectionInvocation,
+	right: EtlProcessInspectionInvocation
+): boolean {
+	return left.candidateId === right.candidateId
+		&& left.etlFileIndex === right.etlFileIndex
+		&& left.etlPath === right.etlPath
+		&& left.etlSha256 === right.etlSha256
+		&& left.etlSizeBytes === right.etlSizeBytes
+		&& left.etlVolumeSerialNumber === right.etlVolumeSerialNumber
+		&& left.outputArtifactRelativePath
+			=== right.outputArtifactRelativePath
+		&& left.role === right.role
+		&& left.runId === right.runId
+		&& left.targetProcessId === right.targetProcessId;
 }
 
 function parseCanonicalPrettyJsonArtifact(

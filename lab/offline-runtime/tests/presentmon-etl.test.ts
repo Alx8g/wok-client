@@ -271,6 +271,8 @@ test('offline PresentMon process-name replay uses one executable basename for Jo
 test('ETL process inspection binds exact accepted bytes and target PID', () => {
 	const launch = buildEtlProcessEventInspectionArguments({
 		acceptedCapture: acceptedCapture(),
+		candidateId: 'electron-44',
+		runId: 'run-a',
 		targetProcessId: 42_424
 	});
 
@@ -282,8 +284,22 @@ test('ETL process inspection binds exact accepted bytes and target PID', () => {
 		'--expected-etl-size-bytes', '12345678',
 		'--expected-etl-file-index', ETL_FILE_INDEX,
 		'--expected-etl-volume-serial-number', ETL_VOLUME_SERIAL_NUMBER,
-		'--target-process-id', '42424'
+		'--target-process-id', '42424',
+		'--inspection-run-id', 'run-a',
+		'--inspection-candidate-id', 'electron-44'
 	]);
+	assert.deepEqual(launch.invocation, {
+		candidateId: 'electron-44',
+		etlFileIndex: ETL_FILE_INDEX,
+		etlPath: OPERATIONAL_ETL_PATH,
+		etlSha256: ETL_SHA256,
+		etlSizeBytes: 12_345_678,
+		etlVolumeSerialNumber: ETL_VOLUME_SERIAL_NUMBER,
+		outputArtifactRelativePath: 'captures/etl-process-events.json',
+		role: 'etl-process-inspector',
+		runId: 'run-a',
+		targetProcessId: 42_424
+	});
 });
 
 test('ETL process inspection rejects forged captures and invalid target PIDs', () => {
@@ -291,6 +307,8 @@ test('ETL process inspection rejects forged captures and invalid target PIDs', (
 	assert.throws(
 		() => buildEtlProcessEventInspectionArguments({
 			acceptedCapture: { ...accepted },
+			candidateId: 'electron-44',
+			runId: 'run-a',
 			targetProcessId: 42_424
 		}),
 		/acceptEtlRecorderPair/u
@@ -299,9 +317,27 @@ test('ETL process inspection rejects forged captures and invalid target PIDs', (
 		assert.throws(
 			() => buildEtlProcessEventInspectionArguments({
 				acceptedCapture: accepted,
+				candidateId: 'electron-44',
+				runId: 'run-a',
 				targetProcessId
 			}),
 			/positive uint32/u
+		);
+	}
+	for (const [candidateId, runId] of [
+		['bad/candidate', 'run-a'],
+		['electron-44', 'bad/run'],
+		['', 'run-a'],
+		['electron-44', '']
+	] as const) {
+		assert.throws(
+			() => buildEtlProcessEventInspectionArguments({
+				acceptedCapture: accepted,
+				candidateId,
+				runId,
+				targetProcessId: 42_424
+			}),
+			/valid runtime-lab identifier/u
 		);
 	}
 });

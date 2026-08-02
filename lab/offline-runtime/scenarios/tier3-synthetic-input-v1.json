@@ -1,0 +1,17 @@
+{
+	"id": "tier3-synthetic-input-v1",
+	"protocolVersion": 1,
+	"tier": 3,
+	"claimBoundary": "In-page deterministic DOM event dispatch, receipt integrity and scheduler lateness; not trusted browser input IPC, hardware input latency or input-to-photon latency.",
+	"benchmarkMs": 30000,
+	"minSamples": 120,
+	"inputMode": "synthetic",
+	"profilePolicy": "fresh",
+	"networkPolicy": "loopback-only",
+	"tracePolicy": "disabled-for-headline-runs",
+	"viewport": {
+		"cssWidth": 1280,
+		"cssHeight": 720,
+		"deviceScaleFactor": 1
+	}
+}

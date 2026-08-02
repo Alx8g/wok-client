@@ -28,7 +28,6 @@ const lazyBoundaries = [
 	'src/discord-rpc.ts',
 	'src/competitive-mode.ts',
 	'src/adaptive-validation-runtime.ts',
-	'src/splashscreen.ts',
 	'src/calibration-window.ts'
 ];
 
@@ -53,11 +52,45 @@ for (const [outputPath, output] of Object.entries(metafile.outputs)) {
 assert.equal(entryOutputs.get('src/main.ts'), 'bundle/main.mjs', 'src/main.ts must produce bundle/main.mjs');
 assert.equal(entryOutputs.get('src/preload.ts'), 'bundle/preload.mjs', 'src/preload.ts must produce bundle/preload.mjs');
 
-for (const entry of ['bundle/main.mjs', 'bundle/preload.mjs']) {
-	const eagerInputs = eagerInputsOf(entry);
-	for (const boundary of lazyBoundaries) {
-		assert.ok(!eagerInputs.has(boundary), `${boundary} was flattened into the eager ${entry} bundle`);
+function outputsContainingInput(inputPath) {
+	return Object.entries(metafile.outputs)
+		.filter(([, output]) => Object.keys(output.inputs).some(candidate => candidate.replaceAll('\\', '/') === inputPath))
+		.map(([outputPath]) => outputPath.replaceAll('\\', '/'));
+}
+
+function reachableThroughDynamicImport(entryPath, targetPath) {
+	const pending = [{ outputPath: entryPath, crossedDynamicBoundary: false }];
+	const seen = new Set();
+	while (pending.length > 0) {
+		const current = pending.shift();
+		const seenKey = `${current.outputPath}:${current.crossedDynamicBoundary}`;
+		if (seen.has(seenKey)) continue;
+		seen.add(seenKey);
+		if (current.outputPath === targetPath && current.crossedDynamicBoundary) return true;
+		const output = metafile.outputs[current.outputPath];
+		if (!output) continue;
+		for (const imported of output.imports ?? []) {
+			if (imported.external) continue;
+			pending.push({
+				outputPath: imported.path.replaceAll('\\', '/'),
+				crossedDynamicBoundary: current.crossedDynamicBoundary || imported.kind === 'dynamic-import'
+			});
+		}
 	}
+	return false;
+}
+
+const entryBundles = ['bundle/main.mjs', 'bundle/preload.mjs'];
+for (const boundary of lazyBoundaries) {
+	const containingOutputs = outputsContainingInput(boundary);
+	assert.ok(containingOutputs.length > 0, `${boundary} is declared lazy but absent from the bundle graph`);
+	for (const entry of entryBundles) {
+		assert.ok(!eagerInputsOf(entry).has(boundary), `${boundary} was flattened into the eager ${entry} bundle`);
+	}
+	assert.ok(
+		containingOutputs.some(output => entryBundles.some(entry => reachableThroughDynamicImport(entry, output))),
+		`${boundary} is not reachable from an entry through a dynamic import`
+	);
 }
 
 // main.mjs must point Electron at the bundled preload, never the raw TypeScript one.

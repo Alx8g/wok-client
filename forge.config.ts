@@ -4,6 +4,7 @@ import { MakerDMG } from "@electron-forge/maker-dmg";
 import { MakerNSIS } from "./MakerNSIS.ts";
 import { copyFileSync, existsSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { verifyPackagedApplication } from './scripts/verify-package.mjs';
 
 export const PATCHED_ELECTRON_VERSION = "44.0.0-nightly.20260522";
 export const PATCHED_ELECTRON_RELEASE = `v${PATCHED_ELECTRON_VERSION}-patched-2`;
@@ -73,7 +74,8 @@ export default {
             // The app ships the bundled runtime (scripts/bundle.mjs output), not src/.
             /^\/(?!(bundle|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
             /^\/bundle\/metafile\.json$/,
-            /^\/assets\/(?!(?:blockFilters\.txt|full_logo\.svg|wok-mark\.svg|wok-mark-favicon\.svg|hideAds\.css|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash\.css)$)/
+            /^\/bundle\/.*\.mjs\.map$/,
+            /^\/assets\/(?!(?:blockFilters\.txt|wok-mark\.svg|hideAds\.css|intro-short-1080\.webm|intro-short-1440\.webm|intro-long-1080\.webm|intro-long-1440\.webm|intro\.html|intro\.js|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash-frame\.webp|splash\.css)$)/
         ],
         prune: true,
         asar: true,
@@ -123,18 +125,28 @@ export default {
             for (const buildPath of outputPaths) {
                 copyWokNotices(buildPath, platform);
                 if (platform === "linux" || platform === "win32") pruneChromiumLocales(buildPath);
-                if (platform !== "linux") continue;
+                if (platform === "linux") {
+                    const exeName = config.packagerConfig.executableName;
+                    const realBin = join(buildPath, `${exeName}.bin`);
+                    const wrapper = join(buildPath, exeName);
 
-                const exeName = config.packagerConfig.executableName;
-                const realBin = join(buildPath, `${exeName}.bin`);
-                const wrapper = join(buildPath, exeName);
+                    renameSync(wrapper, realBin);
 
-                renameSync(wrapper, realBin);
+                    writeFileSync(
+                        wrapper,
+                        `#!/bin/sh\nDIR="$(dirname "$(readlink -f "$0")")"\nexec "$DIR/${exeName}.bin" --ozone-platform=x11 "$@"\n`,
+                        { mode: 0o755 }
+                    );
+                }
 
-                writeFileSync(
-                    wrapper,
-                    `#!/bin/sh\nDIR="$(dirname "$(readlink -f "$0")")"\nexec "$DIR/${exeName}.bin" --ozone-platform=x11 "$@"\n`,
-                    { mode: 0o755 }
+                const verification = verifyPackagedApplication({
+                    buildPath,
+                    platform,
+                    repositoryRoot: import.meta.dirname
+                });
+                console.log(
+                    `Verified packaged ASAR: ${verification.bundleOutputCount} bundle outputs, `
+                    + `${verification.assetCount} assets.`
                 );
             }
         },

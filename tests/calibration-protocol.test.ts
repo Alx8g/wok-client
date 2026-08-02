@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
 	CALIBRATION_MAX_LAUNCHES,
 	calibrationClearWinMargin,
+	canStartCalibrationLaunch,
+	clampCalibrationTrialDeadline,
 	createCalibrationCandidates,
 	createCalibrationSignature,
 	finalizeCalibration,
@@ -12,9 +14,9 @@ import {
 	isCalibrationBudgetExhausted,
 	parseCalibrationState,
 	prepareCalibrationState,
-	recordCalibrationLaunch,
 	recordCalibrationResult,
 	startCalibrationRun,
+	tryRecordCalibrationLaunch,
 	type CalibrationCandidate,
 	type CalibrationMetrics,
 	type CalibrationState
@@ -280,8 +282,19 @@ test('the calibration budget bounds wall time and launches, then finalizes with 
 
 	assert.equal(isCalibrationBudgetExhausted(state, 89_000), false);
 	assert.equal(isCalibrationBudgetExhausted(state, 90_001), true);
+	assert.equal(clampCalibrationTrialDeadline(state, 99_000), 90_000);
+	assert.equal(clampCalibrationTrialDeadline(state, 80_000), 80_000);
 
-	for (let launch = 0; launch < CALIBRATION_MAX_LAUNCHES; launch++) state = recordCalibrationLaunch(state, 10);
+	for (let launch = 0; launch < CALIBRATION_MAX_LAUNCHES; launch++) {
+		assert.equal(canStartCalibrationLaunch(state, 10), true, `launch ${launch + 1} should be allowed`);
+		const admittedLaunch = tryRecordCalibrationLaunch(state, 10);
+		assert.ok(admittedLaunch);
+		state = admittedLaunch;
+	}
+	assert.equal(state.launchCount, CALIBRATION_MAX_LAUNCHES);
+	assert.equal(canStartCalibrationLaunch(state, 10), false);
+	assert.equal(tryRecordCalibrationLaunch(state, 10), undefined, 'a seventh launch must be stopped before incrementing');
+	assert.equal(state.launchCount, CALIBRATION_MAX_LAUNCHES);
 	assert.equal(isCalibrationBudgetExhausted(state, 10), true);
 
 	state = recordCalibrationResult(state, candidates[0], metricsForScore(300));

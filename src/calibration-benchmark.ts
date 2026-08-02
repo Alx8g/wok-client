@@ -318,6 +318,9 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			if (!measuring && timestamp >= warmupMinEnd && (warmupSettled() || timestamp >= warmupHardEnd)) {
 				measuring = true;
 				measureEnd = timestamp + config.benchmarkMs;
+				// Establish a fresh timer baseline inside the measured interval so lateness
+				// accumulated during warmup cannot reject an otherwise clean trial.
+				samplerExpected = undefined;
 			}
 			if (hooks.onProgress) {
 				hooks.onProgress(measuring

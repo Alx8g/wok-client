@@ -397,6 +397,11 @@ export function recordGraphicsGpuFailure(
 	reason: string,
 	now: number = Date.now()
 ): GraphicsProfileState {
+	// Chromium can report several teardown events for one failed GPU process. Once this
+	// launch has recorded its confirmed failure, later same-run events are diagnostics,
+	// not independent launches that should lengthen the backend quarantine.
+	if (!state.launchPending && state.lastLaunchOutcome === 'gpu-failure') return state;
+
 	const previous = state.backendFailures.find(failure => failure.backend === backend);
 	const previousIsRecent = previous && now <= previous.quarantineUntil + GRAPHICS_QUARANTINE_MAX_MS;
 	const failureCount = previousIsRecent ? previous.failureCount + 1 : 1;

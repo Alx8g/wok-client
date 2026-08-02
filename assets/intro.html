@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<!--
+		Launch identity animation.
+
+		The asset is a VP9 WebM with a real alpha channel (alpha_mode=1). Its video track ends at
+		3.733s while the audio track runs to 5.674s, so the sting keeps fading after the picture
+		has finished. The first ~1.3s is genuinely transparent, which is what lets the user's
+		desktop show through before the frame closes to opaque black.
+
+		The <video> element is deliberately off-screen and the picture is blitted to a canvas from
+		a requestAnimationFrame loop - see intro.js for the measurements that forced this. The main
+		process still drives the sequence entirely from the webContents media lifecycle events, so
+		this page needs no preload and has no IPC surface.
+	-->
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; media-src 'self'; script-src 'self'; style-src 'unsafe-inline'">
+	<title>WOK Client</title>
+	<style>
+		html,
+		body {
+			margin: 0;
+			padding: 0;
+			width: 100%;
+			height: 100%;
+			overflow: hidden;
+			/* Must stay transparent: any painted background would hide the desktop behind the window. */
+			background: transparent;
+		}
+
+		#intro-canvas {
+			position: fixed;
+			inset: 0;
+			width: 100%;
+			height: 100%;
+			background: transparent;
+		}
+
+		/* Decoded but never composited by the browser; intro.js blits it to the canvas instead. */
+		#intro-source {
+			display: none;
+		}
+	</style>
+</head>
+<body>
+	<canvas id="intro-canvas"></canvas>
+	<!-- src is set by intro.js from the resolution the main process selected. -->
+	<video id="intro-source" playsinline disablepictureinpicture></video>
+	<script src="intro.js"></script>
+</body>
+</html>

@@ -1,0 +1,26 @@
+[
+	{
+		"direction": "higher-is-better",
+		"metricId": "average-fps",
+		"noiseFloor": 0,
+		"practicalMargin": 2
+	},
+	{
+		"direction": "lower-is-better",
+		"metricId": "frame-time-p95-ms",
+		"noiseFloor": 0,
+		"practicalMargin": 0.5
+	},
+	{
+		"direction": "lower-is-better",
+		"metricId": "frame-time-p99-ms",
+		"noiseFloor": 0,
+		"practicalMargin": 1
+	},
+	{
+		"direction": "higher-is-better",
+		"metricId": "one-percent-low-fps",
+		"noiseFloor": 0,
+		"practicalMargin": 2
+	}
+]

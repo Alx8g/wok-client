@@ -1,0 +1,30 @@
+{
+	"bootstrapIterations": 10000,
+	"confidenceLevel": 0.95,
+	"metrics": [
+		{
+			"direction": "higher-is-better",
+			"metricId": "average-fps",
+			"practicalMargin": 2
+		},
+		{
+			"direction": "lower-is-better",
+			"metricId": "frame-time-p95-ms",
+			"practicalMargin": 0.5
+		},
+		{
+			"direction": "lower-is-better",
+			"metricId": "frame-time-p99-ms",
+			"practicalMargin": 1
+		},
+		{
+			"direction": "higher-is-better",
+			"metricId": "one-percent-low-fps",
+			"practicalMargin": 2
+		}
+	],
+	"minimumPairedBlocks": 7,
+	"noisePercentile": 0.95,
+	"targetPairedBlocks": 10,
+	"version": 1
+}

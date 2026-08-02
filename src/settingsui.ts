@@ -1,11 +1,13 @@
 import { join } from 'path';
-import { readFileSync, readdirSync } from 'fs';
+import { readdirSync } from 'fs';
+import { readFile } from 'fs/promises';
 import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
 import { styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
-import { MATCHMAKER_GAMEMODES, MATCHMAKER_REGIONS } from './matchmaker.ts';
+import { MATCHMAKER_GAMEMODES, MATCHMAKER_REGIONS } from './matchmaker-data.ts';
+import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
 
 const RefreshEnum = {
 	notNeeded: 0,
@@ -17,8 +19,10 @@ interface IPaths { [path: string]: string }
 let userPrefs: UserPrefs;
 let userPrefsPath: string;
 let userPrefsCache: UserPrefs; // the userprefs on path
-let refreshNeeded: (typeof RefreshEnum)[keyof typeof RefreshEnum]  = RefreshEnum.notNeeded;
-let refreshNotifElement: HTMLElement;
+let refreshNeeded: SettingsRefreshRequirement = RefreshEnum.notNeeded;
+let displayedRefreshNeeded: SettingsRefreshRequirement = RefreshEnum.notNeeded;
+let refreshNotifElement: HTMLElement | undefined;
+const settingsRefreshTracker = new SettingsRefreshTracker();
 let paths: IPaths;
 let resolveSettingsReady: () => void;
 export const settingsReady = new Promise<void>(resolve => { resolveSettingsReady = resolve; });
@@ -49,6 +53,11 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 	paths = received_paths;
 	userPrefs = received_userPrefs;
 	userPrefsCache = { ...received_userPrefs }; // cache userprefs
+	settingsRefreshTracker.reset();
+	refreshNeeded = RefreshEnum.notNeeded;
+	displayedRefreshNeeded = RefreshEnum.notNeeded;
+	refreshNotifElement?.remove();
+	refreshNotifElement = undefined;
 
 	settingsDesc.competitiveMode.button = { icon: 'speed', text: 'Run calibration', callback: () => ipcRenderer.send('calibration_request_rerun') };
 	settingsDesc.resourceSwapper.button = { icon: 'folder', text: 'Swapper', callback: e => openPath(e, paths.swapperPath) };
@@ -73,6 +82,27 @@ function openPath(e: MouseEvent, path: string) {
 	shell.openPath(path).catch(err => strippedConsole.error(err));
 }
 
+let customCssLoadGeneration = 0;
+
+async function applyCustomCssSelection(value: string) {
+	const generation = ++customCssLoadGeneration;
+	const cssElement = document.getElementById('crankshaftCustomCSS');
+	if (!cssElement) return;
+	if (value === 'None') {
+		cssElement.textContent = '';
+		return;
+	}
+
+	try {
+		const cssFile = await readFile(join(paths.cssPath, value), { encoding: 'utf-8' });
+		if (generation === customCssLoadGeneration && userPrefs.cssSwapper === value) {
+			cssElement.textContent = cssFile;
+		}
+	} catch (error) {
+		strippedConsole.error(`Failed to load custom CSS: ${value}`, error);
+	}
+}
+
 /**
  * each setting is defined here as a SettingsDesc object. check typescript intelliSense to see if you have all required props.
  * some setting types, like 'sel' will have more required props, for example 'opts'.
@@ -93,22 +123,23 @@ const settingsDesc: SettingsDesc = {
 	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Applies the calibrated graphics and frame-delivery profile plus a reversible set of safe Krunker performance settings. Calibration runs only with your consent, never blocks first play, and applies its profile provisionally while your next play sessions confirm it. Original game settings are backed up before modification.', safety: 0, cat: 0 },
 	fpsUncap: { title: 'Manual Un-cap FPS', type: 'bool', desc: 'Used when Competitive mode is off. Competitive mode uses the frame policy selected by calibration.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Manual Graphics Backend', type: 'sel', desc: 'Used when Competitive mode is off. Auto selects a conservative hardware profile. D3D11on12 is tuned for Intel-only Windows systems; Vulkan is experimental.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
-	performanceOverlay: { title: 'Performance Diagnostics', type: 'bool', desc: 'Shows lightweight FPS, 1% low, frame-time, active-backend, WebGL, and rasterization diagnostics. Alt+F8 toggles visibility.', safety: 0, cat: 0, refreshOnly: true },
+	performanceOverlay: { title: 'Performance Diagnostics', type: 'bool', desc: 'Shows lightweight renderer FPS/frame-time diagnostics plus Krunker-reported ping, variation, assigned region, TPS, and the game\'s lag warning. Reported ping is shown as-is and is not claimed to be RTT. Alt+F8 toggles visibility.', safety: 0, cat: 0, refreshOnly: true },
 	fullscreen: { title: 'Start in Windowed/Fullscreen mode', type: 'sel', desc: "Use 'borderless' if you have client-capped fps and unstable fps in fullscreen", safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
 	resourceSwapper: { title: 'Legacy Resource Swapper', type: 'bool', desc: 'Disabled by default. Prefer Krunker\'s official resource-pack and mod APIs; unofficial replacement may conflict with current service rules.', safety: 3, cat: 0 },
 	discordRPC: { title: 'Legacy Discord Rich Presence', type: 'bool', desc: 'Uses the upstream Crankshaft Discord application until WOK Client receives its own Discord application ID.', safety: 0, cat: 0 },
 	extendedRPC: { title: 'Extended Discord RPC', type: 'bool', desc: 'Adds WOK Client and upstream source buttons. No effect if RPC is off.', safety: 0, cat: 0, instant: true },
-	hideAds: { title: 'Legacy Ad Controls', type: 'sel', desc: 'Disabled by default. Blocking or hiding advertisements may conflict with current service requirements.', safety: 4, cat: 0, refreshOnly: true, opts: ['off', 'hide', 'block'] },
-	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Disabled by default. Filters can modify or cancel game requests and may conflict with current service rules.', safety: 4, cat: 0, refreshOnly: true },
+	hideAds: { title: 'Legacy Ad Controls', type: 'sel', desc: 'Disabled by default. Blocking or hiding advertisements may conflict with current service requirements. Changing network blocking requires an app restart.', safety: 4, cat: 0, opts: ['off', 'hide', 'block'] },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Disabled by default. Filters can modify or cancel game requests and may conflict with current service rules. Changes require an app restart.', safety: 4, cat: 0 },
 	saveMatchResultJSONButton: { title: 'Match Result To Clipboard', type: 'bool', desc: 'New button on match end which copies the match results JSON.', safety: 0, cat: 0, refreshOnly: true },
 
 	cssSwapper: cssSwapperOption,
 	menuTimer: { title: 'Menu Timer', type: 'bool', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', safety: 0, cat: 1, instant: true },
+	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK identity animation over your desktop while the game loads. Takes effect on the next launch.', safety: 0, cat: 1 },
+	introAudio: { title: 'Launch Animation Sound', type: 'bool', desc: 'Plays the launch sting. Has no effect if Launch Animation is off. Takes effect on the next launch.', safety: 0, cat: 1 },
 	clientSplash: { title: 'Client Splash Screen', type: 'bool', safety: 0, cat: 1, refreshOnly: true },
 	immersiveSplash: { title: 'Immersive Splash Screen', type: 'bool', desc: 'Adds a background that covers the Krunker loading skeleton. Has no effect if Client Splash Screen is off.', safety: 0, cat: 1, refreshOnly: true },
 	immersiveSplashBackgroundColor: { title: 'Immersive Splash Screen BG Color', desc: 'Changes the color of the immersive splash screen background. Has no effect if Immersive Splash Screen is off.', safety: 0, cat: 1, refreshOnly: true, type: 'color'},
-	loadingSplashTitleCardBackgroundColor: { title: 'Splash Screen Title Card BG Color', desc: 'Changes the color of the immersive splash screen title card. Has no effect if Client Splash Screen is off.', safety: 0, cat: 1, refreshOnly: true, type: 'color' },
 	regionTimezones: { title: 'Region Picker Timezones', type: 'bool', desc: 'Adds local time to all region pickers', safety: 0, cat: 1, refreshOnly: true },
 
 	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: "Disabled by default. Selects servers but does not automate gameplay; unofficial matchmaking may conflict with current service rules.", safety: 2, cat: 2, refreshOnly: true },
@@ -169,27 +200,55 @@ window.addEventListener('beforeunload', () => {
 	flushSettingsUpdates();
 });
 
-function recalculateRefreshNeeded() {
-	refreshNeeded = RefreshEnum.notNeeded;
-	const keys = Object.keys(userPrefs);
-	for (const key of keys) {
-		const cache = (item: UserPrefs[keyof UserPrefs]) => (Array.isArray(item) ? [...item] : item);
-		const descObj = settingsDesc[key];
-		const setting = cache(userPrefs[key]);
-		const cachedSetting = cache(userPrefsCache[key]);
+function settingValuesEqual(
+	setting: UserPrefs[keyof UserPrefs],
+	cachedSetting: UserPrefs[keyof UserPrefs]
+): boolean {
+	if (Array.isArray(setting) || Array.isArray(cachedSetting)) {
+		return Array.isArray(setting) && Array.isArray(cachedSetting) && haveSameContents(setting, cachedSetting);
+	}
+	if (setting !== null && cachedSetting !== null && typeof setting === 'object' && typeof cachedSetting === 'object') {
+		return objectsAreEqual(setting, cachedSetting);
+	}
+	return setting === cachedSetting;
+}
 
-		const settingsEqual = Array.isArray(setting) && Array.isArray(cachedSetting) ? haveSameContents(setting, cachedSetting)
-			: (typeof setting === "object" && typeof cachedSetting === "object") ? objectsAreEqual(setting, cachedSetting)
-			: setting === cachedSetting;
+function refreshRequirementForKey(key: string): SettingsRefreshRequirement {
+	const description = settingsDesc[key];
+	if (description?.instant) return RefreshEnum.notNeeded;
+	if (description?.refreshOnly) return RefreshEnum.refresh;
+	return RefreshEnum.reloadApp;
+}
 
-		if (!settingsEqual) {
-			if (descObj?.instant) {
-			} else if (descObj?.refreshOnly) {
-				if (refreshNeeded < RefreshEnum.refresh) refreshNeeded = RefreshEnum.refresh;
-			} else {
-				refreshNeeded = RefreshEnum.reloadApp;
-			}
-		}
+function updateRefreshNeededForKey(key: string) {
+	refreshNeeded = settingsRefreshTracker.update(
+		key,
+		!settingValuesEqual(userPrefs[key], userPrefsCache[key]),
+		refreshRequirementForKey(key)
+	);
+}
+
+function updateRefreshNotification() {
+	if (refreshNeeded === RefreshEnum.notNeeded) {
+		refreshNotifElement?.remove();
+		refreshNotifElement = undefined;
+		displayedRefreshNeeded = RefreshEnum.notNeeded;
+		return;
+	}
+
+	if (!refreshNotifElement) {
+		refreshNotifElement = createElement('div', {
+			class: ['crankshaft-holder-update', 'refresh-popup'],
+			innerHTML: skeleton.refreshElem(refreshNeeded)
+		});
+		document.body.appendChild(refreshNotifElement);
+		displayedRefreshNeeded = refreshNeeded;
+		return;
+	}
+
+	if (displayedRefreshNeeded !== refreshNeeded) {
+		refreshNotifElement.innerHTML = skeleton.refreshElem(refreshNeeded);
+		displayedRefreshNeeded = refreshNeeded;
 	}
 }
 
@@ -397,31 +456,17 @@ class SettingElem {
 				document.getElementById('hiddenClasses').classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
 			}
 
-			if (this.props.key === 'cssSwapper' && value !== 'None') {
-				const cssElem = document.getElementById('crankshaftCustomCSS');
-				const cssFile = readFileSync(join(paths.cssPath, value), { encoding: 'utf-8' });
-				cssElem.textContent = cssFile;
-			} else if (this.props.key === 'cssSwapper' && value === 'None') {
-				const cssElem = document.getElementById('crankshaftCustomCSS');
-				cssElem.textContent = '';
-			}
+			if (this.props.key === 'cssSwapper') void applyCustomCssSelection(String(value));
 
 			// you can add custom instant refresh callbacks for settings here
 			if (typeof value === 'boolean') {
 				if (this.props.key === 'menuTimer') toggleSettingCSS(styleSettingsCSS.menuTimer, this.props.key, value);
 				if (this.props.key === 'quickClassPicker') toggleSettingCSS(styleSettingsCSS.quickClassPicker, this.props.key, value);
 			}
+			updateRefreshNeededForKey(this.props.key);
+			updateRefreshNotification();
 		} else {
 			callback(value);
-		}
-		recalculateRefreshNeeded();
-		try { refreshNotifElement.remove(); } catch (_e) { }
-		if (refreshNeeded > 0) {
-			refreshNotifElement = createElement('div', {
-				class: ['crankshaft-holder-update', 'refresh-popup'],
-				innerHTML: skeleton.refreshElem(refreshNeeded)
-			});
-			document.body.appendChild(refreshNotifElement);
 		}
 	}
 
@@ -734,69 +779,63 @@ const crankshaftSettingsHolder = createElement('div', {
  */
 let settingElementPairs: { [key: string]: SettingElem } = {};
 
+function toggleSettingsCategory(header: Element) {
+	const sibling = header.nextElementSibling;
+	if (!sibling) return;
+	sibling.classList.toggle('setting-category-collapsed');
+
+	const iconElement = header.querySelector('.material-icons');
+	if (!iconElement) return;
+	iconElement.textContent = iconElement.textContent === 'keyboard_arrow_down'
+		? 'keyboard_arrow_right'
+		: 'keyboard_arrow_down';
+}
+
+crankshaftSettingsHolder.addEventListener('click', event => {
+	if (!(event.target instanceof Element)) return;
+	const header = event.target.closest('.Crankshaft-setHed');
+	if (header && crankshaftSettingsHolder.contains(header)) toggleSettingsCategory(header);
+});
+
 export function renderSettings() {
-	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? "").toLowerCase();
-	Array.from(document.querySelectorAll(".setHed")).filter(element => element.innerHTML === "No settings found").forEach(element => element.remove());
+	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').toLowerCase();
+	Array.from(document.querySelectorAll('.setHed')).filter(element => element.innerHTML === 'No settings found').forEach(element => element.remove());
 
 	crankshaftSettingsHolder.remove();
-	crankshaftSettingsHolder.innerHTML = "";
+	crankshaftSettingsHolder.replaceChildren();
 	settingElementPairs = {};
 
-	const settings: RenderReadySetting[] = transformMarrySettings(userPrefs, settingsDesc, 'normal').filter((setting) => {return settingSearchFilter(setting, filter)});
+	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
+		.filter(setting => settingSearchFilter(setting, filter));
+	const categoryBodies = new Map<number, HTMLElement>();
+	const ensureCategory = (categoryIndex: number): HTMLElement => {
+		const existing = categoryBodies.get(categoryIndex);
+		if (existing) return existing;
+		const category = categoryNames[categoryIndex];
+		const body = skeleton.catBodElem(category.cat, category.note ? skeleton.notice(category.note) : '');
+		crankshaftSettingsHolder.append(skeleton.catHedElem(category.name), body);
+		categoryBodies.set(categoryIndex, body);
+		return body;
+	};
 
-	// Add the basic client settings element whenever client settings are rendered
-	if (settings.filter(setting => setting.cat === 0).length === 0) {
-		crankshaftSettingsHolder.appendChild(skeleton.catHedElem(categoryNames[0].name));
-		crankshaftSettingsHolder.appendChild(skeleton.catBodElem(categoryNames[0].cat, ''));
+	// Preserve the basic client category even when a search filters out all of its settings.
+	if (!settings.some(setting => setting.cat === 0)) ensureCategory(0);
+
+	for (const setting of settings) {
+		const settingElement = new SettingElem(setting);
+		settingElementPairs[setting.key] = settingElement;
+		ensureCategory(setting.cat ?? 0).appendChild(settingElement.elem);
 	}
 
-	for (const setObj of settings) {
-		const setElem = new SettingElem(setObj);
-		settingElementPairs[setObj.key] = setElem;
-		const settElemMade = setElem.elem;
-
-		if ('cat' in setObj) { // if category is specified
-			const cat = categoryNames[setObj.cat];
-
-			// create the given category if it doesen't exist
-			if (crankshaftSettingsHolder.querySelector(`.${cat.cat}`) === null) {
-				crankshaftSettingsHolder.appendChild(skeleton.catHedElem(cat.name));
-				crankshaftSettingsHolder.appendChild(skeleton.catBodElem(cat.cat, ('note' in cat) ? skeleton.notice(cat.note) : ''));
-			}
-
-			// add to that category
-			crankshaftSettingsHolder.querySelector(`.${cat.cat}`).appendChild(settElemMade);
-		} else {
-			// add to default category
-			crankshaftSettingsHolder.querySelector('.setBodH.mainSettings').appendChild(settElemMade);
-		}
-	}
-
-	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder); // append the holder to the DOM
-
-	function toggleCategory(me: Element) {
-		const sibling = me.nextElementSibling;
-		sibling.classList.toggle('setting-category-collapsed');
-
-		const iconElem = me.querySelector('.material-icons');
-		if (iconElem.innerHTML.toString() === 'keyboard_arrow_down') iconElem.innerHTML = 'keyboard_arrow_right';
-		else iconElem.innerHTML = 'keyboard_arrow_down';
-	}
-
-	const settingCategoryHeaders = [...document.querySelectorAll('.Crankshaft-setHed')];
-	settingCategoryHeaders.forEach(header => {
-		const collapseCallback = () => { toggleCategory(header); };
-		try { header.removeEventListener('click', collapseCallback); } catch (_e) { }
-		header.addEventListener('click', collapseCallback);
-	});
-
+	const mainCategory = ensureCategory(0);
 	const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
 	supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
 	supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft upstream', _ => shell.openExternal(UPSTREAM_REPO_URL)));
-	document.querySelector('.setBodH.Crankshaft-setBodH').prepend(supportHolder);
 
 	const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
 	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
 	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK Client folder', e => openPath(e, paths.configPath)));
-	document.querySelector('.setBodH.Crankshaft-setBodH').prepend(buttonsHolder);
+	mainCategory.prepend(buttonsHolder, supportHolder);
+
+	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder);
 }

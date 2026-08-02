@@ -16,3 +16,7 @@
 *.pak binary
 *.bin binary
 *.db binary
+
+# Patch payload whitespace and the verified monitor bytes are attested data.
+*.patch -whitespace
+lab/offline-runtime/src/controller/windows-process-monitor.ts whitespace=-blank-at-eof

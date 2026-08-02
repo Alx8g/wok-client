@@ -1,6 +1,6 @@
-## WOK Client 1.0.0 (2026-07-30)
+## WOK Client 1.0.0 (2026-08-02)
 
-Modification notice: WOK Client is a modified distribution based on Crankshaft 2.0.0 (`ee43dee847ece639b7e5b6e9b8f6dc1729af90bd`). Crankshaft's GPL terms, attribution, contributor history, and historical changelog are retained below.
+Modification notice: WOK Client is a modified distribution based on Crankshaft 2.0.1 (`c1f1ce39e49296735ac73737b1cb6f2b5e5482b2`). Crankshaft's GPL terms, attribution, contributor history, and historical changelog are retained below.
 
 ### WOK changes
 - Added hardware-adaptive graphics selection, recovery, calibration, Competitive mode, and performance diagnostics.
@@ -9,9 +9,17 @@ Modification notice: WOK Client is a modified distribution based on Crankshaft 2
 - Replaced the ambiguously licensed Discord RPC package with an in-tree local IPC implementation and removed all runtime npm dependencies.
 - Removed the userscript subsystem, stale examples, selectors, and unused legacy assets from the public source tree.
 - Kept resource swapping, ad controls, custom filters, matchmaker, and competition automation disabled by default.
-- Removed the `in-process-gpu` switch after the upstream Crankshaft 2.0.1 fix identified Windows startup breakage.
+- Retained the upstream Crankshaft 2.0.1 removal of the `in-process-gpu` switch that broke Windows startup.
 - Assigned a fork-specific version and added patched-Electron source, patch, license, and SHA-256 provenance records.
 - Added source validation across Windows, Linux, and macOS plus a pinned tag-only workflow for unsigned, checksum-published GitHub prereleases.
+- Added an attested offline runtime laboratory with dedicated ETL capture, offline PresentMon replay, exact tournament plans, and content-addressed evidence.
+- Added an adaptive launch intro and one-shot gameplay-readiness handoff.
+
+## [2.0.1](https://github.com/KraXen72/crankshaft/compare/2.0.0...2.0.1) (2026-07-29)
+
+
+### Bugfixes
+- actually remove in-process-gpu code (fixes breakage on windows)
 
 ## [2.0.0](https://github.com/KraXen72/crankshaft/compare/1.12.0...2.0.0) (2026-07-28)
 

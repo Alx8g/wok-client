@@ -12,7 +12,7 @@ Releases: [WOK Client releases](https://github.com/nzalexgarciagil-ctrl/wok-clie
 
 ## Project status
 
-WOK Client `1.0.0` is the first WOK release and is a modified version of GPL-licensed [Crankshaft 2.0.0](https://github.com/KraXen72/crankshaft/tree/2.0.0). Crankshaft attribution, license terms, and contributor history are preserved. See [CHANGELOG.md](CHANGELOG.md), [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt) for the modification and dependency record.
+WOK Client `1.0.0` is the first WOK release and is a modified version of GPL-licensed [Crankshaft 2.0.1](https://github.com/KraXen72/crankshaft/tree/c1f1ce39e49296735ac73737b1cb6f2b5e5482b2). Crankshaft attribution, license terms, and contributor history are preserved. See [CHANGELOG.md](CHANGELOG.md), [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt) for the modification and dependency record.
 
 Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations.
 

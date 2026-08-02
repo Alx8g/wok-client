@@ -123,7 +123,7 @@ export function parseWindowsProcessTreeSample(value: string): WindowsProcessTree
 const PROCESS_IDENTITY_PROJECTION = [
 	'ForEach-Object { [PSCustomObject]@{',
 	"commandLine = if ($null -eq $_.CommandLine) { '' } else { [string]$_.CommandLine };",
-	"creationTimeUtcTicks = if ($null -eq $_.CreationDate) { '' } else { $ticks = [long]$_.CreationDate.ToUniversalTime().Ticks; [string]($ticks - ($ticks % 10)) };",
+	"creationTimeUtcTicks = if ($null -eq $_.CreationDate) { '' } else { $created = if ($_.CreationDate -is [datetime]) { $_.CreationDate } else { [System.Management.ManagementDateTimeConverter]::ToDateTime([string]$_.CreationDate) }; $ticks = [long]$created.ToUniversalTime().Ticks; [string]($ticks - ($ticks % 10)) };",
 	'executableName = [string]$_.Name;',
 	"executablePath = if ($null -eq $_.ExecutablePath) { '' } else { [string]$_.ExecutablePath };",
 	'parentProcessId = [int]$_.ParentProcessId;',
@@ -171,8 +171,8 @@ export async function listWindowsProcessesById(processIds: readonly number[]): P
 	if (ids.length === 0) return [];
 	if (ids.length > 4_096) throw new RangeError('No more than 4,096 process IDs can be queried at once.');
 	const command = [
-		'$items = @(Get-CimInstance',
-		'-ClassName Win32_Process',
+		'$items = @(Get-WmiObject',
+		'-Class Win32_Process',
 		'-Filter $env:WOK_RUNTIME_PROCESS_FILTER',
 		'-Property CommandLine,CreationDate,ExecutablePath,Name,ParentProcessId,ProcessId |',
 		PROCESS_IDENTITY_PROJECTION,

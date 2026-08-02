@@ -4,11 +4,14 @@ import { join as pathJoin, resolve as pathResolve } from 'path';
 import { ipcRenderer, webFrame } from 'electron';
 import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
 import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
+import { GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
 
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
 function sendPerfMark(name: string) {
-	if (perfMarksEnabled) ipcRenderer.send('wok_perf_mark', name, Date.now());
+	if (!perfMarksEnabled) return;
+	performance.mark(`wok:${name}`);
+	ipcRenderer.send('wok_perf_mark', name, Date.now());
 }
 sendPerfMark('preload-start');
 
@@ -466,6 +469,7 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 
 	document.addEventListener('keydown', event => {
 		if (event.code === 'Escape') document.exitPointerLock();
+		if (event.repeat) return;
 		const config = clientHotkeyConfig;
 		if (!config || !keyboardEventMatchesCustomSetting(config.matchmakerKey, event)) return;
 		if (config.matchmakerEnabled) {
@@ -478,17 +482,59 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 	});
 }
 
+let gameUsableObservationStarted = false;
+const gameUsableSignal = new GameUsabilitySignal({
+	onFirstReport: () => {
+		sendPerfMark('game-usable');
+		ipcRenderer.send('wok_game_usable');
+	},
+	onListenerError: error => {
+		strippedConsole.error(
+			'Game usability listener failed',
+			error
+		);
+	}
+});
+
+/** Report gameplay readiness once, independently of whether the optional client splash is enabled. */
+function reportGameUsable(): void {
+	gameUsableSignal.report();
+}
+
+function onGameUsable(listener: () => void): () => void {
+	return gameUsableSignal.subscribe(listener);
+}
+
+/**
+ * Krunker's populated #instructions UI is the earliest stable readiness signal used by the
+ * original splash. Pointer lock is an independent definitive signal. Observe both on every
+ * launch so disabled or failed presentation code cannot prevent the adaptive intro profile from
+ * learning, including when #instructions is created after the window load event.
+ */
+function observeGameUsable(): void {
+	if (gameUsableObservationStarted) return;
+	gameUsableObservationStarted = true;
+	observeGameUsability({
+		document,
+		onUsable: reportGameUsable
+	});
+}
+
 let splashMountAttempted = false;
 
-async function mountClientSplash(_userPrefs: UserPrefs, version: string): Promise<void> {
+async function mountClientSplash(_userPrefs: UserPrefs): Promise<void> {
 	if (splashMountAttempted) return;
 	splashMountAttempted = true;
-	const { immersiveSplash, immersiveSplashBackgroundColor, loadingSplashTitleCardBackgroundColor } = _userPrefs;
+	// The title-card colour preference no longer applies: the loading screen carries the launch
+	// animation's final frame rather than a card that can be recoloured.
+	const { immersiveSplash, immersiveSplashBackgroundColor } = _userPrefs;
 
-	const [{ splashFlavor }, splashCSS, logoSVGSource] = await Promise.all([
-		import('./splashscreen.ts'),
+	const [splashCSS, splashFrame] = await Promise.all([
 		readFile(pathJoin($assets, 'splash.css'), { encoding: 'utf-8' }),
-		readFile(pathJoin($assets, 'full_logo.svg'), { encoding: 'utf-8' })
+		// The launch animation's own final frame. Inlined as a data URI because this stylesheet is
+		// injected into Krunker's document, where a relative url() would resolve against
+		// krunker.io and a file:// URL would be blocked.
+		readFile(pathJoin($assets, 'splash-frame.webp'))
 	]);
 	webFrame.insertCSS(splashCSS);
 
@@ -505,44 +551,37 @@ async function mountClientSplash(_userPrefs: UserPrefs, version: string): Promis
 		splashBackground.style.setProperty('background-color', `${immersiveSplashBackgroundColor}`);
 	}
 
-	const logoSVG = createElement('div', {
-		id: 'crankshaft-logo-holder',
-		innerHTML: logoSVGSource
-	});
-	logoSVG.style.setProperty('background-color', `${loadingSplashTitleCardBackgroundColor}`);
+	/*
+	 * The stage reproduces exactly the rectangle the launch animation occupies under
+	 * object-fit: cover, and paints that animation's own final frame into it. The video therefore
+	 * hands over to this screen without the lockup moving by a pixel - which matters because the
+	 * V8 lockup in the animation does not match assets/full_logo.svg (its mark is 1.40x the
+	 * wordmark cap height rather than 1.26x, with a much tighter gap), so redrawing it from the
+	 * SVG would land in a visibly different place.
+	 */
+	const stage = createElement('div', { class: 'wok-splash-stage' });
+	stage.style.setProperty('background-image', `url("data:image/webp;base64,${splashFrame.toString('base64')}")`);
+	splashBackground.appendChild(stage);
 
-	uiBaseElement.appendChild(splashBackground);
+	/*
+	 * Mounted on <body>, NOT inside #uiBase. Krunker applies its UI scale to #uiBase as a CSS
+	 * transform (measured: matrix(0.869, 0, 0, 0.869, 0, 0)), which rescaled this overlay to 86.9%
+	 * and shrank the lockup by 13% relative to the launch animation that hands over to it. The
+	 * element still waits for #uiBase to exist, because that is the earliest reliable signal that
+	 * the parser has reached Krunker's UI, but it must not inherit that transform.
+	 */
+	document.body.appendChild(splashBackground);
 
-	// i am not sure if you should be injecting more elements into a svg element, but it seems to work. feel free to pr a better version tho.
-	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-l', id: 'loadInfoLHolder', text: `v${version}` }));
-	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-r', id: 'loadInfoRHolder', text: 'WOK Client • Based on Crankshaft' }));
-	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-splash', id: 'loadInfoSplashHolder', text: splashFlavor }));
-	logoSVG.appendChild(createElement('div', { class: 'crankshaft-holder-loadingindicator', id: 'loadInfoLoadingIndicator', text: 'LOADING...' }));
-	splashBackground.appendChild(logoSVG);
-
-	const clearListeners = new AbortController();
-	const observer = new MutationObserver(mutationList => {
-		for (const mutation of mutationList) if (mutation.type === 'childList') clearSplash();
-	});
+	let splashCleared = false;
+	let removeGameUsableListener: () => void = () => {};
 	const clearSplash = () => {
-		try {
-			splashBackground.remove();
-			observer.disconnect();
-			clearListeners.abort();
-		} catch (_e) {
-			strippedConsole.log('splash screen was already cleared.');
-		}
+		if (splashCleared) return;
+		splashCleared = true;
+		sendPerfMark('splash-cleared');
+		splashBackground.remove();
+		removeGameUsableListener();
 	};
-	document.addEventListener('pointerlockchange', () => { clearSplash(); }, { once: true, signal: clearListeners.signal });
-
-	// #instructions mutates while Krunker itself loads, so only watch it once the page has
-	// finished loading — the same point the pre-boot-payload code started observing.
-	const observeInstructions = () => {
-		const instructionsElement = document.getElementById('instructions');
-		if (instructionsElement) observer.observe(instructionsElement, { childList: true, subtree: true });
-	};
-	if (document.readyState === 'complete') observeInstructions();
-	else window.addEventListener('load', observeInstructions, { once: true, signal: clearListeners.signal });
+	removeGameUsableListener = onGameUsable(clearSplash);
 }
 
 let clientCSSInjected = false;
@@ -589,8 +628,11 @@ function injectKeyframeFix() {
  * payload is available and again on the injectClientCSS IPC message; every step is
  * idempotent per document and later calls reconcile preference changes (reload flow).
  */
-async function applyClientVisuals(_userPrefs: UserPrefs, version: string, cssPath: string): Promise<void> {
+// _version is retained to keep the boot-payload and injectClientCSS IPC shapes unchanged; the
+// loading screen no longer prints a version string.
+async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	applyClientHotkeys(_userPrefs);
+	observeGameUsable();
 
 	const { matchmaker, hideAds, menuTimer, quickClassPicker, clientSplash, cssSwapper } = _userPrefs;
 
@@ -605,7 +647,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, version: string, cssPat
 	}
 
 	if (clientSplash && !splashMountAttempted) {
-		void mountClientSplash(_userPrefs, version).catch(error => {
+		void mountClientSplash(_userPrefs).catch(error => {
 			strippedConsole.error('Failed to mount the client splash screen', error);
 		});
 	}

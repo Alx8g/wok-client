@@ -12,6 +12,7 @@ import {
 	finalizeCalibration,
 	getPendingCalibrationCandidate,
 	isMeaningfulCalibrationScoreWin,
+	orchestrateCalibrationTrialRetry,
 	parseCalibrationState,
 	prepareCalibrationState,
 	recordCalibrationResult,
@@ -453,6 +454,116 @@ test('trial page embeds the workload and completion-honest measurement modules',
 	assert.match(page, /overlay-gradient/);
 	assert.match(page, /data-feed-row/);
 	assert.doesNotMatch(page, /desynchronized: true/);
+});
+
+test('retry orchestration counts launched retries independently from rejected diagnostics', async () => {
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(
+		prepareCalibrationState(undefined, signature, candidates, false),
+		candidates[0].id
+	);
+	const firstRejected: CalibrationMetrics = {
+		...stableMetrics,
+		lowConfidenceReasons: ['window-blurred'],
+		rejectionReasons: ['window-blurred'],
+		sampleCount: 800
+	};
+	const secondRejected: CalibrationMetrics = {
+		...stableMetrics,
+		lowConfidenceReasons: ['power-state-changed'],
+		onePercentLowFps: firstRejected.onePercentLowFps + 10,
+		rejectionReasons: ['power-state-changed'],
+		sampleCount: 700
+	};
+	const firstTrialAttempts: number[] = [];
+	const firstTrial = await orchestrateCalibrationTrialRetry({
+		candidate: candidates[0],
+		getState: () => state,
+		isRunTimeBudgetExhausted: () => false,
+		persistState: nextState => {
+			state = nextState;
+		},
+		runAttempt: async attempt => {
+			firstTrialAttempts.push(attempt);
+			return {
+				aborted: false,
+				metrics: attempt === 1 ? firstRejected : secondRejected
+			};
+		}
+	});
+	assert.deepEqual(firstTrialAttempts, [1, 2]);
+	assert.equal(firstTrial.metrics, firstRejected);
+	assert.equal(state.runRetriesUsed, 1);
+	assert.equal(
+		state.rejectedAttempts.length,
+		2,
+		'both rejected attempts remain available as diagnostics'
+	);
+
+	const laterRejected: CalibrationMetrics = {
+		...stableMetrics,
+		lowConfidenceReasons: ['window-blurred'],
+		rejectionReasons: ['window-blurred']
+	};
+	const laterTrialAttempts: number[] = [];
+	const laterTrial = await orchestrateCalibrationTrialRetry({
+		candidate: candidates[1],
+		getState: () => state,
+		isRunTimeBudgetExhausted: () => false,
+		persistState: nextState => {
+			state = nextState;
+		},
+		runAttempt: async attempt => {
+			laterTrialAttempts.push(attempt);
+			return {
+				aborted: false,
+				metrics: attempt === 1 ? laterRejected : stableMetrics
+			};
+		}
+	});
+	assert.deepEqual(laterTrialAttempts, [1, 2]);
+	assert.equal(laterTrial.metrics, stableMetrics);
+	assert.equal(state.runRetriesUsed, 2);
+	assert.equal(state.rejectedAttempts.length, 3);
+});
+
+test('retry orchestration fails closed when the retry-count transition cannot persist', async () => {
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(
+		prepareCalibrationState(undefined, signature, candidates, false),
+		candidates[0].id
+	);
+	const rejected: CalibrationMetrics = {
+		...stableMetrics,
+		lowConfidenceReasons: ['window-blurred'],
+		rejectionReasons: ['window-blurred']
+	};
+	const attempts: number[] = [];
+
+	await assert.rejects(
+		orchestrateCalibrationTrialRetry({
+			candidate: candidates[0],
+			getState: () => state,
+			isRunTimeBudgetExhausted: () => false,
+			persistState: nextState => {
+				if (nextState.runRetriesUsed > state.runRetriesUsed) {
+					throw new Error('retry-count-write-failed');
+				}
+				state = nextState;
+			},
+			runAttempt: async attempt => {
+				attempts.push(attempt);
+				return {
+					aborted: false,
+					metrics: rejected
+				};
+			}
+		}),
+		/retry-count-write-failed/u
+	);
+	assert.deepEqual(attempts, [1]);
+	assert.equal(state.runRetriesUsed, 0);
+	assert.equal(state.rejectedAttempts.length, 1);
 });
 
 test('trial page renders retry messaging only for a second attempt', () => {

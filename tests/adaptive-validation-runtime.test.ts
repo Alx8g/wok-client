@@ -133,6 +133,13 @@ function createRuntimeHarness(pointerLocked: boolean) {
 	};
 }
 
+function collectQualifyingFrameEvidence(harness: ReturnType<typeof createRuntimeHarness>, segmentStartTime: number) {
+	harness.runNextAnimationFrame(segmentStartTime);
+	for (let sample = 1; sample <= 101; sample++) {
+		harness.runNextAnimationFrame(segmentStartTime + sample * 10);
+	}
+}
+
 test('starts no listeners or animation frames after validation is already complete', () => {
 	const harness = createRuntimeHarness(true);
 	const stop = startAdaptiveValidationRuntime({
@@ -168,7 +175,7 @@ test('unload cancels active sampling without accepting or submitting a partial s
 	assert.equal(submissions, 0);
 });
 
-test('marks passive contamination and stops all background sampling after the third accepted session', async () => {
+test('continues sampling after a rejected attempt and stops after three qualifying sessions', async () => {
 	const harness = createRuntimeHarness(true);
 	let persistedState = stateWithSessions(2);
 	const submissions: AdaptiveValidationSubmission[] = [];
@@ -181,12 +188,11 @@ test('marks passive contamination and stops all background sampling after the th
 		}
 	}, harness.environment);
 
-	harness.runNextAnimationFrame(1);
 	harness.windowEvents.dispatch('blur');
 	harness.windowEvents.dispatch('resize');
 	harness.documentEvents.dispatch('visibilitychange');
 	harness.runNextTimer(1_300);
-	harness.runNextAnimationFrame(1_301);
+	collectQualifyingFrameEvidence(harness, 20_000);
 	harness.setNow(30_001);
 	harness.runtimeDocument.pointerLockElement = null;
 	harness.documentEvents.dispatch('pointerlockchange');
@@ -200,8 +206,31 @@ test('marks passive contamination and stops all background sampling after the th
 		'window-blurred',
 		'window-resized'
 	]));
+	assert.ok(submissions[0].session.metrics.sampleCount >= 100);
+	assert.equal(persistedState.sessions.length, 2);
+	assert.equal(persistedState.status, 'sampling');
+	assert.equal(harness.animationFrames.size, 0);
+	assert.equal(harness.timers.size, 0);
+	assert.equal(harness.documentEvents.listenerCount(), 2);
+	assert.equal(harness.windowEvents.listenerCount(), 3);
+
+	harness.runtimeDocument.pointerLockElement = {};
+	harness.documentEvents.dispatch('pointerlockchange');
+	assert.equal(harness.animationFrames.size, 1);
+	assert.equal(harness.timers.size, 1);
+	collectQualifyingFrameEvidence(harness, 50_001);
+	harness.setNow(60_002);
+	harness.runtimeDocument.pointerLockElement = null;
+	harness.documentEvents.dispatch('pointerlockchange');
+	await Promise.resolve();
+	await Promise.resolve();
+
+	assert.equal(submissions.length, 2);
+	assert.deepEqual(submissions[1].session.lowConfidenceReasons, []);
+	assert.ok(submissions[1].session.metrics.sampleCount >= 100);
+	assert.equal(persistedState.sessions.length, 3);
 	assert.equal(persistedState.status, 'complete');
-	assert.equal(persistedState.classification, 'inconclusive');
+	assert.equal(persistedState.classification, 'validated');
 	assert.equal(harness.animationFrames.size, 0);
 	assert.equal(harness.timers.size, 0);
 	assert.equal(harness.documentEvents.listenerCount(), 0);
@@ -209,6 +238,6 @@ test('marks passive contamination and stops all background sampling after the th
 
 	harness.runtimeDocument.pointerLockElement = {};
 	harness.documentEvents.dispatch('pointerlockchange');
-	assert.equal(submissions.length, 1);
+	assert.equal(submissions.length, 2);
 	assert.equal(harness.animationFrames.size, 0);
 });

@@ -276,6 +276,18 @@ test('each contamination signal rejects the trial with its reason', async () => 
 	}
 });
 
+test('warmup timer lateness cannot contaminate the first measured sampler callback', async () => {
+	const { result } = await driveTrial({
+		onTick: api => {
+			if (api.tickIndex === 0) api.fireSampler();
+			if (api.tickIndex === 7) api.fireSampler();
+		}
+	});
+
+	assert.equal(result.rejected, false);
+	assert.equal(result.eventLoopWorstMs, 0);
+});
+
 test('severe event-loop lateness during measurement rejects the trial', async () => {
 	const { result } = await driveTrial({
 		onTick: api => {

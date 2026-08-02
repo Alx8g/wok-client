@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseUserPreferencePatch } from '../src/user-preferences.ts';
+import { containsObsoletePreferences, parseUserPreferencePatch } from '../src/user-preferences.ts';
 
 test('accepts bounded WOK preference values', () => {
 	assert.deepEqual(parseUserPreferencePatch({
@@ -29,6 +29,16 @@ test('retains only legacy values needed by settings migration', () => {
 		fullscreen: true,
 		hideAds: false
 	});
+});
+
+test('detects parser-rejected obsolete settings for canonical rewrites', () => {
+	const rawSettings = {
+		competitiveMode: true,
+		loadingSplashTitleCardBackgroundColor: '#363636'
+	};
+	assert.equal(containsObsoletePreferences(rawSettings), true);
+	assert.deepEqual(parseUserPreferencePatch(rawSettings), { competitiveMode: true });
+	assert.equal(containsObsoletePreferences({ competitiveMode: true }), false);
 });
 
 test('rejects unsafe URLs, paths, ranges, and malformed keybinds', () => {

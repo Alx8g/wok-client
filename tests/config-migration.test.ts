@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test, { type TestContext } from 'node:test';
@@ -18,12 +18,14 @@ function writeTestFile(path: string, contents: string) {
 	writeFileSync(path, contents);
 }
 
-test('phase 1 copies top-level files synchronously, defers directory trees, and writes no marker', t => {
+test('phase 1 copies only the startup-critical top-level allowlist and writes no marker', t => {
 	const root = createTestRoot(t);
 	const source = join(root, 'crankshaft', 'config');
 	const destination = join(root, 'WOK Client', 'config');
 	writeTestFile(join(source, 'settings.json'), '{"fpsUncap":true}');
 	writeTestFile(join(source, 'filters.txt'), 'legacy filters');
+	writeTestFile(join(source, 'future-config.json'), '{"future":true}');
+	writeTestFile(join(source, 'notes.txt'), 'not required during startup');
 	writeTestFile(join(source, 'swapper', 'textures', 'weapon.png'), 'texture');
 
 	const result = migrateLegacyConfigsPhaseOne(destination, [{ label: 'Crankshaft AppData', path: source }]);
@@ -34,16 +36,19 @@ test('phase 1 copies top-level files synchronously, defers directory trees, and 
 	assert.deepEqual(result.deferredSources, [{ label: 'Crankshaft AppData', path: source }]);
 	assert.equal(readFileSync(join(destination, 'settings.json'), 'utf-8'), '{"fpsUncap":true}');
 	assert.equal(readFileSync(join(destination, 'filters.txt'), 'utf-8'), 'legacy filters');
+	assert.equal(existsSync(join(destination, 'future-config.json')), false);
+	assert.equal(existsSync(join(destination, 'notes.txt')), false);
 	assert.equal(existsSync(join(destination, 'swapper')), false);
 	assert.equal(existsSync(join(destination, MIGRATION_MARKER)), false);
 	assert.equal(existsSync(join(source, 'settings.json')), true);
 });
 
-test('phase 2 copies directory trees recursively without deleting the source and writes the marker', async t => {
+test('phase 2 copies deferred top-level files and directory trees without deleting the source', async t => {
 	const root = createTestRoot(t);
 	const source = join(root, 'crankshaft', 'config');
 	const destination = join(root, 'WOK Client', 'config');
 	writeTestFile(join(source, 'settings.json'), '{"fpsUncap":true}');
+	writeTestFile(join(source, 'future-config.json'), '{"future":true}');
 	writeTestFile(join(source, 'swapper', 'textures', 'weapon.png'), 'texture');
 	writeTestFile(join(source, 'scripts', 'tracker.json'), '{}');
 	writeTestFile(join(source, 'css', 'custom.css'), 'body {}');
@@ -53,9 +58,10 @@ test('phase 2 copies directory trees recursively without deleting the source and
 
 	assert.equal(phaseOne.copiedFiles, 1);
 	assert.equal(phaseTwo.completed, true);
-	assert.equal(phaseTwo.copiedFiles, 3);
+	assert.equal(phaseTwo.copiedFiles, 4);
 	assert.equal(phaseTwo.errors, 0);
 	assert.equal(readFileSync(join(destination, 'settings.json'), 'utf-8'), '{"fpsUncap":true}');
+	assert.equal(readFileSync(join(destination, 'future-config.json'), 'utf-8'), '{"future":true}');
 	assert.equal(readFileSync(join(destination, 'swapper', 'textures', 'weapon.png'), 'utf-8'), 'texture');
 	assert.equal(readFileSync(join(destination, 'scripts', 'tracker.json'), 'utf-8'), '{}');
 	assert.equal(readFileSync(join(destination, 'css', 'custom.css'), 'utf-8'), 'body {}');
@@ -63,7 +69,7 @@ test('phase 2 copies directory trees recursively without deleting the source and
 	assert.equal(existsSync(join(source, 'swapper', 'textures', 'weapon.png')), true);
 });
 
-test('preserves WOK Client files and copies only missing legacy files', t => {
+test('preserves WOK Client files and copies only missing startup-critical legacy files', t => {
 	const root = createTestRoot(t);
 	const source = join(root, 'legacy');
 	const destination = join(root, 'current');
@@ -97,6 +103,28 @@ test('phase 2 preserves WOK Client files inside deferred trees', async t => {
 	assert.equal(readFileSync(join(source, 'css', 'example.css'), 'utf-8'), 'legacy example');
 });
 
+test('skips allowlisted and deferred symbolic links without following them', async t => {
+	const root = createTestRoot(t);
+	const source = join(root, 'legacy');
+	const destination = join(root, 'current');
+	const linkTarget = join(root, 'link-target');
+	writeTestFile(join(linkTarget, 'must-not-copy.txt'), 'linked data');
+	mkdirSync(join(source, 'tree'), { recursive: true });
+	symlinkSync(linkTarget, join(source, 'settings.json'), 'junction');
+	symlinkSync(linkTarget, join(source, 'linked-config'), 'junction');
+	symlinkSync(linkTarget, join(source, 'tree', 'nested-link'), 'junction');
+
+	const phaseOne = migrateLegacyConfigsPhaseOne(destination, [{ label: 'Legacy', path: source }]);
+	const phaseTwo = await migrateLegacyConfigsPhaseTwo(destination, phaseOne.deferredSources);
+
+	assert.equal(phaseOne.skippedLinks, 1);
+	assert.equal(phaseTwo.completed, true);
+	assert.equal(phaseTwo.skippedLinks, 2);
+	assert.equal(existsSync(join(destination, 'settings.json')), false);
+	assert.equal(existsSync(join(destination, 'linked-config')), false);
+	assert.equal(existsSync(join(destination, 'tree', 'nested-link')), false);
+});
+
 test('an interrupted phase 2 resumes on the next launch without overwriting existing files', async t => {
 	const root = createTestRoot(t);
 	const source = join(root, 'legacy');
@@ -123,27 +151,54 @@ test('an interrupted phase 2 resumes on the next launch without overwriting exis
 	assert.equal(rerun.copiedFiles, 0);
 });
 
-test('phase 2 copies large nested trees completely with bounded concurrency', async t => {
+test('phase 2 bounds active I/O and queued work for a large flat source', async t => {
 	const root = createTestRoot(t);
 	const source = join(root, 'legacy');
 	const destination = join(root, 'current');
-	const expected: string[] = [];
-	for (let directory = 0; directory < 6; directory++) {
-		for (let file = 0; file < 10; file++) {
-			const relativePath = join('swapper', `dir-${directory}`, 'nested', `file-${file}.png`);
+	const fileCount = 512;
+	for (let file = 0; file < fileCount; file++) {
+		writeTestFile(join(source, `top-level-${file}.json`), String(file));
+	}
+
+	const concurrency = 3;
+	const result = await migrateLegacyConfigsPhaseTwo(destination, [{ label: 'Legacy', path: source }], concurrency);
+
+	assert.equal(result.completed, true);
+	assert.equal(result.copiedFiles, fileCount);
+	assert.equal(result.errors, 0);
+	assert.ok(result.peakActiveOperations >= 1);
+	assert.ok(result.peakActiveOperations <= concurrency, `peak active I/O ${result.peakActiveOperations} exceeded ${concurrency}`);
+	assert.ok(result.peakQueuedWork >= 1);
+	assert.ok(result.peakQueuedWork <= concurrency, `peak queued work ${result.peakQueuedWork} exceeded ${concurrency}`);
+	assert.equal(readFileSync(join(destination, 'top-level-0.json'), 'utf-8'), '0');
+	assert.equal(readFileSync(join(destination, `top-level-${fileCount - 1}.json`), 'utf-8'), String(fileCount - 1));
+});
+
+test('phase 2 bounds active I/O and queued work for a large wide tree', async t => {
+	const root = createTestRoot(t);
+	const source = join(root, 'legacy');
+	const destination = join(root, 'current');
+	const directoryCount = 64;
+	const filesPerDirectory = 8;
+	for (let directory = 0; directory < directoryCount; directory++) {
+		for (let file = 0; file < filesPerDirectory; file++) {
+			const relativePath = join('swapper', `dir-${directory}`, `file-${file}.png`);
 			writeTestFile(join(source, relativePath), relativePath);
-			expected.push(relativePath);
 		}
 	}
 
-	const result = await migrateLegacyConfigsPhaseTwo(destination, [{ label: 'Legacy', path: source }], 4);
+	const concurrency = 4;
+	const result = await migrateLegacyConfigsPhaseTwo(destination, [{ label: 'Legacy', path: source }], concurrency);
 
 	assert.equal(result.completed, true);
-	assert.equal(result.copiedFiles, expected.length);
+	assert.equal(result.copiedFiles, directoryCount * filesPerDirectory);
 	assert.equal(result.errors, 0);
-	for (const relativePath of expected) {
-		assert.equal(readFileSync(join(destination, relativePath), 'utf-8'), relativePath);
-	}
+	assert.ok(result.peakActiveOperations >= 1);
+	assert.ok(result.peakActiveOperations <= concurrency, `peak active I/O ${result.peakActiveOperations} exceeded ${concurrency}`);
+	assert.ok(result.peakQueuedWork >= 1);
+	assert.ok(result.peakQueuedWork <= concurrency, `peak queued work ${result.peakQueuedWork} exceeded ${concurrency}`);
+	assert.equal(readFileSync(join(destination, 'swapper', 'dir-0', 'file-0.png'), 'utf-8'), join('swapper', 'dir-0', 'file-0.png'));
+	assert.equal(readFileSync(join(destination, 'swapper', `dir-${directoryCount - 1}`, `file-${filesPerDirectory - 1}.png`), 'utf-8'), join('swapper', `dir-${directoryCount - 1}`, `file-${filesPerDirectory - 1}.png`));
 });
 
 test('uses source order for conflicts and does not repeat a completed migration', async t => {
@@ -153,6 +208,8 @@ test('uses source order for conflicts and does not repeat a completed migration'
 	const destination = join(root, 'destination');
 	writeTestFile(join(appDataSource, 'settings.json'), 'appdata');
 	writeTestFile(join(documentsSource, 'settings.json'), 'documents');
+	writeTestFile(join(appDataSource, 'future-config.json'), 'appdata future');
+	writeTestFile(join(documentsSource, 'future-config.json'), 'documents future');
 
 	const sources = [
 		{ label: 'AppData', path: appDataSource },
@@ -167,7 +224,9 @@ test('uses source order for conflicts and does not repeat a completed migration'
 
 	assert.equal(firstPhaseOne.skippedConflicts, 1);
 	assert.equal(firstPhaseTwo.completed, true);
+	assert.equal(firstPhaseTwo.skippedConflicts, 1);
 	assert.equal(readFileSync(join(destination, 'settings.json'), 'utf-8'), 'appdata');
+	assert.equal(readFileSync(join(destination, 'future-config.json'), 'utf-8'), 'appdata future');
 	assert.equal(secondPhaseOne.completed, true);
 	assert.equal(secondPhaseOne.copiedFiles, 0);
 	assert.deepEqual(secondPhaseOne.deferredSources, []);

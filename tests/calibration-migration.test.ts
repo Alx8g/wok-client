@@ -91,6 +91,7 @@ test('a version-1 document upgrades to a single-trial plan with the workload sen
 	]);
 	assert.deepEqual(parsed.results.map(result => result.slotIndex), [0, 1]);
 	assert.equal(parsed.launchCount, 2);
+	assert.equal(parsed.runRetriesUsed, 0);
 	assert.equal(parsed.activeSelection?.candidate.id, 'd3d11on12:uncapped');
 	assert.equal(parsed.activeSelection?.metrics.workloadVersion, 0);
 	assert.deepEqual(parsed.fieldRejectedCandidateIds, []);

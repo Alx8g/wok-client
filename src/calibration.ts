@@ -1,6 +1,10 @@
 import type { AppliedGraphicsBackend } from './graphics-profile.ts';
 import { WORKLOAD_VERSION } from './calibration-workload.ts';
-import { BENCHMARK_REJECTION_REASONS, type BenchmarkRejectionReason } from './calibration-benchmark.ts';
+import {
+	BENCHMARK_REJECTION_REASONS,
+	BENCHMARK_RUN_RETRY_BUDGET,
+	type BenchmarkRejectionReason
+} from './calibration-benchmark.ts';
 
 const CALIBRATION_STATE_VERSION = 2;
 export const CALIBRATION_VERSION = 3;
@@ -141,6 +145,8 @@ export interface CalibrationState {
 	fieldRejectedCandidateIds: string[];
 	launchCount: number;
 	plan: CalibrationTrialSlot[];
+	/** Retries actually launched in this calibration run; diagnostic records are independent. */
+	runRetriesUsed: number;
 	planCreatedAt?: number;
 	previousSelection?: CalibrationResult;
 	provisionalSince?: number;
@@ -362,6 +368,7 @@ export function createCalibrationState(
 		plan: [],
 		rejectedAttempts: [],
 		rerunRequested: false,
+		runRetriesUsed: 0,
 		results: [],
 		signature,
 		status: 'uncalibrated',
@@ -400,6 +407,7 @@ export function startCalibrationRun(state: CalibrationState, now: number = Date.
 		rejectedAttempts: [],
 		rerunRequested: false,
 		results: [],
+		runRetriesUsed: 0,
 		startedAt: now,
 		status: 'running',
 		updatedAt: now
@@ -463,10 +471,34 @@ export function recordCalibrationLaunch(state: CalibrationState, now: number = D
 	};
 }
 
+export function isCalibrationRunTimeBudgetExhausted(state: CalibrationState, now: number = Date.now()): boolean {
+	return state.status === 'running'
+		&& state.startedAt !== undefined
+		&& now - state.startedAt > CALIBRATION_RUN_BUDGET_MS;
+}
+
+/** Clamp every admitted trial to the calibration run's one absolute wall-clock budget. */
+export function clampCalibrationTrialDeadline(state: CalibrationState | undefined, requestedDeadlineAt: number): number {
+	if (state?.status !== 'running' || state.startedAt === undefined) return requestedDeadlineAt;
+	return Math.min(requestedDeadlineAt, state.startedAt + CALIBRATION_RUN_BUDGET_MS);
+}
+
 export function isCalibrationBudgetExhausted(state: CalibrationState, now: number = Date.now()): boolean {
-	if (state.status !== 'running') return false;
-	if (state.launchCount >= CALIBRATION_MAX_LAUNCHES) return true;
-	return state.startedAt !== undefined && now - state.startedAt > CALIBRATION_RUN_BUDGET_MS;
+	return state.status === 'running'
+		&& (state.launchCount >= CALIBRATION_MAX_LAUNCHES || isCalibrationRunTimeBudgetExhausted(state, now));
+}
+
+/** True only before an allowed launch is recorded; the sixth launch may run, the seventh may not. */
+export function canStartCalibrationLaunch(state: CalibrationState, now: number = Date.now()): boolean {
+	return state.status === 'running' && !isCalibrationBudgetExhausted(state, now);
+}
+
+/** Atomically enforces the pre-increment launch budget and records an admitted launch. */
+export function tryRecordCalibrationLaunch(
+	state: CalibrationState,
+	now: number = Date.now()
+): CalibrationState | undefined {
+	return canStartCalibrationLaunch(state, now) ? recordCalibrationLaunch(state, now) : undefined;
 }
 
 export function prepareCalibrationState(
@@ -740,6 +772,104 @@ export function recordRejectedCalibrationAttempt(
 		rejectedAttempts: [...state.rejectedAttempts, attempt],
 		updatedAt: Date.now()
 	};
+}
+
+/** Records one retry immediately before it is launched; rejected-attempt diagnostics are unrelated. */
+export function recordCalibrationRetryLaunch(
+	state: CalibrationState,
+	now: number = Date.now()
+): CalibrationState {
+	if (state.status !== 'running') {
+		throw new Error('Calibration retries can only launch while a run is active.');
+	}
+	if (state.runRetriesUsed >= BENCHMARK_RUN_RETRY_BUDGET) {
+		throw new Error('Calibration retry budget is already exhausted.');
+	}
+	return {
+		...state,
+		runRetriesUsed: state.runRetriesUsed + 1,
+		updatedAt: now
+	};
+}
+
+export interface CalibrationTrialAttemptOutcome {
+	aborted: boolean;
+	failureReason?: string;
+	metrics: CalibrationMetrics;
+}
+
+export interface CalibrationTrialRetryOrchestrationOptions {
+	candidate: CalibrationCandidate;
+	getState(): CalibrationState | undefined;
+	isRunTimeBudgetExhausted(state: CalibrationState): boolean;
+	persistState(state: CalibrationState): void;
+	runAttempt(attempt: number): Promise<CalibrationTrialAttemptOutcome>;
+}
+
+function pickBetterRejectedAttempt(
+	first: CalibrationMetrics,
+	second: CalibrationMetrics
+): CalibrationMetrics {
+	if (first.success !== second.success) return first.success ? first : second;
+	if (first.sampleCount !== second.sampleCount) {
+		return first.sampleCount > second.sampleCount ? first : second;
+	}
+	return second.onePercentLowFps > first.onePercentLowFps ? second : first;
+}
+
+/** Applies the one-per-trial and two-per-run retry policy around a main-process trial callback. */
+export async function orchestrateCalibrationTrialRetry(
+	options: CalibrationTrialRetryOrchestrationOptions
+): Promise<CalibrationTrialAttemptOutcome> {
+	let firstRejectedAttempt: CalibrationMetrics | undefined;
+	for (let attempt = 1; ; attempt += 1) {
+		const outcome = await options.runAttempt(attempt);
+		if (outcome.aborted || outcome.failureReason !== undefined) return outcome;
+		const rejected = (outcome.metrics.rejectionReasons?.length ?? 0) > 0;
+		if (!rejected) return outcome;
+
+		const state = options.getState();
+		if (
+			attempt === 1
+			&& state !== undefined
+			&& state.runRetriesUsed < BENCHMARK_RUN_RETRY_BUDGET
+		) {
+			options.persistState(recordRejectedCalibrationAttempt(
+				state,
+				options.candidate,
+				outcome.metrics
+			));
+			firstRejectedAttempt = outcome.metrics;
+			const diagnosticState = options.getState();
+			if (
+				diagnosticState === undefined
+				|| options.isRunTimeBudgetExhausted(diagnosticState)
+			) {
+				return outcome;
+			}
+			options.persistState(recordCalibrationRetryLaunch(diagnosticState));
+			continue;
+		}
+		if (firstRejectedAttempt !== undefined) {
+			const better = pickBetterRejectedAttempt(
+				firstRejectedAttempt,
+				outcome.metrics
+			);
+			const currentState = options.getState();
+			if (better !== outcome.metrics && currentState !== undefined) {
+				options.persistState(recordRejectedCalibrationAttempt(
+					currentState,
+					options.candidate,
+					outcome.metrics
+				));
+			}
+			return {
+				aborted: false,
+				metrics: better
+			};
+		}
+		return outcome;
+	}
 }
 
 interface CandidateTrialSummary {
@@ -1231,6 +1361,7 @@ function upgradeVersionOneState(core: ParsedStateCore): CalibrationState {
 		rejectedAttempts: [],
 		rerunRequested: core.rerunRequested,
 		results: core.results.map((result, index) => stampWorkloadVersion(result, index)),
+		runRetriesUsed: 0,
 		signature: core.signature,
 		status: core.status,
 		updatedAt: core.updatedAt,
@@ -1278,6 +1409,10 @@ export function parseCalibrationState(value: unknown): CalibrationState | undefi
 		...(previousSelection ? { previousSelection } : {}),
 		...(provisionalSince !== undefined ? { provisionalSince } : {}),
 		rejectedAttempts,
+		runRetriesUsed: Math.max(
+			0,
+			Math.trunc(finiteNumber(value.runRetriesUsed))
+		),
 		...(value.signatureStale === true ? { signatureStale: true as const } : {}),
 		...(staleRerunPromptShownAt !== undefined ? { staleRerunPromptShownAt } : {}),
 		...(startedAt !== undefined ? { startedAt } : {}),

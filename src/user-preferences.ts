@@ -1,3 +1,14 @@
+const OBSOLETE_PREFERENCE_KEYS = new Set([
+	'inProcessGPU',
+	'loadingSplashTitleCardBackgroundColor',
+	'userscripts'
+]);
+
+export function containsObsoletePreferences(value: unknown): boolean {
+	if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+	return [...OBSOLETE_PREFERENCE_KEYS].some(key => Object.hasOwn(value, key));
+}
+
 const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'alwaysWaitForDevTools',
 	'clientSplash',
@@ -10,6 +21,8 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'extendedRPC',
 	'fpsUncap',
 	'immersiveSplash',
+	'introAnimation',
+	'introAudio',
 	'matchmaker',
 	'matchmaker_openServerWindow',
 	'menuTimer',
@@ -113,7 +126,7 @@ function parsePreferenceValue(key: string, value: unknown): UserPrefValue | unde
 			: undefined;
 	}
 
-	if (key === 'immersiveSplashBackgroundColor' || key === 'loadingSplashTitleCardBackgroundColor') {
+	if (key === 'immersiveSplashBackgroundColor') {
 		return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/u.test(value) ? value : undefined;
 	}
 

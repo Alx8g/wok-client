@@ -167,6 +167,23 @@ test('a confirmed GPU-process failure immediately selects a safe fallback', () =
 	assert.equal(recoverySelection.source, 'recovery');
 });
 
+test('duplicate GPU teardown events in one launch do not escalate quarantine', () => {
+	let state = intelGraphicsState();
+	state = beginGraphicsLaunch(
+		state,
+		selectGraphicsBackend('auto', state, 'win32', START_TIME),
+		START_TIME + 1
+	);
+	state = recordGraphicsGpuFailure(state, 'd3d11on12', 'GPU process crashed.', START_TIME + 2);
+	const firstFailureState = state;
+	state = recordGraphicsGpuFailure(state, 'd3d11on12', 'GPU process abnormal-exit.', START_TIME + 3);
+
+	assert.equal(state, firstFailureState);
+	assert.equal(state.gpuFailureCount, 1);
+	assert.equal(state.backendFailures[0].failureCount, 1);
+	assert.equal(state.backendFailures[0].reason, 'GPU process crashed.');
+});
+
 test('GPU failure quarantine expires and a successful retry clears backend failure history', () => {
 	let state = recordGraphicsGpuFailure(
 		intelGraphicsState(),
@@ -196,9 +213,15 @@ test('repeated confirmed failures use an increasing cooldown capped at a bounded
 	let previousCooldown = 0;
 
 	for (let failureCount = 1; failureCount <= 20; failureCount++) {
-		state = recordGraphicsGpuFailure(state, 'd3d11on12', `GPU failure ${failureCount}.`, now);
+		state = beginGraphicsLaunch(state, {
+			backend: 'd3d11on12',
+			preference: 'auto',
+			reason: 'Synthetic confirmed launch attempt.',
+			source: 'auto'
+		}, now);
+		state = recordGraphicsGpuFailure(state, 'd3d11on12', `GPU failure ${failureCount}.`, now + 1);
 		const failure = state.backendFailures[0];
-		const cooldown = failure.quarantineUntil - now;
+		const cooldown = failure.quarantineUntil - (now + 1);
 		assert.equal(failure.failureCount, failureCount);
 		assert.equal(cooldown, graphicsBackendCooldownMs(failureCount));
 		assert.ok(cooldown >= previousCooldown);

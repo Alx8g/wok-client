@@ -1,0 +1,100 @@
+# WOK ETL recorder patch for PresentMon v2.5.1.
+# Upstream: https://github.com/GameTechDev/PresentMon
+# Commit: 3e06c7dcb922e411bae38503b51ab501be61c37f
+
+diff --git a/PresentData/PresentMonTraceSession.cpp b/PresentData/PresentMonTraceSession.cpp
+index 478fd49..179869e 100644
+--- a/PresentData/PresentMonTraceSession.cpp
++++ b/PresentData/PresentMonTraceSession.cpp
+@@ -27,6 +27,8 @@ struct TraceProperties : public EVENT_TRACE_PROPERTIES {
+     wchar_t mSessionName[MAX_PATH];
+ };
+ 
++constexpr ULONG kProviderEnableTimeoutMs = 10 * 1000;
++
+ template<typename T> void PatchKeyword(uint64_t*) {}
+ template<typename T> void PatchPreWin11Keyword(uint64_t*) {}
+ 
+@@ -89,6 +91,7 @@ struct FilteredProvider {
+     uint8_t maxLevel_;
+     bool isWin11OrGreater_;
+     bool isDryRun_;
++    ULONG filterInitializationStatus_;
+     std::shared_ptr<IFilterBuildListener> pListener_;
+ 
+     FilteredProvider(
+@@ -105,6 +108,7 @@ struct FilteredProvider {
+         maxLevel_ = 0;
+         isWin11OrGreater_ = isWin11OrGreater;
+         isDryRun_ = pSessionGuid == nullptr;
++        filterInitializationStatus_ = ERROR_SUCCESS;
+         pListener_ = std::move(pListener);
+ 
+         if (filterEventIds && !isDryRun_) {
+@@ -126,6 +130,8 @@ struct FilteredProvider {
+                 params_.SourceId = *pSessionGuid;
+                 params_.EnableFilterDesc = &filterDesc_;
+                 params_.FilterDescCount = 1;
++            } else {
++                filterInitializationStatus_ = ERROR_OUTOFMEMORY;
+             }
+         }
+     }
+@@ -194,6 +200,10 @@ struct FilteredProvider {
+         GUID const& providerGuid,
+         ULONG controlCode = EVENT_CONTROL_CODE_ENABLE_PROVIDER)
+     {
++        if (filterInitializationStatus_ != ERROR_SUCCESS) {
++            return filterInitializationStatus_;
++        }
++
+         if (pListener_) {
+             pListener_->ProviderEnabled(providerGuid, anyKeywordMask_, allKeywordMask_, maxLevel_, controlCode);
+         }
+@@ -209,7 +219,8 @@ struct FilteredProvider {
+             }
+ 
+             return EnableTraceEx2(sessionHandle, &providerGuid, controlCode,
+-                maxLevel_, anyKeywordMask_, allKeywordMask_, 0, pparams);
++                maxLevel_, anyKeywordMask_, allKeywordMask_,
++                kProviderEnableTimeoutMs, pparams);
+         }
+         return ERROR_SUCCESS;
+     }
+@@ -225,7 +236,7 @@ struct FilteredProvider {
+ 
+         if (!isDryRun_) {
+             return EnableTraceEx2(sessionHandle, &providerGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER,
+-                maxLevel, 0, 0, 0, nullptr);
++                maxLevel, 0, 0, kProviderEnableTimeoutMs, nullptr);
+         }
+         return ERROR_SUCCESS;
+     }
+@@ -805,12 +816,23 @@ ULONG EnableProvidersListing(
+     provider.AddEvent<Microsoft_Windows_Kernel_Process::ProcessStop_Stop>();
+     provider.AddEvent<Microsoft_Windows_Kernel_Process::ProcessRundown_Info>();
+     auto status = provider.Enable(sessionHandle, Microsoft_Windows_Kernel_Process::GUID);
+-    if (status != ERROR_SUCCESS && status != ERROR_ACCESS_DENIED) return status;
+-    // additionally, request a rundown if we have kproc access and the pertinent consumer flag is set
+-    if (pmConsumer->mTrackProcessState && status == ERROR_SUCCESS) {
++    if (status != ERROR_SUCCESS) {
++        if (pmConsumer->mTrackProcessState || status != ERROR_ACCESS_DENIED) return status;
++    }
++    // Process-name targeting during offline replay requires both live process events
++    // and the initial rundown. Fail closed when the consumer requires that state.
++    if (pmConsumer->mTrackProcessState) {
++        // Rebuild the canonical filter before capture-state. Provider-description
++        // listeners consume their pending event list on each Enable() call, so
++        // reusing the live filter without replaying AddEvent() would describe the
++        // rundown request as unfiltered in dry-run/service paths.
++        provider.ClearFilter();
++        provider.AddEvent<Microsoft_Windows_Kernel_Process::ProcessStart_Start>();
++        provider.AddEvent<Microsoft_Windows_Kernel_Process::ProcessStop_Stop>();
++        provider.AddEvent<Microsoft_Windows_Kernel_Process::ProcessRundown_Info>();
+         status = provider.Enable(sessionHandle, Microsoft_Windows_Kernel_Process::GUID,
+             EVENT_CONTROL_CODE_CAPTURE_STATE);
+-        if (status != ERROR_SUCCESS && status != ERROR_ACCESS_DENIED) return status;
++        if (status != ERROR_SUCCESS) return status;
+     }
+ 
+     // Microsoft_Windows_DxgKrnl

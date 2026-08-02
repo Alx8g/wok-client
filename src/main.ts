@@ -6,6 +6,18 @@ import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, ap
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
+import { runBeforeDeadline } from './absolute-deadline.ts';
+import { createIntroGameWindowHandoff, getIntroWindowBounds, selectIntroSource, startIntroSequence, type IntroSequence } from './intro-window.ts';
+import {
+	createStartupProfile,
+	estimateProcessStartWallClockMs,
+	INTRO_VARIANTS,
+	parseStartupProfile,
+	recordStartupSample,
+	selectIntroVariant,
+	startupReadyMs,
+	type StartupProfile
+} from './startup-profile.ts';
 import {
 	beginGraphicsLaunch,
 	clearKeptGraphicsBackend,
@@ -26,6 +38,7 @@ import {
 	type GraphicsProfileState,
 	type GraphicsSelection
 } from './graphics-profile.ts';
+import { createGraphicsStabilityConfirmation } from './graphics-stability.ts';
 import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
 import { migrateLegacyConfigsPhaseOne, migrateLegacyConfigsPhaseTwo, type LegacyConfigSource } from './config-migration.ts';
 import {
@@ -37,8 +50,10 @@ import {
 	CALIBRATION_VERSION,
 	calibrationCandidateId,
 	calibrationProvisionalExpired,
+	clampCalibrationTrialDeadline,
 	calibrationResumeRequired,
 	canAutoRollbackCalibration,
+	canStartCalibrationLaunch,
 	collectStableGraphicsDriverFields,
 	completeCalibration,
 	confirmCalibration,
@@ -48,29 +63,29 @@ import {
 	finalizeCalibration,
 	getPendingCalibrationCandidate,
 	getPendingLaunchSlotIndices,
-	isCalibrationBudgetExhausted,
+	isCalibrationRunTimeBudgetExhausted,
 	markCalibrationUnwatched,
 	markStaleRerunPromptShown,
+	orchestrateCalibrationTrialRetry,
 	parseCalibrationState,
 	prepareCalibrationState,
-	recordCalibrationLaunch,
 	recordCalibrationResult,
-	recordRejectedCalibrationAttempt,
 	requestCalibrationRerun,
 	rollbackCalibration,
+	tryRecordCalibrationLaunch,
 	type CalibrationCandidate,
 	type CalibrationGpuTimingStatus,
 	type CalibrationLowConfidenceReason,
 	type CalibrationMetrics,
 	type CalibrationState,
+	type CalibrationTrialAttemptOutcome,
 	type CalibrationTrialEnvironment,
 	type CalibrationTrialRejectionReason,
 	type FramePolicy
 } from './calibration.ts';
 import { WORKLOAD_CONSTANTS, WORKLOAD_VERSION } from './calibration-workload.ts';
-import { BENCHMARK_RUN_RETRY_BUDGET } from './calibration-benchmark.ts';
 import type { CompetitiveGameSettings } from './competitive-mode.ts';
-import { parseUserPreferencePatch } from './user-preferences.ts';
+import { containsObsoletePreferences, parseUserPreferencePatch } from './user-preferences.ts';
 import {
 	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
 	adaptiveValidationProfileIdentitiesEqual,
@@ -101,23 +116,18 @@ if (userDataOverrideDir) {
 	}
 }
 
+// Process start is needed by both ordinary startup profiling and optional diagnostic marks.
+const processStartWallClockMs = estimateProcessStartWallClockMs(Date.now(), process.uptime());
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
-const perfProcessStartWallClockMs = perfMarksEnabled ? Date.now() - process.uptime() * 1_000 : 0;
 const perfExitAfterLoadMs = Number.parseInt(process.env.WOK_PERF_EXIT_MS ?? '', 10);
 let perfExitScheduled = false;
 
 function logPerfMark(name: string, wallClockMs = Date.now()) {
 	if (!perfMarksEnabled) return;
-	console.log(`[wok-mark] ${name} ${(wallClockMs - perfProcessStartWallClockMs).toFixed(1)}`);
+	console.log(`[wok-mark] ${name} ${(wallClockMs - processStartWallClockMs).toFixed(1)}`);
 }
 
-if (perfMarksEnabled) {
-	ipcMain.on('wok_perf_mark', (_event, name: unknown, wallClockMs: unknown) => {
-		if (typeof name !== 'string' || name.length > 64 || typeof wallClockMs !== 'number' || !Number.isFinite(wallClockMs)) return;
-		logPerfMark(name, wallClockMs);
-	});
-}
 logPerfMark('main-module-eval-start');
 
 // Diagnostic-only Chromium content tracing. Inert unless WOK_TRACE_MS is set in the environment.
@@ -261,9 +271,9 @@ if (!gotTheLock) {
 		}
 	});
 
-// Phase 1 copies only the small top-level legacy files (settings.json, filters.txt, ...)
-// that this module reads or seeds before command-line switches and window creation.
-// The bulky trees (swapper/, css/, scripts/) migrate in phase 2 once a window exists.
+// Phase 1 copies only settings.json and filters.txt, the top-level legacy files this
+// module reads or seeds before command-line switches and window creation. All unknown
+// regular files and directory trees migrate in phase 2 once a window exists.
 let deferredMigrationSources: LegacyConfigSource[] = [];
 try {
 	const migration = migrateLegacyConfigsPhaseOne(configPath, [
@@ -272,7 +282,7 @@ try {
 	]);
 	deferredMigrationSources = migration.deferredSources;
 	if (migration.foundSources.length > 0) {
-		console.log(`Migrated ${migration.copiedFiles} legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files. Legacy folders migrate in the background after the game window opens.`);
+		console.log(`Migrated ${migration.copiedFiles} startup-critical legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files. Remaining files migrate in the background after the game window opens.`);
 	}
 } catch (error) {
 	console.error('Failed to migrate legacy Crankshaft configuration. The original files were left untouched.', error);
@@ -301,6 +311,8 @@ const settingsSkeleton = {
 	cssSwapper: 'None',
 	clientSplash: true,
 	immersiveSplash: false,
+	introAnimation: true,
+	introAudio: true,
 	discordRPC: false,
 	extendedRPC: true,
 	saveMatchResultJSONButton: false,
@@ -339,21 +351,45 @@ const settingsSkeleton = {
 	hideAds: 'off',
 	customFilters: false,
 	regionTimezones: false,
-	immersiveSplashBackgroundColor: '#0A0A0A',
-	loadingSplashTitleCardBackgroundColor: '#0A0A0A'
+	immersiveSplashBackgroundColor: '#0A0A0A'
 };
 
 const userPrefs = settingsSkeleton;
+let settingsNeedCanonicalRewrite = false;
 
 if (!existsSync(configPath)) mkdirSync(configPath, { recursive: true });
 if (!existsSync(settingsPath)) writeFileSync(settingsPath, JSON.stringify(settingsSkeleton, null, 2), { encoding: 'utf-8', flag: 'wx' });
 try {
-	Object.assign(
-		userPrefs,
-		parseUserPreferencePatch(JSON.parse(readFileSync(settingsPath, { encoding: 'utf-8' })))
-	);
+	const rawSettings: unknown = JSON.parse(readFileSync(settingsPath, { encoding: 'utf-8' }));
+	settingsNeedCanonicalRewrite = containsObsoletePreferences(rawSettings);
+	Object.assign(userPrefs, parseUserPreferencePatch(rawSettings));
 } catch (error) {
 	console.error('Failed to read WOK Client settings; using safe defaults', error);
+}
+
+const startupProfilePath = pathJoin(configPath, 'startup-profile.json');
+
+/**
+ * How long this machine's recent launches actually took. Drives which launch animation is chosen,
+ * so a fast machine is never made to wait for one and a slow machine is never left staring at a
+ * static screen. See src/startup-profile.ts.
+ */
+function loadStartupProfile(): StartupProfile {
+	if (!existsSync(startupProfilePath)) return createStartupProfile();
+	try {
+		return parseStartupProfile(JSON.parse(readFileSync(startupProfilePath, 'utf-8')));
+	} catch (error) {
+		console.error('Failed to read the startup profile; starting a fresh one', error);
+		return createStartupProfile();
+	}
+}
+
+function writeStartupProfile(profile: StartupProfile) {
+	try {
+		writeFileSync(startupProfilePath, JSON.stringify(profile, null, 2), { encoding: 'utf-8' });
+	} catch (error) {
+		console.error('Failed to persist the startup profile', error);
+	}
 }
 
 function loadGraphicsProfile(): GraphicsProfileState {
@@ -386,11 +422,13 @@ function loadCalibrationState(): CalibrationState | undefined {
 	}
 }
 
-function writeCalibrationStateSync(state: CalibrationState) {
+function writeCalibrationStateSync(state: CalibrationState): boolean {
 	try {
 		writeFileSync(calibrationPath, JSON.stringify(state, null, 2), { encoding: 'utf-8' });
+		return true;
 	} catch (error) {
 		console.error('Failed to persist WOK Client calibration state', error);
+		return false;
 	}
 }
 
@@ -496,10 +534,6 @@ function normalizeBenchmarkMetrics(value: unknown): CalibrationMetrics {
 		workloadVersion: WORKLOAD_VERSION,
 		worstFrameTimeMs: numberValue('worstFrameTimeMs')
 	};
-}
-
-function metricsRejectionReasons(metrics: CalibrationMetrics): CalibrationTrialRejectionReason[] {
-	return metrics.rejectionReasons ?? [];
 }
 
 /** Applies a main-process-detected trial rejection (for example a powerMonitor AC/battery flip). */
@@ -625,15 +659,10 @@ if (userPrefs.cssSwapper !== 'None') ensureCssStorage();
 
 
 // convert legacy settings files to newer formats
-let modifiedSettings = false;
+let modifiedSettings = settingsNeedCanonicalRewrite;
 let writeSafetyBaseline = false;
 
 const indexedUserPrefs = userPrefs as UserPrefs;
-for (const obsoletePreference of ['inProcessGPU', 'userscripts']) {
-	if (!Object.hasOwn(indexedUserPrefs, obsoletePreference)) continue;
-	delete indexedUserPrefs[obsoletePreference];
-	modifiedSettings = true;
-}
 
 // Existing Crankshaft/WOK profiles may have Terms-sensitive features enabled by default.
 // Reset them once, then preserve any later explicit user choice.
@@ -662,6 +691,7 @@ if (typeof userPrefs.fullscreen === 'boolean') {
 // borderless is now broken on windows, and I don't think there's a fix?
 if (process.platform === "win32" && userPrefs.fullscreen === 'borderless') {
 	userPrefs.fullscreen = 'windowed';
+	modifiedSettings = true;
 }
 
 // initially, hideAds was a true/false, now it's "block", "hide" or "off"
@@ -675,11 +705,6 @@ if (userPrefs.immersiveSplashBackgroundColor === '#171717') {
 	userPrefs.immersiveSplashBackgroundColor = '#0A0A0A';
 	modifiedSettings = true;
 }
-if (userPrefs.loadingSplashTitleCardBackgroundColor === '#363636') {
-	userPrefs.loadingSplashTitleCardBackgroundColor = '#0A0A0A';
-	modifiedSettings = true;
-}
-
 // write the new settings format to the settings.json file right after the conversion
 if (modifiedSettings) writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
 if (writeSafetyBaseline) {
@@ -696,6 +721,14 @@ function isTrustedGameIpcSender(event: IpcMainEvent | IpcMainInvokeEvent): boole
 	if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
 	if (event.senderFrame !== mainWindow.webContents.mainFrame) return false;
 	return parseKrunkerUrl(event.senderFrame.url, true) !== undefined;
+}
+
+if (perfMarksEnabled) {
+	ipcMain.on('wok_perf_mark', (event, name: unknown, wallClockMs: unknown) => {
+		if (!isTrustedGameIpcSender(event)) return;
+		if (typeof name !== 'string' || name.length > 64 || typeof wallClockMs !== 'number' || !Number.isFinite(wallClockMs)) return;
+		logPerfMark(name, wallClockMs);
+	});
 }
 
 app.on('gpu-info-update', () => {
@@ -843,11 +876,31 @@ app.on('child-process-gone', (_event, details) => {
 	) return;
 
 	const reason = `GPU process ${details.reason} with exit code ${details.exitCode}.`;
-	graphicsProfileState = recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
+	const failedState = recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
+	if (failedState === graphicsProfileState) {
+		console.error(`Additional GPU teardown event after the ${graphicsSelection.backend} launch failure: ${reason}`);
+		return;
+	}
+	graphicsProfileState = failedState;
 	persistGraphicsProfile();
 	if (queuedCalibrationCandidate) activeCalibrationFailureReason = reason;
 	console.error(`${graphicsSelection.source === 'calibration' ? 'Calibrated' : 'Automatic'} graphics backend ${graphicsSelection.backend} failed and will fall back on the next launch.`);
 });
+
+function observeGraphicsLaunchRenderer(window: BrowserWindow, onRendererGone?: () => void) {
+	window.webContents.on('render-process-gone', (_event, details) => {
+		onRendererGone?.();
+		if (appQuitting || !graphicsProfileState.launchPending) return;
+
+		// A renderer exit interrupts the launch, but only child-process-gone with type GPU is
+		// evidence that the selected backend itself failed and should be quarantined.
+		graphicsProfileState = recordUnknownGraphicsLaunchInterruption(
+			graphicsProfileState,
+			`Renderer process ${details.reason} with exit code ${details.exitCode}; no GPU-process failure was observed.`
+		);
+		persistGraphicsProfile();
+	});
+}
 
 function relaunchClient() {
 	const args = process.argv.slice(1).filter(argument => argument !== '--safe-graphics');
@@ -858,6 +911,15 @@ function relaunchClient() {
 function persistCalibrationState(next: CalibrationState) {
 	calibrationState = next;
 	writeCalibrationStateSync(next);
+}
+
+function persistCalibrationRetryState(next: CalibrationState): void {
+	if (!writeCalibrationStateSync(next)) {
+		throw new Error(
+			'Calibration retry state could not be persisted; refusing to launch another attempt.'
+		);
+	}
+	calibrationState = next;
 }
 
 /**
@@ -1138,17 +1200,41 @@ function calibrationDataUrl(html: string): string {
 	return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-function createCalibrationWindow(): BrowserWindow {
-	// The trial window matches the real game-window dimensions so the workload renders at the
-	// resolution the selected profile will actually drive (design §1.2).
-	const screenSize = screen.getPrimaryDisplay().size;
+/** Keeps calibration and gameplay on the same primary-display surface and window mode. */
+function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
+	const display = screen.getPrimaryDisplay();
+	const geometry: BrowserWindowConstructorOptions = {
+		center: true,
+		fullscreen: false,
+		height: Math.round(display.size.height * windowScale),
+		width: Math.round(display.size.width * windowScale)
+	};
+
+	if (userPrefs.fullscreen === 'fullscreen') return { ...geometry, fullscreen: true };
+	if (userPrefs.fullscreen === 'borderless') {
+		return {
+			...geometry,
+			frame: false,
+			fullscreenable: false,
+			height: display.bounds.height,
+			kiosk: true,
+			width: display.bounds.width
+		};
+	}
+	return geometry;
+}
+
+const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
+const CALIBRATION_MAXIMIZE_GRACE_MS = 1_500;
+
+async function createCalibrationWindow(deadlineAt: number): Promise<BrowserWindow> {
+	// Use the same geometry and mode as the real game window so backend and frame-policy ranking
+	// sees the pixel load the selected profile will actually drive (design §1.2).
 	const calibrationWindow = new BrowserWindow({
+		...getGameplayWindowGeometry(),
 		alwaysOnTop: true,
 		backgroundColor: '#0A0A0A',
-		center: true,
-		height: Math.round(screenSize.height * windowScale),
 		show: false,
-		width: Math.round(screenSize.width * windowScale),
 		webPreferences: {
 			backgroundThrottling: false,
 			contextIsolation: true,
@@ -1157,63 +1243,134 @@ function createCalibrationWindow(): BrowserWindow {
 			spellcheck: false
 		}
 	});
+	observeGraphicsLaunchRenderer(calibrationWindow);
 	calibrationWindow.setAutoHideMenuBar(true);
 	calibrationWindow.setMenuBarVisibility(false);
 	calibrationWindow.once('ready-to-show', () => {
 		calibrationWindow.show();
 		calibrationWindow.focus();
 	});
-	return calibrationWindow;
+
+	try {
+		if (userPrefs.fullscreen === 'maximized' && !calibrationWindow.isMaximized()) {
+			// Native maximize can occasionally fail to signal. Give it a short grace period,
+			// bounded again by the trial's one end-to-end absolute deadline.
+			let onMaximized: () => void = () => {};
+			let onClosed: () => void = () => {};
+			const maximizeDeadline = Math.min(deadlineAt, Date.now() + CALIBRATION_MAXIMIZE_GRACE_MS);
+			try {
+				await runBeforeDeadline(() => new Promise<void>((resolve, reject) => {
+					onMaximized = resolve;
+					onClosed = () => { reject(new Error('Calibration window was closed before maximization.')); };
+					calibrationWindow.once('maximize', onMaximized);
+					calibrationWindow.once('closed', onClosed);
+					calibrationWindow.maximize();
+					if (calibrationWindow.isMaximized()) onMaximized();
+				}), maximizeDeadline, 'Calibration window maximization');
+			} finally {
+				calibrationWindow.removeListener('maximize', onMaximized);
+				calibrationWindow.removeListener('closed', onClosed);
+			}
+		}
+		return calibrationWindow;
+	} catch (error) {
+		if (!calibrationWindow.isDestroyed()) calibrationWindow.destroy();
+		throw error;
+	}
 }
 
 async function runCalibrationTrial(candidate: CalibrationCandidate, step: number, total: number, attempt = 1): Promise<CalibrationMetrics> {
-	const [{ buildCalibrationTrialPage }, markSvg] = await Promise.all([
-		import('./calibration-window.ts'),
-		readFile(pathJoin($assets, 'wok-mark.svg'), 'utf-8')
-	]);
-	// Same-launch trials and retries reuse the window with a page reload: fresh GL context, no
-	// extra window churn (design §2.4, §3.2).
-	if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createCalibrationWindow();
-	const display = screen.getPrimaryDisplay();
-	await mainWindow.loadURL(calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg, {
-		attempt,
-		onBattery: powerMonitor.isOnBatteryPower(),
-		...(typeof display.displayFrequency === 'number' && display.displayFrequency > 0 ? { refreshRateHz: display.displayFrequency } : {})
-	})));
-
-	const timeoutMs = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
-	const timeout = new Promise<never>((_resolve, reject) => {
-		setTimeout(() => reject(new Error('Calibration renderer timed out.')), timeoutMs);
-	});
-	const closed = new Promise<never>((_resolve, reject) => {
-		mainWindow.once('closed', () => reject(new Error('Calibration window was closed.')));
-	});
-	const benchmark = mainWindow.webContents.executeJavaScript(
-		`window.wokRunBenchmark(${JSON.stringify({
-			benchmarkMs: CALIBRATION_BENCHMARK_MS,
-			minSamples: CALIBRATION_MIN_SAMPLES,
-			warmupMaxMs: WORKLOAD_CONSTANTS.warmupMaxMs,
-			warmupMinMs: WORKLOAD_CONSTANTS.warmupMinMs,
-			warmupSettleFrames: WORKLOAD_CONSTANTS.warmupSettleFrames,
-			warmupSettleRatio: WORKLOAD_CONSTANTS.warmupSettleRatio
-		})})`
+	const deadlineAt = clampCalibrationTrialDeadline(
+		calibrationState,
+		Date.now() + CALIBRATION_TRIAL_DEADLINE_MS
 	);
-	return normalizeBenchmarkMetrics(await Promise.race([benchmark, timeout, closed]));
+	let trialWindow: BrowserWindow | undefined;
+	try {
+		const [{ buildCalibrationTrialPage }, markSvg] = await runBeforeDeadline(() => Promise.all([
+			import('./calibration-window.ts'),
+			readFile(pathJoin($assets, 'wok-mark.svg'), 'utf-8')
+		]), deadlineAt, 'Calibration assets');
+		// Same-launch trials and retries reuse the window with a page reload: fresh GL context, no
+		// extra window churn (design §2.4, §3.2).
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			mainWindow = await runBeforeDeadline(
+				() => createCalibrationWindow(deadlineAt),
+				deadlineAt,
+				'Calibration window creation'
+			);
+		}
+		trialWindow = mainWindow;
+		const activeTrialWindow = trialWindow;
+		const display = screen.getPrimaryDisplay();
+		const trialUrl = calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg, {
+			attempt,
+			onBattery: powerMonitor.isOnBatteryPower(),
+			...(typeof display.displayFrequency === 'number' && display.displayFrequency > 0 ? { refreshRateHz: display.displayFrequency } : {})
+		}));
+		await runBeforeDeadline(
+			() => activeTrialWindow.loadURL(trialUrl),
+			deadlineAt,
+			'Calibration page navigation'
+		);
+
+		let rejectClosed: (reason?: unknown) => void = () => {};
+		const onClosed = () => rejectClosed(new Error('Calibration window was closed.'));
+		const closed = new Promise<never>((_resolve, reject) => {
+			rejectClosed = reject;
+			activeTrialWindow.once('closed', onClosed);
+		});
+		try {
+			const benchmark = () => activeTrialWindow.webContents.executeJavaScript(
+				`window.wokRunBenchmark(${JSON.stringify({
+					benchmarkMs: CALIBRATION_BENCHMARK_MS,
+					minSamples: CALIBRATION_MIN_SAMPLES,
+					warmupMaxMs: WORKLOAD_CONSTANTS.warmupMaxMs,
+					warmupMinMs: WORKLOAD_CONSTANTS.warmupMinMs,
+					warmupSettleFrames: WORKLOAD_CONSTANTS.warmupSettleFrames,
+					warmupSettleRatio: WORKLOAD_CONSTANTS.warmupSettleRatio
+				})})`
+			);
+			return normalizeBenchmarkMetrics(await runBeforeDeadline(
+				() => Promise.race([benchmark(), closed]),
+				deadlineAt,
+				'Calibration renderer'
+			));
+		} finally {
+			activeTrialWindow.removeListener('closed', onClosed);
+		}
+	} catch (error) {
+		if (trialWindow && !trialWindow.isDestroyed()) trialWindow.destroy();
+		throw error;
+	}
 }
 
 async function showCalibrationDecision(state: CalibrationState): Promise<'apply' | 'keep'> {
-	const [{ buildCalibrationResultPage }, markSvg] = await Promise.all([
-		import('./calibration-window.ts'),
-		readFile(pathJoin($assets, 'wok-mark.svg'), 'utf-8')
-	]);
-	if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createCalibrationWindow();
-	await mainWindow.loadURL(calibrationDataUrl(buildCalibrationResultPage(
-		state.results,
-		state.recommendedSelection,
-		markSvg,
-		state.competitiveModeWasEnabled
-	)));
-	return mainWindow.webContents.executeJavaScript('window.wokWaitForCalibrationDecision()') as Promise<'apply' | 'keep'>;
+	const deadlineAt = Date.now() + CALIBRATION_TRIAL_DEADLINE_MS;
+	let decisionWindow: BrowserWindow | undefined;
+	try {
+		const [{ buildCalibrationResultPage }, markSvg] = await runBeforeDeadline(() => Promise.all([
+			import('./calibration-window.ts'),
+			readFile(pathJoin($assets, 'wok-mark.svg'), 'utf-8')
+		]), deadlineAt, 'Calibration result assets');
+		if (!mainWindow || mainWindow.isDestroyed()) {
+			mainWindow = await runBeforeDeadline(
+				() => createCalibrationWindow(deadlineAt),
+				deadlineAt,
+				'Calibration result window creation'
+			);
+		}
+		decisionWindow = mainWindow;
+		await runBeforeDeadline(() => decisionWindow.loadURL(calibrationDataUrl(buildCalibrationResultPage(
+			state.results,
+			state.recommendedSelection,
+			markSvg,
+			state.competitiveModeWasEnabled
+		))), deadlineAt, 'Calibration result navigation');
+		return decisionWindow.webContents.executeJavaScript('window.wokWaitForCalibrationDecision()') as Promise<'apply' | 'keep'>;
+	} catch (error) {
+		if (decisionWindow && !decisionWindow.isDestroyed()) decisionWindow.destroy();
+		throw error;
+	}
 }
 
 function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
@@ -1242,16 +1399,16 @@ function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
 	return preparedState;
 }
 
-interface CalibrationTrialRunOutcome {
-	aborted: boolean;
-	failureReason?: string;
-	metrics: CalibrationMetrics;
+function finalizeCalibrationForBudgetExhaustion(): void {
+	if (!calibrationState) return;
+	console.log('Calibration budget exhausted; deciding with the collected evidence.');
+	persistCalibrationState(finalizeCalibration(calibrationState));
 }
 
-function pickBetterRejectedAttempt(first: CalibrationMetrics, second: CalibrationMetrics): CalibrationMetrics {
-	if (first.success !== second.success) return first.success ? first : second;
-	if (first.sampleCount !== second.sampleCount) return first.sampleCount > second.sampleCount ? first : second;
-	return second.onePercentLowFps > first.onePercentLowFps ? second : first;
+function finalizeCalibrationIfRunTimeBudgetExhausted(): boolean {
+	if (!calibrationState || !isCalibrationRunTimeBudgetExhausted(calibrationState)) return false;
+	finalizeCalibrationForBudgetExhaustion();
+	return true;
 }
 
 /**
@@ -1260,47 +1417,63 @@ function pickBetterRejectedAttempt(first: CalibrationMetrics, second: Calibratio
  * retry budget; when both attempts are rejected, the better one is kept as warn-and-continue
  * evidence and the other is persisted for diagnostics.
  */
-async function runCalibrationTrialWithRetry(candidate: CalibrationCandidate, step: number, total: number): Promise<CalibrationTrialRunOutcome> {
-	let firstRejectedAttempt: CalibrationMetrics | undefined;
-	for (let attempt = 1; ; attempt++) {
-		let metrics = failedCalibrationMetrics();
-		let failureReason: string | undefined;
-		let powerStateChanged = false;
-		const onPowerStateChanged = () => { powerStateChanged = true; };
-		powerMonitor.on('on-ac', onPowerStateChanged);
-		powerMonitor.on('on-battery', onPowerStateChanged);
-		try {
-			metrics = await runCalibrationTrial(candidate, step, total, attempt);
-			failureReason = activeCalibrationFailureReason;
-			if (failureReason) metrics = failedCalibrationMetrics();
-			else if (!metrics.success) failureReason = 'WebGL calibration did not return valid frame samples.';
-		} catch (error) {
-			if (!mainWindow || mainWindow.isDestroyed()) return { aborted: true, metrics };
-			failureReason = error instanceof Error ? error.message : String(error);
-		} finally {
-			powerMonitor.off('on-ac', onPowerStateChanged);
-			powerMonitor.off('on-battery', onPowerStateChanged);
-		}
-
-		if (!failureReason && powerStateChanged) metrics = markMetricsRejected(metrics, 'power-state-changed');
-		const rejected = !failureReason && metricsRejectionReasons(metrics).length > 0;
-		if (!rejected) return { aborted: false, ...(failureReason ? { failureReason } : {}), metrics };
-
-		if (attempt === 1 && calibrationState && calibrationState.rejectedAttempts.length < BENCHMARK_RUN_RETRY_BUDGET) {
-			persistCalibrationState(recordRejectedCalibrationAttempt(calibrationState, candidate, metrics));
-			firstRejectedAttempt = metrics;
-			continue;
-		}
-		if (firstRejectedAttempt) {
-			const better = pickBetterRejectedAttempt(firstRejectedAttempt, metrics);
-			if (better !== metrics && calibrationState) {
-				persistCalibrationState(recordRejectedCalibrationAttempt(calibrationState, candidate, metrics));
+async function runCalibrationTrialWithRetry(
+	candidate: CalibrationCandidate,
+	step: number,
+	total: number
+): Promise<CalibrationTrialAttemptOutcome> {
+	return orchestrateCalibrationTrialRetry({
+		candidate,
+		getState: () => calibrationState,
+		isRunTimeBudgetExhausted: state =>
+			isCalibrationRunTimeBudgetExhausted(state),
+		persistState: persistCalibrationRetryState,
+		runAttempt: async attempt => {
+			let metrics = failedCalibrationMetrics();
+			let failureReason: string | undefined;
+			let powerStateChanged = false;
+			const onPowerStateChanged = () => {
+				powerStateChanged = true;
+			};
+			powerMonitor.on('on-ac', onPowerStateChanged);
+			powerMonitor.on('on-battery', onPowerStateChanged);
+			try {
+				metrics = await runCalibrationTrial(
+					candidate,
+					step,
+					total,
+					attempt
+				);
+				failureReason = activeCalibrationFailureReason;
+				if (failureReason) metrics = failedCalibrationMetrics();
+				else if (!metrics.success) {
+					failureReason =
+						'WebGL calibration did not return valid frame samples.';
+				}
+			} catch (error) {
+				if (!mainWindow || mainWindow.isDestroyed()) {
+					return { aborted: true, metrics };
+				}
+				failureReason = error instanceof Error
+					? error.message
+					: String(error);
+			} finally {
+				powerMonitor.off('on-ac', onPowerStateChanged);
+				powerMonitor.off('on-battery', onPowerStateChanged);
 			}
-			return { aborted: false, metrics: better };
+			if (!failureReason && powerStateChanged) {
+				metrics = markMetricsRejected(
+					metrics,
+					'power-state-changed'
+				);
+			}
+			return {
+				aborted: false,
+				...(failureReason === undefined ? {} : { failureReason }),
+				metrics
+			};
 		}
-		// No retry budget left: round-1 warn-and-continue semantics on the single rejected attempt.
-		return { aborted: false, metrics };
-	}
+	});
 }
 
 /**
@@ -1358,16 +1531,15 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 	prepareCalibrationForGpuInfo(gpuInfo);
 	if (!calibrationState || calibrationState.status === 'complete' || calibrationState.status === 'uncalibrated') return false;
 
-	// The hard run budget is checked at each launch (design §3.4); on exhaustion the decision
-	// runs with the collected evidence and missing evidence resolves through the tie rules.
-	if (calibrationState.status === 'running' && isCalibrationBudgetExhausted(calibrationState)) {
-		console.log('Calibration budget exhausted; deciding with the collected evidence.');
-		persistCalibrationState(finalizeCalibration(calibrationState));
+	// Check before incrementing: launch six is allowed to run, while launch seven is rejected.
+	// Within an admitted launch, only the wall-clock budget can stop same-launch work.
+	if (calibrationState.status === 'running') {
+		const admittedLaunch = tryRecordCalibrationLaunch(calibrationState);
+		if (admittedLaunch) persistCalibrationState(admittedLaunch);
+		else finalizeCalibrationForBudgetExhaustion();
 	}
 
 	if (calibrationState.status === 'running') {
-		persistCalibrationState(recordCalibrationLaunch(calibrationState));
-
 		let pendingCandidate = getPendingCalibrationCandidate(calibrationState);
 		while (pendingCandidate && isGraphicsBackendQuarantined(graphicsProfileState, pendingCandidate.backend)) {
 			persistCalibrationState(recordCalibrationResult(
@@ -1388,7 +1560,11 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 			// Same-candidate trials share this launch with a cooldown and page reload between them (§3.2).
 			const launchTrialCount = Math.max(1, getPendingLaunchSlotIndices(calibrationState).length);
 			for (let trialInLaunch = 0; trialInLaunch < launchTrialCount; trialInLaunch++) {
-				if (trialInLaunch > 0) await new Promise(resolve => { setTimeout(resolve, CALIBRATION_INTRA_LAUNCH_COOLDOWN_MS); });
+				if (finalizeCalibrationIfRunTimeBudgetExhausted()) break;
+				if (trialInLaunch > 0) {
+					await new Promise(resolve => { setTimeout(resolve, CALIBRATION_INTRA_LAUNCH_COOLDOWN_MS); });
+					if (finalizeCalibrationIfRunTimeBudgetExhausted()) break;
+				}
 				const step = calibrationState.results.length + 1;
 				const outcome = await runCalibrationTrialWithRetry(pendingCandidate, step, calibrationState.plan.length);
 				if (outcome.aborted) {
@@ -1401,7 +1577,7 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 				}
 				persistCalibrationState(recordCalibrationResult(calibrationState, pendingCandidate, outcome.metrics, outcome.failureReason));
 				// A GPU-process failure dooms the rest of this launch group; relaunch handles recovery.
-				if (outcome.failureReason) break;
+				if (outcome.failureReason || finalizeCalibrationIfRunTimeBudgetExhausted()) break;
 			}
 			if (graphicsProfileState.launchPending) {
 				graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
@@ -1409,8 +1585,12 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 			}
 
 			if (getPendingCalibrationCandidate(calibrationState)) {
-				relaunchClient();
-				return true;
+				if (!canStartCalibrationLaunch(calibrationState)) {
+					finalizeCalibrationForBudgetExhaustion();
+				} else {
+					relaunchClient();
+					return true;
+				}
 			}
 		}
 	}
@@ -1467,9 +1647,15 @@ if (userPrefs.resourceSwapper) {
 	} ]);
 }
 
+const COMPLETE_GPU_INFO_TIMEOUT_MS = 5_000;
+
 async function refreshCompleteGraphicsInfo(): Promise<unknown> {
 	try {
-		const gpuInfo = await app.getGPUInfo('complete');
+		const gpuInfo = await runBeforeDeadline(
+			() => app.getGPUInfo('complete'),
+			Date.now() + COMPLETE_GPU_INFO_TIMEOUT_MS,
+			'Complete GPU information'
+		);
 		const devices = normalizeGraphicsDevices(gpuInfo);
 		graphicsProfileState = updateGraphicsDetection(graphicsProfileState, process.platform, devices);
 		graphicsProfileState = updateGraphicsDriverIdentity(
@@ -1503,7 +1689,10 @@ app.on('ready', async () => {
 	// krunker.io negotiates h2 and every request multiplexes over a single session, so Chromium
 	// clamps larger asks to 1 once it knows the origin (net-log verified); asking for 1 keeps
 	// fresh profiles from dialing a second connection that h2 makes permanently idle.
-	if (!calibrationBlocksStartup && !process.argv.includes('--safe-graphics')) {
+	// Adding a second preconnect to gapi.svc.krunker.io (the data API behind skins/spins) was tried
+	// and reverted: repeated A/B runs contradicted each other because rate limiting dropped samples
+	// from one arm, so it should not return without clean, rate-limit-free evidence.
+	if (!calibrationBlocksStartup) {
 		try {
 			session.defaultSession.preconnect({ numSockets: 1, url: 'https://krunker.io' });
 		} catch (error) {
@@ -1511,16 +1700,18 @@ app.on('ready', async () => {
 		}
 	}
 
-	let completeGraphicsIdentityReady = false;
 	if (calibrationBlocksStartup) {
 		const gpuInfo = await refreshCompleteGraphicsInfo();
-		completeGraphicsIdentityReady = true;
 		if (await runCalibrationFlow(gpuInfo)) return;
 	}
 
-	const screenSize = screen.getPrimaryDisplay().size;
-
 	clientUrlStartup ??= findClientUrl(process.argv) ?? null;
+
+	// Choose the launch animation before the window exists, so nothing waits on it. A fresh profile
+	// gets the longest variant: a first launch pays for cold HTTP, shader and V8 caches and is the
+	// slowest a user ever sees.
+	const startupProfile = loadStartupProfile();
+	const introVariant = selectIntroVariant(startupProfile);
 
 	// Hand the preload everything it needs to inject CSS and mount the splash at document
 	// start instead of waiting for did-finish-load. The preload falls back to the
@@ -1537,17 +1728,15 @@ app.on('ready', async () => {
 	})();
 
 	const mainWindowProps: BrowserWindowConstructorOptions = {
+		...getGameplayWindowGeometry(),
 		show: false,
-		width: screenSize.width * windowScale,
-		height: screenSize.height * windowScale,
-		center: true,
 		webPreferences: {
 			additionalArguments: bootPayloadArguments,
 			// The bundled runtime (scripts/bundle.mjs) emits this module as bundle/main.mjs with
 			// the compiled preload beside it; running from src/ loads the raw TypeScript preload.
 			preload: pathJoin(import.meta.dirname, import.meta.url.endsWith('.mjs') ? 'preload.mjs' : 'preload.ts'),
 			spellcheck: false,
-			backgroundThrottling: false,
+			backgroundThrottling: !userPrefs.safeFlags_disableBackgrounding,
 			nodeIntegration: false,
 			// not ideal, but preload does a lot of interaction w/ the page
 			// turning this on will also likely require transpiling the preload script to js
@@ -1557,53 +1746,30 @@ app.on('ready', async () => {
 		backgroundColor: '#000000'
 	};
 
-	// userPrefs.fullscreen = maximized gets handled later
-	switch (userPrefs.fullscreen) {
-		case 'fullscreen':
-			mainWindowProps.fullscreen = true;
-			break;
-		case 'borderless': {
-			const dimensions = screen.getPrimaryDisplay().bounds;
-			const borderlessProps: BrowserWindowConstructorOptions = {
-				frame: false,
-				kiosk: true,
-				fullscreenable: false,
-				fullscreen: false,
-				width: dimensions.width,
-				height: dimensions.height
-			};
-
-			Object.assign(mainWindowProps, borderlessProps);
-			break;
-		}
-		case 'windowed':
-		default:
-			mainWindowProps.fullscreen = false;
-			break;
-	}
-
+	// Maximized mode is applied at ready-to-show; the shared resolver handles every other mode.
 	mainWindow = new BrowserWindow(mainWindowProps);
 	logPerfMark('window-created');
 	if (userPrefs.fullscreen === 'borderless') mainWindow.moveTop();
 
-	// Phase 2 of the legacy migration: copy the bulky trees in the background now that a
-	// window exists. The request handler indexes the resource swapper before these files
-	// land, so migrated resources are only served after its next indexing pass (next launch).
+	// Phase 2 of the legacy migration: copy deferred regular files and directory trees in
+	// the background now that a window exists. The request handler indexes the resource
+	// swapper before these files land, so migrated resources are only served after its next
+	// indexing pass (next launch).
 	let requestHandlerStarted = false;
 	if (deferredMigrationSources.length > 0) {
 		const migrationSources = deferredMigrationSources;
 		deferredMigrationSources = [];
-		console.log(`Migrating legacy Crankshaft folders from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
+		console.log(`Migrating remaining legacy Crankshaft configuration from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
 		void migrateLegacyConfigsPhaseTwo(configPath, migrationSources).then(migration => {
 			if (!migration.completed) {
-				console.error('Legacy folder migration did not finish cleanly; it will resume on the next launch.');
+				console.error('Legacy configuration migration did not finish cleanly; it will resume on the next launch.');
 				return;
 			}
 			console.log(`Finished migrating ${migration.copiedFiles} legacy files in the background; preserved ${migration.skippedConflicts} existing WOK Client files.`);
 			if (requestHandlerStarted && migration.copiedFiles > 0) {
-				console.log('Migrated legacy folders finished after resource indexing; swapped resources and CSS files appear after the next launch.');
+				console.log('Migration finished after resource indexing; any migrated swapped resources and CSS files appear after the next launch.');
 			}
-		}).catch(error => { console.error('Failed to migrate legacy Crankshaft folders. The original files were left untouched.', error); });
+		}).catch(error => { console.error('Failed to migrate remaining legacy Crankshaft configuration. The original files were left untouched.', error); });
 	}
 
 	let discordRPCReady = false;
@@ -1697,22 +1863,47 @@ app.on('ready', async () => {
 		void destroy().catch(console.error);
 	});
 
-	// general ready to show, runs when window refreshes or loads url
-	mainWindow.on('ready-to-show', () => {
-		if (userPrefs.fullscreen === 'maximized' && !mainWindow.isMaximized()) mainWindow.maximize();
-		if (!mainWindow.isVisible()) mainWindow.show();
+	/**
+	 * The launch intro owns the first reveal of the game window: it shows the window behind the
+	 * opaque half of the animation so the handoff has no visible seam, then hands focus over when
+	 * the animation ends. Every later ready-to-show (reloads, navigation) reveals immediately.
+	 */
+	const introHandoff = createIntroGameWindowHandoff(
+		mainWindow,
+		userPrefs.fullscreen
+	);
 
+	// General ready-to-show, including later refreshes and navigations.
+	mainWindow.on('ready-to-show', () => {
+		introHandoff.handleReadyToShow();
+	});
+
+	const GRAPHICS_STABILITY_CONFIRMATION_MS = 30_000;
+	const graphicsStability = createGraphicsStabilityConfirmation({
+		delayMs: GRAPHICS_STABILITY_CONFIRMATION_MS,
+		onStable: () => {
+			if (!graphicsProfileState.launchPending || mainWindow.isDestroyed()) return;
+			graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
+			persistGraphicsProfile();
+		}
+	});
+	app.on('before-quit', graphicsStability.cancel);
+	mainWindow.on('closed', graphicsStability.cancel);
+	observeGraphicsLaunchRenderer(mainWindow, graphicsStability.cancel);
+
+	mainWindow.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+		if (isMainFrame && !isInPlace) graphicsStability.mainFrameLoadStarted();
 	});
 
 	mainWindow.webContents.on('dom-ready', () => {
+		// DOM construction is not evidence that WebGL/ANGLE will remain stable through game startup.
 		logPerfMark('dom-ready');
-		if (!graphicsProfileState.launchPending) return;
-		graphicsProfileState = completeGraphicsLaunch(graphicsProfileState);
-		persistGraphicsProfile();
 	});
 
 	mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedUrl, isMainFrame) => {
-		if (!isMainFrame || !graphicsProfileState.launchPending) return;
+		if (!isMainFrame) return;
+		graphicsStability.cancel();
+		if (!graphicsProfileState.launchPending) return;
 		graphicsProfileState = recordUnknownGraphicsLaunchInterruption(
 			graphicsProfileState,
 			`Main-frame navigation to ${validatedUrl || 'Krunker'} failed (${errorCode}: ${errorDescription || 'unknown error'}).`
@@ -1722,6 +1913,7 @@ app.on('ready', async () => {
 
 	mainWindow.webContents.on('did-finish-load', () => {
 		logPerfMark('did-finish-load');
+		if (graphicsProfileState.launchPending) graphicsStability.mainFrameLoadFinished();
 		if (!traceEnabled && Number.isFinite(perfExitAfterLoadMs) && perfExitAfterLoadMs > 0 && !perfExitScheduled) {
 			perfExitScheduled = true;
 			setTimeout(() => { app.quit(); }, perfExitAfterLoadMs);
@@ -1730,7 +1922,7 @@ app.on('ready', async () => {
 			traceScheduled = true;
 			setTimeout(() => { void runDiagnosticTrace(); }, traceDelayMs);
 		}
-		const currentAdaptiveValidationState = userPrefs.competitiveMode && completeGraphicsIdentityReady
+		const currentAdaptiveValidationState = userPrefs.competitiveMode
 			? prepareCurrentAdaptiveValidationState()
 			: undefined;
 		mainWindow.webContents.send('main_did-finish-load', userPrefs, getGraphicsRuntimeInfo(), {
@@ -1804,8 +1996,21 @@ app.on('ready', async () => {
 		userPrefs.hideAds === 'block' ? readFileSync(pathJoin($assets, 'blockFilters.txt'), 'utf-8') : '',
 		filtersPath
 	);
-	await crankshaftFilterHandler.start();
-	requestHandlerStarted = true;
+	try {
+		requestHandlerStarted = await crankshaftFilterHandler.start();
+		if (!requestHandlerStarted) {
+			// Registration failures are normally deterministic, but a single bounded retry
+			// covers transient session setup races without delaying the healthy startup path.
+			await new Promise(resolve => setTimeout(resolve, 100));
+			requestHandlerStarted = await crankshaftFilterHandler.start();
+			if (!requestHandlerStarted) console.error('WOK Client request filters remained unavailable after retry.');
+		}
+	} catch (error) {
+		// Blocking and swapping are optional. Unexpected setup failures must never keep
+		// the hidden game window from reaching its initial navigation.
+		requestHandlerStarted = false;
+		console.error('WOK Client request features are unavailable for this launch.', error);
+	}
 	if (userPrefs.resourceSwapper) {
 		protocol.registerFileProtocol('krunker-resource-swapper', (request, callback) => {
 			const localPath = crankshaftFilterHandler.resolveSwapProtocolRequest(request.url);
@@ -1830,7 +2035,6 @@ app.on('ready', async () => {
 				gpuIdentityRefreshTimer = undefined;
 				if (mainWindow.isDestroyed()) return;
 				void refreshCompleteGraphicsInfo().then(gpuInfo => {
-					completeGraphicsIdentityReady = true;
 					const previousCalibrationState = calibrationState;
 					const preparedState = prepareCalibrationForGpuInfo(gpuInfo);
 					if (preparedState !== previousCalibrationState && preparedState.status === 'uncalibrated') {
@@ -1851,7 +2055,88 @@ app.on('ready', async () => {
 		});
 	}
 
+	// Record how long an ordinary launch took to become usable so the next launch can choose an
+	// animation that fits this machine. Register before navigation, consume only the first trusted
+	// signal, and keep calibration launches out of the normal startup profile.
+	if (!calibrationBlocksStartup) {
+		const removeStartupSampleListener = () => {
+			ipcMain.removeListener('wok_game_usable', recordStartupSampleFromRenderer);
+			mainWindow.removeListener('closed', removeStartupSampleListener);
+		};
+		const recordStartupSampleFromRenderer = (event: IpcMainEvent) => {
+			if (!isTrustedGameIpcSender(event)) return;
+			removeStartupSampleListener();
+			const readyMs = startupReadyMs(process.uptime());
+			if (readyMs !== undefined) writeStartupProfile(recordStartupSample(startupProfile, readyMs));
+		};
+		ipcMain.on('wok_game_usable', recordStartupSampleFromRenderer);
+		mainWindow.once('closed', removeStartupSampleListener);
+	}
+
 	logPerfMark('loadurl-called');
-	await mainWindow.loadURL('https://krunker.io');
+	const gameNavigation = mainWindow.loadURL('https://krunker.io');
+
+	// Start the intro only once the game navigation is under way, so the identity animation can
+	// never delay the first byte of Krunker's load. Calibration launches skip it: that flow has
+	// already put windows in front of the user and should reach the game as directly as possible.
+	let cancelActiveIntro: (() => void) | undefined;
+	if (userPrefs.introAnimation && introVariant !== 'none' && !calibrationBlocksStartup) {
+		introHandoff.beginIntro();
+		let introSequence: IntroSequence | undefined;
+		let introFinished = false;
+		const cleanupIntroListeners = () => {
+			app.removeListener('before-quit', cancelIntro);
+			mainWindow.removeListener('closed', cancelIntro);
+			cancelActiveIntro = undefined;
+		};
+		const cancelIntro = () => introSequence?.cancel();
+		cancelActiveIntro = cancelIntro;
+		app.once('before-quit', cancelIntro);
+		mainWindow.once('closed', cancelIntro);
+
+		try {
+			const introDisplay = screen.getPrimaryDisplay();
+			const introBounds = getIntroWindowBounds(introDisplay, userPrefs.fullscreen, windowScale);
+			introSequence = startIntroSequence({
+				assetsPath: $assets,
+				bounds: introBounds,
+				createWindow: windowOptions =>
+					new BrowserWindow(windowOptions),
+				timing: INTRO_VARIANTS[introVariant],
+				source: selectIntroSource(introDisplay, introBounds),
+				audio: userPrefs.introAudio,
+				// Reveal the game window behind the opaque frame. No focus change: the animation is
+				// still on screen, and this also stops Chromium treating the game renderer as hidden
+				// for the rest of Krunker's load.
+				onReveal: () => {
+					introHandoff.revealBehindIntro();
+				},
+				onVisualEnd: () => {
+					introHandoff.revealForUse();
+					logPerfMark('intro-visual-end');
+				},
+				onFinished: () => {
+					introFinished = true;
+					introSequence = undefined;
+					introHandoff.endIntro();
+					cleanupIntroListeners();
+					logPerfMark('intro-finished');
+				}
+			});
+			if (introFinished) introSequence = undefined;
+		} catch (error) {
+			console.error('Launch intro setup failed; continuing directly to the game.', error);
+			cleanupIntroListeners();
+			introHandoff.revealForUse();
+		}
+	}
+
+	try {
+		await gameNavigation;
+	} catch (error) {
+		cancelActiveIntro?.();
+		introHandoff.revealForUse();
+		console.error('Initial Krunker navigation failed.', error);
+	}
 });
 }

@@ -204,6 +204,13 @@ function sessionHasEnoughEvidence(session: AdaptiveValidationSession): boolean {
 		&& session.metrics.p95FrameTimeMs > 0;
 }
 
+// The version-1 sessions array is the bounded set of qualifying evidence; rejected attempts are not persisted.
+function sessionQualifies(session: AdaptiveValidationSession): boolean {
+	return session.durationMs >= ADAPTIVE_VALIDATION_MIN_SESSION_MS
+		&& session.lowConfidenceReasons.length === 0
+		&& sessionHasEnoughEvidence(session);
+}
+
 export function adaptiveValidationSessionHasSevereInstability(session: AdaptiveValidationSession): boolean {
 	if (!sessionHasEnoughEvidence(session)) return false;
 	const lowRatio = session.metrics.onePercentLowFps / session.metrics.averageFps;
@@ -213,7 +220,7 @@ export function adaptiveValidationSessionHasSevereInstability(session: AdaptiveV
 
 function classificationForSessions(sessions: readonly AdaptiveValidationSession[]): AdaptiveValidationClassification {
 	if (sessions.length < ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return 'inconclusive';
-	if (sessions.some(session => session.lowConfidenceReasons.length > 0 || !sessionHasEnoughEvidence(session))) return 'inconclusive';
+	if (sessions.some(session => !sessionQualifies(session))) return 'inconclusive';
 
 	const severeSessions = sessions.filter(adaptiveValidationSessionHasSevereInstability).length;
 	if (severeSessions === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return 'recalibration-recommended';
@@ -222,16 +229,16 @@ function classificationForSessions(sessions: readonly AdaptiveValidationSession[
 }
 
 function summarizeSessions(sessions: readonly AdaptiveValidationSession[]): AdaptiveValidationEvidenceSummary {
-	const cleanSessions = sessions.filter(session => session.lowConfidenceReasons.length === 0);
+	const qualifyingSessions = sessions.filter(sessionQualifies);
 	return {
-		acceptedSessionCount: sessions.length,
-		cleanSessionCount: cleanSessions.length,
-		maximumP95FrameTimeMs: cleanSessions.reduce((maximum, session) => Math.max(maximum, session.metrics.p95FrameTimeMs), 0),
-		maximumWorstFrameTimeMs: cleanSessions.reduce((maximum, session) => Math.max(maximum, session.metrics.worstFrameTimeMs), 0),
-		minimumAverageFps: cleanSessions.length > 0 ? Math.min(...cleanSessions.map(session => session.metrics.averageFps)) : 0,
-		minimumOnePercentLowFps: cleanSessions.length > 0 ? Math.min(...cleanSessions.map(session => session.metrics.onePercentLowFps)) : 0,
-		severeInstabilitySessionCount: cleanSessions.filter(adaptiveValidationSessionHasSevereInstability).length,
-		totalFrameSamples: cleanSessions.reduce((total, session) => total + session.metrics.sampleCount, 0)
+		acceptedSessionCount: qualifyingSessions.length,
+		cleanSessionCount: qualifyingSessions.length,
+		maximumP95FrameTimeMs: qualifyingSessions.reduce((maximum, session) => Math.max(maximum, session.metrics.p95FrameTimeMs), 0),
+		maximumWorstFrameTimeMs: qualifyingSessions.reduce((maximum, session) => Math.max(maximum, session.metrics.worstFrameTimeMs), 0),
+		minimumAverageFps: qualifyingSessions.length > 0 ? Math.min(...qualifyingSessions.map(session => session.metrics.averageFps)) : 0,
+		minimumOnePercentLowFps: qualifyingSessions.length > 0 ? Math.min(...qualifyingSessions.map(session => session.metrics.onePercentLowFps)) : 0,
+		severeInstabilitySessionCount: qualifyingSessions.filter(adaptiveValidationSessionHasSevereInstability).length,
+		totalFrameSamples: qualifyingSessions.reduce((total, session) => total + session.metrics.sampleCount, 0)
 	};
 }
 
@@ -287,7 +294,7 @@ export function recordAdaptiveValidationSession(
 	const previousSession = state.sessions.at(-1);
 	if (
 		!session
-		|| session.durationMs < ADAPTIVE_VALIDATION_MIN_SESSION_MS
+		|| !sessionQualifies(session)
 		|| state.sessions.some(existing => existing.id === session.id)
 		|| (previousSession !== undefined && session.completedAt <= previousSession.completedAt)
 	) return state;
@@ -329,7 +336,7 @@ export function parseAdaptiveValidationState(value: unknown): AdaptiveValidation
 	if (value.sessions.length > ADAPTIVE_VALIDATION_REQUIRED_SESSIONS || value.profileChangeConfirmationRequired !== true) return undefined;
 	const profile = parseAdaptiveValidationProfileIdentity(value.profile);
 	const sessions = value.sessions.map(parseAdaptiveValidationSession);
-	if (!profile || sessions.some(session => !session || session.durationMs < ADAPTIVE_VALIDATION_MIN_SESSION_MS)) return undefined;
+	if (!profile || sessions.some(session => !session || !sessionQualifies(session))) return undefined;
 
 	const parsedSessions = sessions as AdaptiveValidationSession[];
 	if (

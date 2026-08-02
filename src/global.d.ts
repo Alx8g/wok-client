@@ -40,7 +40,23 @@ interface PerformanceSnapshot {
 	windowSeconds: number;
 }
 
+interface NetworkDiagnosticsSnapshot {
+	available: boolean;
+	currentReportedPingMs: number;
+	minimumReportedPingMs: number;
+	medianReportedPingMs: number;
+	p95ReportedPingMs: number;
+	reportedPingVariationMs: number;
+	reportedPingSampleAgeMs: number;
+	reportedPingSampleCount: number;
+	reportedPingWindowSeconds: number;
+	regionCode: string;
+	reportedTps: number;
+	networkLagWarning: boolean;
+}
+
 interface WokPerformanceAPI {
+	networkSnapshot: () => NetworkDiagnosticsSnapshot;
 	reset: () => void;
 	setVisible: (visible: boolean) => void;
 	snapshot: () => PerformanceSnapshot;

@@ -44,7 +44,10 @@
 	grid-template-rows: 0fr;
 	grid-auto-flow: column;
 }
-.Crankshaft-settings .crankshaft-button-holder .buttons-title, .material-icons { color: inherit; }
+.Crankshaft-settings .crankshaft-button-holder .buttons-title,
+.Crankshaft-settings .material-icons {
+	color: inherit;
+}
 .Crankshaft-settings .crankshaft-button-holder .settingsBtn, 
 .Crankshaft-settings .settName.has-button .settingsBtn { 
 	width: max-content 
@@ -59,7 +62,7 @@
 }
 
 /* type: multisel */
-.crankshaft-multisel-parent {
+.Crankshaft-settings .crankshaft-multisel-parent {
 	display: grid;
 	grid-template-columns: repeat(5, 1fr);
 	grid-auto-rows: 1fr;
@@ -69,12 +72,12 @@
 	border-radius: 10px;
 	margin-top: 0.8rem;
 }
-.crankshaft-multisel-parent label.hostOpt {
+.Crankshaft-settings .crankshaft-multisel-parent label.hostOpt {
 	width: 100%;
 	margin: 0;
 	box-sizing: border-box;
 }
-span.optDescription {
+.Crankshaft-settings span.optDescription {
     color: #fff;
     z-index: 2;
     font-size: 14px;
@@ -179,11 +182,11 @@ span.optDescription {
 	fill: currentColor;
 }
 
-.desc-icon {
+.Crankshaft-settings .desc-icon {
 	position: relative;
 }
 
-.setting-desc-new {
+.Crankshaft-settings .setting-desc-new {
 	display: block;
 	width: fit-content;
 	max-width: 50ch;
@@ -198,12 +201,12 @@ span.optDescription {
 	grid-area: desc;
 }
 
-.setting-desc-new a {
+.Crankshaft-settings .setting-desc-new a {
 	font-size: inherit !important;
 	font-family: inherit !important;
 }
 
-.setting-category-collapsed {
+.Crankshaft-settings .setting-category-collapsed {
 	display: none;
 }
 

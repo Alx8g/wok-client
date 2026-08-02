@@ -76,6 +76,34 @@ test('parses only internally consistent versioned adaptive validation state', ()
 	assert.equal(parseAdaptiveValidationState({ ...state, sessions: [...state.sessions, stableSession()] }), undefined);
 });
 
+test('rejects persisted states containing nonqualifying sessions', () => {
+	const state = recordSessions([stableSession()]);
+	const contaminated = stableSession({ lowConfidenceReasons: ['window-blurred'] });
+	const insufficient = stableSession();
+	insufficient.metrics = { ...insufficient.metrics, sampleCount: 99 };
+	const contaminatedLegacyState = {
+		...state,
+		sessions: [...state.sessions, contaminated],
+		summary: {
+			...state.summary,
+			acceptedSessionCount: 2
+		}
+	};
+	const insufficientLegacyState = {
+		...state,
+		sessions: [...state.sessions, insufficient],
+		summary: {
+			...state.summary,
+			acceptedSessionCount: 2,
+			cleanSessionCount: 2,
+			totalFrameSamples: state.summary.totalFrameSamples + insufficient.metrics.sampleCount
+		}
+	};
+
+	assert.equal(parseAdaptiveValidationState(contaminatedLegacyState), undefined);
+	assert.equal(parseAdaptiveValidationState(insufficientLegacyState), undefined);
+});
+
 test('rejects incomplete hardware identity before collecting gameplay evidence', () => {
 	assert.equal(parseAdaptiveValidationProfileIdentity({ ...profile, driverFingerprint: '' }), undefined);
 	assert.equal(parseAdaptiveValidationProfileIdentity({ ...profile, hardwareFingerprint: '' }), undefined);
@@ -111,18 +139,57 @@ test('discards pointer-lock sessions shorter than thirty seconds', () => {
 	assert.equal(accepted.status, 'sampling');
 });
 
-test('contamination is retained as low-confidence evidence and keeps the result inconclusive', () => {
+test('rejects contaminated attempts without consuming qualifying session slots', () => {
 	const first = stableSession();
 	const contaminated = stableSession({ lowConfidenceReasons: ['window-blurred', 'window-resized'] });
+	const second = stableSession();
 	const third = stableSession();
-	const state = recordSessions([first, contaminated, third]);
+	const initial = createAdaptiveValidationState(profile, 1);
+	const afterFirst = recordAdaptiveValidationSession(initial, first, 2);
+	const afterContaminated = recordAdaptiveValidationSession(afterFirst, contaminated, 3);
 
+	assert.equal(afterContaminated, afterFirst);
+	assert.equal(afterContaminated.sessions.length, 1);
+	assert.equal(afterContaminated.status, 'sampling');
+
+	const state = [second, third].reduce(
+		(current, session, index) => recordAdaptiveValidationSession(current, session, index + 4),
+		afterContaminated
+	);
 	assert.equal(state.status, 'complete');
-	assert.equal(state.classification, 'inconclusive');
-	assert.deepEqual(state.sessions[1].lowConfidenceReasons, ['window-blurred', 'window-resized']);
-	const summary = summarizeAdaptiveValidationEvidence(state);
-	assert.equal(summary.acceptedSessionCount, 3);
-	assert.equal(summary.cleanSessionCount, 2);
+	assert.equal(state.classification, 'validated');
+	assert.deepEqual(state.sessions.map(session => session.id), [first.id, second.id, third.id]);
+	assert.deepEqual(summarizeAdaptiveValidationEvidence(state), {
+		acceptedSessionCount: 3,
+		cleanSessionCount: 3,
+		maximumP95FrameTimeMs: 6,
+		maximumWorstFrameTimeMs: 18,
+		minimumAverageFps: 240,
+		minimumOnePercentLowFps: 180,
+		severeInstabilitySessionCount: 0,
+		totalFrameSamples: 21_000
+	});
+});
+
+test('rejects evidence-insufficient attempts without consuming qualifying session slots', () => {
+	const initial = createAdaptiveValidationState(profile, 1);
+	const insufficientSessions = [
+		{ sampleCount: 99 },
+		{ averageFps: 0 },
+		{ onePercentLowFps: 0 },
+		{ p95FrameTimeMs: 0 }
+	].map(metricOverrides => {
+		const session = stableSession();
+		return { ...session, metrics: { ...session.metrics, ...metricOverrides } };
+	});
+
+	for (const session of insufficientSessions) {
+		assert.equal(recordAdaptiveValidationSession(initial, session, 2), initial);
+	}
+
+	const accepted = recordAdaptiveValidationSession(initial, stableSession(), 3);
+	assert.equal(accepted.sessions.length, 1);
+	assert.equal(accepted.status, 'sampling');
 });
 
 test('accepts exactly three qualifying sessions and ignores every later result', () => {
@@ -158,6 +225,8 @@ test('recommends only confirmation-gated recalibration after three clean severe 
 		severeSession(['document-visibility-changed']),
 		severeSession()
 	]);
+	assert.equal(contaminated.sessions.length, 2);
+	assert.equal(contaminated.status, 'sampling');
 	assert.equal(contaminated.classification, 'inconclusive');
 
 	const recommended = recordSessions([severeSession(), severeSession(), severeSession()]);
@@ -174,7 +243,7 @@ test('recommends only confirmation-gated recalibration after three clean severe 
 	assert.equal(validated.classification, 'validated');
 });
 
-test('summarizes only clean evidence with conservative cross-session bounds', () => {
+test('summarizes only qualifying evidence with conservative cross-session bounds', () => {
 	const firstCleanSession = stableSession();
 	const slowerCleanSession = stableSession({
 		metrics: {
@@ -195,17 +264,43 @@ test('summarizes only clean evidence with conservative cross-session bounds', ()
 			worstFrameTimeMs: 900
 		}
 	});
-	const state = recordSessions([firstCleanSession, slowerCleanSession, contaminatedOutlier]);
+	const insufficientOutlier = stableSession({
+		metrics: {
+			averageFps: 20,
+			onePercentLowFps: 2,
+			p95FrameTimeMs: 200,
+			sampleCount: 99,
+			worstFrameTimeMs: 900
+		}
+	});
+	const thirdCleanSession = stableSession({
+		metrics: {
+			averageFps: 210,
+			onePercentLowFps: 140,
+			p95FrameTimeMs: 8,
+			sampleCount: 6_000,
+			worstFrameTimeMs: 26
+		}
+	});
+	const state = recordSessions([
+		firstCleanSession,
+		slowerCleanSession,
+		contaminatedOutlier,
+		insufficientOutlier,
+		thirdCleanSession
+	]);
 	const expectedSummary = {
 		acceptedSessionCount: 3,
-		cleanSessionCount: 2,
+		cleanSessionCount: 3,
 		maximumP95FrameTimeMs: 11,
 		maximumWorstFrameTimeMs: 42,
 		minimumAverageFps: 180,
 		minimumOnePercentLowFps: 110,
 		severeInstabilitySessionCount: 0,
-		totalFrameSamples: 12_000
+		totalFrameSamples: 18_000
 	};
+	assert.equal(state.status, 'complete');
+	assert.deepEqual(state.sessions.map(session => session.id), [firstCleanSession.id, slowerCleanSession.id, thirdCleanSession.id]);
 	assert.deepEqual(state.summary, expectedSummary);
 	assert.deepEqual(summarizeAdaptiveValidationEvidence(state), expectedSummary);
 });

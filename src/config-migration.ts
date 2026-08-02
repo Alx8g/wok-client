@@ -1,4 +1,4 @@
-import { constants, copyFileSync, existsSync, mkdirSync, readdirSync, statSync, type Dirent } from 'node:fs';
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, statSync, type Dirent, type Stats } from 'node:fs';
 import { copyFile, mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
@@ -17,8 +17,15 @@ export interface ConfigMigrationResult {
 }
 
 export interface ConfigMigrationPhaseOneResult extends ConfigMigrationResult {
-	/** Sources that still hold directory trees for migrateLegacyConfigsPhaseTwo to copy. */
+	/** Sources that still hold files or directory trees for migrateLegacyConfigsPhaseTwo to copy. */
 	deferredSources: LegacyConfigSource[];
+}
+
+export interface ConfigMigrationPhaseTwoResult extends ConfigMigrationResult {
+	/** Peak number of asynchronous filesystem operations active at once. */
+	peakActiveOperations: number;
+	/** Peak number of discovered file or directory jobs buffered for workers. */
+	peakQueuedWork: number;
 }
 
 /** Bounded filesystem concurrency for the phase-2 bulk copy. */
@@ -26,6 +33,7 @@ export const CONFIG_MIGRATION_PHASE_TWO_CONCURRENCY = 6;
 
 const MIGRATION_MARKER = '.wok-client-migration-v1.json';
 const LEGACY_MARKER_FILES = new Set(['settings moved.txt']);
+const PHASE_ONE_STARTUP_FILES = new Set(['filters.txt', 'settings.json']);
 
 function createResult(): ConfigMigrationResult {
 	return {
@@ -35,6 +43,14 @@ function createResult(): ConfigMigrationResult {
 		foundSources: [],
 		skippedConflicts: 0,
 		skippedLinks: 0
+	};
+}
+
+function createPhaseTwoResult(): ConfigMigrationPhaseTwoResult {
+	return {
+		...createResult(),
+		peakActiveOperations: 0,
+		peakQueuedWork: 0
 	};
 }
 
@@ -64,12 +80,11 @@ function copyMissingFileSync(sourcePath: string, destinationPath: string, result
 }
 
 /**
- * Phase 1 of the legacy migration: synchronously copy only the small top-level files
- * (settings.json, filters.txt, ...) that startup may read before command-line switches
- * are applied and before any window exists. This is tiny and bounded: no recursion.
- * Directory trees (swapper/, css/, scripts/) are deferred to migrateLegacyConfigsPhaseTwo.
- * No completion marker is written here — the marker belongs to phase 2, so an interrupted
- * bulk copy resumes on the next launch (conflict skips make both phases idempotent).
+ * Phase 1 of the legacy migration: synchronously copy only settings.json and filters.txt,
+ * the top-level legacy files that startup may read or seed before command-line switches
+ * are applied and before any window exists. This is tiny and explicitly bounded: no other
+ * regular files and no directory trees are copied here. Everything else waits for phase 2.
+ * No completion marker is written here, so an interrupted phase 2 resumes on the next launch.
  */
 export function migrateLegacyConfigsPhaseOne(destination: string, sources: LegacyConfigSource[]): ConfigMigrationPhaseOneResult {
 	const result: ConfigMigrationPhaseOneResult = { ...createResult(), deferredSources: [] };
@@ -80,41 +95,124 @@ export function migrateLegacyConfigsPhaseOne(destination: string, sources: Legac
 		result.deferredSources.push(source);
 		mkdirSync(destination, { recursive: true });
 
-		for (const entry of readdirSync(source.path, { withFileTypes: true })) {
-			if (LEGACY_MARKER_FILES.has(entry.name)) continue;
-			if (entry.isSymbolicLink()) {
+		for (const fileName of PHASE_ONE_STARTUP_FILES) {
+			const sourcePath = join(source.path, fileName);
+			let sourceStats: Stats;
+			try {
+				sourceStats = lstatSync(sourcePath);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+				throw error;
+			}
+			if (sourceStats.isSymbolicLink()) {
 				result.skippedLinks++;
 				continue;
 			}
-
-			// Directory trees wait for phase 2.
-			if (!entry.isFile()) continue;
-			copyMissingFileSync(join(source.path, entry.name), join(destination, entry.name), result);
+			if (!sourceStats.isFile()) continue;
+			copyMissingFileSync(sourcePath, join(destination, fileName), result);
 		}
 	}
 	return result;
 }
 
-type OperationLimiter = <T>(operation: () => Promise<T>) => Promise<T>;
-
-function createOperationLimiter(limit: number): OperationLimiter {
-	let active = 0;
-	const waiting: Array<() => void> = [];
-	return async operation => {
-		if (active >= limit) await new Promise<void>(releaseSlot => { waiting.push(releaseSlot); });
-		active++;
-		try {
-			return await operation();
-		} finally {
-			active--;
-			waiting.shift()?.();
-		}
-	};
+interface MigrationActivity {
+	activeOperations: number;
 }
 
-async function copyMissingFile(sourcePath: string, destinationPath: string, result: ConfigMigrationResult): Promise<void> {
+interface MigrationDirectoryWork {
+	destination: string;
+	source: string;
+	sourceRoot: boolean;
+	type: 'directory';
+}
+
+interface MigrationFileWork {
+	destination: string;
+	source: string;
+	type: 'file';
+}
+
+type MigrationWork = MigrationDirectoryWork | MigrationFileWork;
+
+interface MigrationDirectoryFrame extends MigrationDirectoryWork {
+	entries: Dirent[];
+	nextEntry: number;
+}
+
+/**
+ * A fixed-capacity queue shared by a fixed worker pool. When it is full, the worker that
+ * discovered the next job processes that job inline instead of allocating another promise
+ * or waiter. pendingWork includes buffered and active jobs so idle workers can stop exactly
+ * when all recursively discovered work has completed.
+ */
+class BoundedMigrationWorkQueue {
+	private readonly capacity: number;
+	private closed = false;
+	private readonly items: MigrationWork[] = [];
+	private pendingWork = 0;
+	private readonly result: ConfigMigrationPhaseTwoResult;
+	private readonly waitingWorkers: Array<(work: MigrationWork | undefined) => void> = [];
+
+	constructor(capacity: number, result: ConfigMigrationPhaseTwoResult) {
+		this.capacity = capacity;
+		this.result = result;
+	}
+
+	enqueue(work: MigrationWork): boolean {
+		if (this.closed) throw new Error('Cannot enqueue migration work after the queue has closed.');
+
+		const waitingWorker = this.waitingWorkers.shift();
+		if (waitingWorker) {
+			this.pendingWork++;
+			waitingWorker(work);
+			return true;
+		}
+		if (this.items.length >= this.capacity) return false;
+
+		this.pendingWork++;
+		this.items.push(work);
+		this.result.peakQueuedWork = Math.max(this.result.peakQueuedWork, this.items.length);
+		return true;
+	}
+
+	async take(): Promise<MigrationWork | undefined> {
+		const work = this.items.shift();
+		if (work) return work;
+		if (this.closed) return undefined;
+		return new Promise(resolveWorker => { this.waitingWorkers.push(resolveWorker); });
+	}
+
+	complete(): void {
+		if (this.pendingWork <= 0) throw new Error('Migration work completed without a pending queue item.');
+		this.pendingWork--;
+		if (this.pendingWork > 0) return;
+
+		this.closed = true;
+		for (const waitingWorker of this.waitingWorkers.splice(0)) waitingWorker(undefined);
+	}
+}
+
+async function runTrackedOperation<T>(
+	activity: MigrationActivity,
+	result: ConfigMigrationPhaseTwoResult,
+	operation: () => Promise<T>
+): Promise<T> {
+	activity.activeOperations++;
+	result.peakActiveOperations = Math.max(result.peakActiveOperations, activity.activeOperations);
 	try {
-		await copyFile(sourcePath, destinationPath, constants.COPYFILE_EXCL);
+		return await operation();
+	} finally {
+		activity.activeOperations--;
+	}
+}
+
+async function copyMissingFile(
+	work: MigrationFileWork,
+	result: ConfigMigrationPhaseTwoResult,
+	activity: MigrationActivity
+): Promise<void> {
+	try {
+		await runTrackedOperation(activity, result, () => copyFile(work.source, work.destination, constants.COPYFILE_EXCL));
 		result.copiedFiles++;
 	} catch (error) {
 		// Existing WOK Client files always win conflicts.
@@ -123,82 +221,128 @@ async function copyMissingFile(sourcePath: string, destinationPath: string, resu
 			return;
 		}
 		result.errors++;
-		console.error(`Failed to migrate legacy file ${sourcePath}`, error);
+		console.error(`Failed to migrate legacy file ${work.source}`, error);
 	}
 }
 
-async function copyMissingTree(source: string, destination: string, result: ConfigMigrationResult, limitOperation: OperationLimiter): Promise<void> {
-	let entries: Dirent[];
-	try {
-		await limitOperation(() => mkdir(destination, { recursive: true }));
-		entries = await limitOperation(() => readdir(source, { withFileTypes: true }));
-	} catch (error) {
-		result.errors++;
-		console.error(`Failed to enumerate legacy directory ${source}`, error);
-		return;
-	}
+async function processDirectoryTree(
+	initialDirectory: MigrationDirectoryWork,
+	queue: BoundedMigrationWorkQueue,
+	result: ConfigMigrationPhaseTwoResult,
+	activity: MigrationActivity
+): Promise<void> {
+	const frames: MigrationDirectoryFrame[] = [];
+	let nextDirectory: MigrationDirectoryWork | undefined = initialDirectory;
 
-	const pending: Promise<void>[] = [];
-	for (const entry of entries) {
+	while (nextDirectory || frames.length > 0) {
+		if (nextDirectory) {
+			let entries: Dirent[];
+			try {
+				await runTrackedOperation(activity, result, () => mkdir(nextDirectory.destination, { recursive: true }));
+				entries = await runTrackedOperation(activity, result, () => readdir(nextDirectory.source, { withFileTypes: true }));
+			} catch (error) {
+				result.errors++;
+				console.error(`Failed to enumerate legacy directory ${nextDirectory.source}`, error);
+				nextDirectory = undefined;
+				continue;
+			}
+			frames.push({ ...nextDirectory, entries, nextEntry: 0 });
+			nextDirectory = undefined;
+		}
+
+		const frame = frames.at(-1);
+		if (!frame) continue;
+		if (frame.nextEntry >= frame.entries.length) {
+			frames.pop();
+			continue;
+		}
+
+		const entry = frame.entries[frame.nextEntry++];
 		if (LEGACY_MARKER_FILES.has(entry.name)) continue;
-		const sourcePath = join(source, entry.name);
-		const destinationPath = join(destination, entry.name);
 
+		const sourcePath = join(frame.source, entry.name);
+		const destinationPath = join(frame.destination, entry.name);
 		if (entry.isSymbolicLink()) {
-			result.skippedLinks++;
+			// Phase 1 counts allowlisted top-level links; every other link belongs to phase 2.
+			if (!frame.sourceRoot || !PHASE_ONE_STARTUP_FILES.has(entry.name)) result.skippedLinks++;
 			continue;
 		}
 		if (entry.isDirectory()) {
-			pending.push(copyMissingTree(sourcePath, destinationPath, result, limitOperation));
+			const directoryWork: MigrationDirectoryWork = {
+				destination: destinationPath,
+				source: sourcePath,
+				sourceRoot: false,
+				type: 'directory'
+			};
+			if (!queue.enqueue(directoryWork)) nextDirectory = directoryWork;
 			continue;
 		}
 		if (!entry.isFile()) continue;
-		pending.push(limitOperation(() => copyMissingFile(sourcePath, destinationPath, result)));
+		// Startup-critical top-level files were handled synchronously in phase 1.
+		if (frame.sourceRoot && PHASE_ONE_STARTUP_FILES.has(entry.name)) continue;
+
+		const fileWork: MigrationFileWork = {
+			destination: destinationPath,
+			source: sourcePath,
+			type: 'file'
+		};
+		if (!queue.enqueue(fileWork)) await copyMissingFile(fileWork, result, activity);
 	}
-	await Promise.all(pending);
+}
+
+async function copySourceWithWorkers(
+	source: LegacyConfigSource,
+	destination: string,
+	concurrency: number,
+	result: ConfigMigrationPhaseTwoResult,
+	activity: MigrationActivity
+): Promise<void> {
+	const queue = new BoundedMigrationWorkQueue(concurrency, result);
+	if (!queue.enqueue({ destination, source: source.path, sourceRoot: true, type: 'directory' })) {
+		throw new Error('Failed to enqueue the legacy migration source root.');
+	}
+
+	const workers = Array.from({ length: concurrency }, async () => {
+		while (true) {
+			const work = await queue.take();
+			if (!work) return;
+			try {
+				if (work.type === 'file') await copyMissingFile(work, result, activity);
+				else await processDirectoryTree(work, queue, result, activity);
+			} finally {
+				queue.complete();
+			}
+		}
+	});
+	await Promise.all(workers);
 }
 
 /**
- * Phase 2 of the legacy migration: asynchronously copy the bulky directory trees
- * (swapper/, css/, scripts/) after the main window exists, with bounded filesystem
- * concurrency. Per-file errors are logged and counted, never thrown, and the completion
- * marker is only written after an error-free pass, so an interrupted or failed phase 2
- * resumes on the next launch. Legacy sources are never modified.
+ * Phase 2 of the legacy migration: asynchronously copy deferred top-level files and directory
+ * trees after the main window exists. A fixed worker pool performs filesystem operations, and
+ * its fixed-capacity queue falls back to inline depth-first work when full, so neither active
+ * I/O nor queued promises grow with a flat or wide source tree. Per-file errors are logged and
+ * counted, and the completion marker is only written after an error-free pass so a failed or
+ * interrupted migration resumes on the next launch. Legacy sources are never modified.
  *
- * Note for callers: the resource swapper (and the CSS swapper dropdown) index their
- * directories independently; files migrated here are only picked up by their next
- * indexing pass, typically the next launch.
+ * Note for callers: the resource swapper (and the CSS swapper dropdown) index their directories
+ * independently; files migrated here are only picked up by their next indexing pass, typically
+ * the next launch.
  */
 export async function migrateLegacyConfigsPhaseTwo(
 	destination: string,
 	sources: LegacyConfigSource[],
 	concurrency = CONFIG_MIGRATION_PHASE_TWO_CONCURRENCY
-): Promise<ConfigMigrationResult> {
-	const result = createResult();
+): Promise<ConfigMigrationPhaseTwoResult> {
+	const result = createPhaseTwoResult();
 	const markerPath = join(destination, MIGRATION_MARKER);
 	if (existsSync(markerPath)) return { ...result, completed: true };
 
-	const limitOperation = createOperationLimiter(Math.min(Math.max(Math.trunc(concurrency) || 1, 1), 8));
+	const workerCount = Math.min(Math.max(Math.trunc(concurrency) || 1, 1), 8);
+	const activity: MigrationActivity = { activeOperations: 0 };
 	for (const source of listLegacySources(destination, sources)) {
 		result.foundSources.push(source.label);
-
-		let entries: Dirent[];
-		try {
-			entries = await limitOperation(() => readdir(source.path, { withFileTypes: true }));
-		} catch (error) {
-			result.errors++;
-			console.error(`Failed to enumerate legacy source ${source.path}`, error);
-			continue;
-		}
-
-		const pending: Promise<void>[] = [];
-		for (const entry of entries) {
-			if (LEGACY_MARKER_FILES.has(entry.name)) continue;
-			// Top-level files and symbolic links were phase 1's job.
-			if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
-			pending.push(copyMissingTree(join(source.path, entry.name), join(destination, entry.name), result, limitOperation));
-		}
-		await Promise.all(pending);
+		await copySourceWithWorkers(source, destination, workerCount, result, activity);
 	}
 
 	if (result.foundSources.length === 0) return result;
@@ -206,14 +350,14 @@ export async function migrateLegacyConfigsPhaseTwo(
 	if (result.errors > 0) return result;
 
 	try {
-		await mkdir(destination, { recursive: true });
-		await writeFile(markerPath, JSON.stringify({
+		await runTrackedOperation(activity, result, () => mkdir(destination, { recursive: true }));
+		await runTrackedOperation(activity, result, () => writeFile(markerPath, JSON.stringify({
 			completedAt: new Date().toISOString(),
 			copiedFiles: result.copiedFiles,
 			sources: result.foundSources,
 			skippedConflicts: result.skippedConflicts,
 			skippedLinks: result.skippedLinks
-		}, null, 2));
+		}, null, 2)));
 		result.completed = true;
 	} catch (error) {
 		result.errors++;

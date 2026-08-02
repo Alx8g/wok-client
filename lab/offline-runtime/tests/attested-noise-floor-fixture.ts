@@ -208,6 +208,8 @@ function headlineStream(options: {
 	applicationName: string;
 	averageFps: number;
 	firstTimestampMs: number;
+	frameTimeP95Ms: number;
+	frameTimeP99Ms: number;
 	lastTimestampMs: number;
 	onePercentLowFps: number;
 	processId: number;
@@ -221,11 +223,11 @@ function headlineStream(options: {
 		firstTimestampMs: options.firstTimestampMs,
 		fixedBudgetMissCount: 0,
 		fixedBudgetMissRatio: 0,
-		frameTimeP50Ms: 10,
-		frameTimeP95Ms: 10,
-		frameTimeP99Ms: 15,
-		frameTimeTotalMs: 20,
-		frameTimeWorstMs: 15,
+		frameTimeP50Ms: Math.min(8, options.frameTimeP95Ms),
+		frameTimeP95Ms: options.frameTimeP95Ms,
+		frameTimeP99Ms: options.frameTimeP99Ms,
+		frameTimeTotalMs: 2_000 / options.averageFps,
+		frameTimeWorstMs: options.frameTimeP99Ms,
 		key: options.streamKey,
 		lastTimestampMs: options.lastTimestampMs,
 		onePercentLowFps: options.onePercentLowFps,
@@ -621,6 +623,10 @@ export async function createAttestedNoiseFloorFixture(
 					applicationName: candidate.executableName,
 					averageFps: values['average-fps'] ?? 0,
 					firstTimestampMs: firstFrameTimestampMs,
+					frameTimeP95Ms:
+						values['frame-time-p95-ms'] ?? 0,
+					frameTimeP99Ms:
+						values['frame-time-p99-ms'] ?? 0,
 					lastTimestampMs: lastFrameTimestampMs,
 					onePercentLowFps:
 						values['one-percent-low-fps'] ?? 0,

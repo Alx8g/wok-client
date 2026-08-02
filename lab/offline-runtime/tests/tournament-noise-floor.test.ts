@@ -14,7 +14,8 @@ import {
 } from '../src/controller/tournament-controller.ts';
 import {
 	analyzeRuntimeTournamentMetric,
-	buildRuntimeTournamentPairedBlocks
+	buildRuntimeTournamentPairedBlocks,
+	buildRuntimeTournamentPairAnalyses
 } from '../src/controller/tournament-analysis.ts';
 import {
 	buildRuntimeTournamentNoiseFloorReport,
@@ -718,6 +719,51 @@ test('noise-floor evidence independently verifies process lifetimes and executed
 				sampleMismatchFixture.tournamentResultPath
 		}),
 		/does not match the planned candidate and sampled presenting process/iu
+	);
+
+	const rewrittenMetricsFixture = await createAttestedNoiseFloorFixture(
+		join(directory, 'rewritten-metrics')
+	);
+	const rewrittenMetricsResult = structuredClone(
+		rewrittenMetricsFixture.tournamentResult
+	);
+	const rewrittenMetricsRecord = rewrittenMetricsResult.runRecords[0];
+	assert.ok(rewrittenMetricsRecord);
+	rewrittenMetricsRecord.metricValues['average-fps'] =
+		(rewrittenMetricsRecord.metricValues['average-fps'] ?? 0) + 25;
+	const rewrittenMetricsDryRun = JSON.parse(
+		await readFile(
+			rewrittenMetricsResult.dryRunReport.evidencePath,
+			'utf8'
+		)
+	) as {
+		metricPolicy: {
+			metricPolicies: Parameters<
+				typeof buildRuntimeTournamentPairAnalyses
+			>[0]['metricPolicies'];
+		};
+		seed: string;
+	};
+	rewrittenMetricsResult.analyses =
+		buildRuntimeTournamentPairAnalyses({
+			analysisControls: rewrittenMetricsResult.analysisControls,
+			candidateIds: rewrittenMetricsResult.candidateIds,
+			metricPolicies:
+				rewrittenMetricsDryRun.metricPolicy.metricPolicies,
+			runRecords: rewrittenMetricsResult.runRecords,
+			seed: rewrittenMetricsDryRun.seed
+		});
+	await persistFixtureResult(
+		rewrittenMetricsFixture,
+		rewrittenMetricsResult
+	);
+	await assert.rejects(
+		deriveRuntimeTournamentNoiseFloorFile({
+			outputPath: join(directory, 'rewritten-metrics.json'),
+			tournamentResultPath:
+				rewrittenMetricsFixture.tournamentResultPath
+		}),
+		/metric values do not reproduce from the selected headline stream/iu
 	);
 
 	const inspectorMismatchFixture =

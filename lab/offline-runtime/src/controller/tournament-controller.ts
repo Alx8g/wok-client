@@ -328,7 +328,7 @@ export function resolveTournamentHeadlineStreamEvidence(
 		: { violations };
 }
 
-function extractMetricValues(
+export function extractRuntimeTournamentMetricValues(
 	stream: PresentMonStreamAnalysis | undefined
 ): Partial<Record<RuntimeTournamentMetricId, number>> {
 	if (stream === undefined) return {};
@@ -745,7 +745,7 @@ export async function runRuntimeTournament(
 				resolveTournamentHeadlineStreamEvidence(
 					result
 				);
-			const metricValues = extractMetricValues(
+			const metricValues = extractRuntimeTournamentMetricValues(
 				headlineEvidence.stream
 			);
 			const missingMetrics = metricPolicy.metricPolicies

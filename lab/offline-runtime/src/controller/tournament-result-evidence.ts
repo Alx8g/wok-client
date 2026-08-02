@@ -43,6 +43,7 @@ import {
 	sha256Hex
 } from '../shared/hash.ts';
 import {
+	extractRuntimeTournamentMetricValues,
 	RUNTIME_TOURNAMENT_CONTROLLER_VERSION,
 	type RuntimeTournamentResult,
 	type RuntimeTournamentRunRecord
@@ -696,6 +697,19 @@ async function verifyRunRecordLifetimeEvidence(options: {
 	) {
 		throw new Error(
 			`Run ${record.runId} PresentMon binding does not match the selected headline stream.`
+		);
+	}
+	const recomputedMetricValues =
+		extractRuntimeTournamentMetricValues(record.headlineStream);
+	if (
+		dryRun.report.metricPolicy.metricPolicies.some(
+			policy => recomputedMetricValues[policy.metricId] === undefined
+		)
+		|| canonicalJson(record.metricValues)
+			!== canonicalJson(recomputedMetricValues)
+	) {
+		throw new Error(
+			`Run ${record.runId} metric values do not reproduce from the selected headline stream.`
 		);
 	}
 	const executionIdentities = expectRecord(

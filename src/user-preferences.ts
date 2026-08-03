@@ -1,4 +1,6 @@
 const OBSOLETE_PREFERENCE_KEYS = new Set([
+	// Placebo-with-downside: raised a renderer-process ceiling a one-origin app never reaches.
+	'experimentalFlags_increaseLimits',
 	'inProcessGPU',
 	'loadingSplashTitleCardBackgroundColor',
 	'userscripts'
@@ -17,7 +19,6 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'customFilters',
 	'discordRPC',
 	'experimentalFlags_experimental',
-	'experimentalFlags_increaseLimits',
 	'extendedRPC',
 	'fpsUncap',
 	'immersiveSplash',
@@ -32,6 +33,7 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'resourceSwapper',
 	'safeFlags_disableBackgrounding',
 	'safeFlags_gpuRasterizing',
+	'safeFlags_highPerformanceGpu',
 	'saveMatchResultJSONButton'
 ]);
 

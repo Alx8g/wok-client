@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { readFile, writeFile } from 'fs/promises';
 import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
+import { buildDiagnosticsReport } from './diagnostics-report.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
 import { runBeforeDeadline } from './absolute-deadline.ts';
@@ -19,6 +20,7 @@ import {
 	type StartupProfile
 } from './startup-profile.ts';
 import {
+	assessIntegratedGpuUsage,
 	beginGraphicsLaunch,
 	clearKeptGraphicsBackend,
 	completeGraphicsLaunch,
@@ -319,8 +321,9 @@ const settingsSkeleton = {
 	overrideURL: undefined as string | undefined,
 	alwaysWaitForDevTools: false,
 	safeFlags_disableBackgrounding: true,
-	safeFlags_gpuRasterizing: true,
-	experimentalFlags_increaseLimits: false,
+	// Chromium already GPU-rasterizes by default; true would only force past the driver blocklist.
+	safeFlags_gpuRasterizing: false,
+	safeFlags_highPerformanceGpu: true,
 	experimentalFlags_experimental: false,
 	matchmaker: false,
 	competitionAutomation: false,
@@ -739,13 +742,17 @@ app.on('gpu-info-update', () => {
 });
 
 function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
+	const integratedGpuAssessment = assessIntegratedGpuUsage(graphicsProfileState.devices);
 	return {
 		activeBackend: graphicsSelection.backend,
 		preference: graphicsSelection.preference,
 		recommendation: graphicsProfileState.recommendedBackend,
 		reason: graphicsSelection.reason,
 		source: graphicsSelection.source,
-		features: gpuFeatureStatus
+		features: gpuFeatureStatus,
+		...(integratedGpuAssessment.suspectedIntegratedFallback
+			? { gpuAdvisory: 'Running on the integrated GPU while a discrete GPU is present. Set the high-performance GPU for WOK Client in your OS graphics settings.' }
+			: {})
 	};
 }
 
@@ -1736,7 +1743,11 @@ app.on('ready', async () => {
 			// the compiled preload beside it; running from src/ loads the raw TypeScript preload.
 			preload: pathJoin(import.meta.dirname, import.meta.url.endsWith('.mjs') ? 'preload.mjs' : 'preload.ts'),
 			spellcheck: false,
-			backgroundThrottling: !userPrefs.safeFlags_disableBackgrounding,
+			// Always false for the game window: the always-on-top intro fully occludes it during
+			// Krunker's heaviest load, and Windows occlusion tracking would background-throttle
+			// that load. The safeFlags_disableBackgrounding pref governs only the tab-away
+			// Chromium switches, not launch-time renderer priority.
+			backgroundThrottling: false,
 			nodeIntegration: false,
 			// not ideal, but preload does a lot of interaction w/ the page
 			// turning this on will also likely require transpiling the preload script to js
@@ -1951,6 +1962,24 @@ app.on('ready', async () => {
 				click: () => {
 					const copiedUrl = parseKrunkerUrl(clipboard.readText());
 					if (copiedUrl?.searchParams.has('game')) void mainWindow.webContents.loadURL(copiedUrl.toString());
+				}
+			},
+			{
+				label: 'Copy diagnostics report',
+				accelerator: 'CommandOrControl+F9',
+				click: () => {
+					clipboard.writeText(buildDiagnosticsReport({
+						appVersion: app.getVersion(),
+						calibration: calibrationState,
+						electronVersion: process.versions.electron,
+						gpuFeatureStatus,
+						graphicsProfile: graphicsProfileState,
+						graphicsSelection,
+						osVersion: process.getSystemVersion(),
+						platform: process.platform,
+						preferences: userPrefs,
+						...(adaptiveValidationState ? { adaptiveValidation: adaptiveValidationState } : {})
+					}));
 				}
 			},
 			{ type: 'separator' },

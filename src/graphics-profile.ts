@@ -51,6 +51,8 @@ export interface GraphicsSelection {
 
 const INTEL_VENDOR_ID = 0x8086;
 const MICROSOFT_SOFTWARE_VENDOR_ID = 0x1414;
+const NVIDIA_VENDOR_ID = 0x10de;
+const AMD_VENDOR_ID = 0x1002;
 const PROFILE_VERSION = 1;
 export const GRAPHICS_QUARANTINE_BASE_MS = 5 * 60 * 1_000;
 export const GRAPHICS_QUARANTINE_MAX_MS = 24 * 60 * 60 * 1_000;
@@ -112,6 +114,33 @@ export function graphicsHardwareFingerprint(devices: GraphicsDevice[]): string {
 		.sort((left, right) => left.vendorId - right.vendorId || left.deviceId - right.deviceId)
 		.map(device => `${device.vendorId.toString(16)}:${device.deviceId.toString(16)}`)
 		.join('|');
+}
+
+export interface IntegratedGpuAssessment {
+	discreteVendorPresent: boolean;
+	integratedActive: boolean;
+	/** True when the Intel adapter is active while an NVIDIA or AMD adapter is also present. */
+	suspectedIntegratedFallback: boolean;
+}
+
+/**
+ * Flags the one clearly detectable dual-GPU misconfiguration: an NVIDIA or AMD adapter is present
+ * but the Intel adapter is the active one, so the game is probably running on the power-saving
+ * GPU. Advisory only — vendor IDs cannot distinguish every hybrid layout (Intel Arc discrete,
+ * AMD APU plus AMD discrete), so this never drives an automatic action.
+ */
+export function assessIntegratedGpuUsage(devices: GraphicsDevice[], webglRenderer = ''): IntegratedGpuAssessment {
+	const discreteVendorPresent = devices.some(device => device.vendorId === NVIDIA_VENDOR_ID || device.vendorId === AMD_VENDOR_ID);
+	const activeDevices = devices.filter(device => device.active);
+	const rendererLooksIntel = /\bintel\b/iu.test(webglRenderer);
+	const rendererLooksDiscrete = /nvidia|geforce|quadro|radeon|\bamd\b/iu.test(webglRenderer);
+	const integratedActive = activeDevices.length > 0
+		? activeDevices.every(device => device.vendorId === INTEL_VENDOR_ID)
+		: rendererLooksIntel;
+	// A renderer string that contradicts the device flags (ANGLE already reporting the discrete
+	// vendor) clears the suspicion rather than warning against direct evidence.
+	const suspectedIntegratedFallback = discreteVendorPresent && integratedActive && !rendererLooksDiscrete;
+	return { discreteVendorPresent, integratedActive, suspectedIntegratedFallback };
 }
 
 export function recommendGraphicsBackend(platform: NodeJS.Platform, devices: GraphicsDevice[]): Pick<GraphicsProfileState, 'recommendedBackend' | 'recommendationReason'> {

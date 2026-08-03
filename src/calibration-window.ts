@@ -10,8 +10,11 @@ import {
 } from './calibration-workload.ts';
 import {
 	BENCHMARK_EVENT_LOOP_SAMPLE_MS,
+	BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG,
 	BENCHMARK_FENCE_QUEUE_DEPTH,
 	BENCHMARK_FENCE_RING_SIZE,
+	BENCHMARK_FENCE_STALL_ARTIFACT_RATIO,
+	BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO,
 	BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO,
 	BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO,
 	BENCHMARK_GPU_QUERY_POOL_SIZE,
@@ -23,6 +26,15 @@ import {
 	BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS,
 	runBenchmarkTrial
 } from './calibration-benchmark.ts';
+
+/**
+ * 'capped' is not a frame-rate cap: it is simply the uncap switches absent, i.e. compositor
+ * vsync left on. Krunker has no in-browser frame-cap setting, so the honest user-facing label
+ * is display synchronization, not a cap.
+ */
+function framePolicyLabel(framePolicy: CalibrationCandidate['framePolicy']): string {
+	return framePolicy === 'capped' ? 'display-synced' : framePolicy;
+}
 
 function escapeHtml(value: string): string {
 	return value
@@ -45,8 +57,11 @@ function embedJson(value: unknown): string {
 function embeddedModulesScript(): string {
 	const constants: Record<string, unknown> = {
 		BENCHMARK_EVENT_LOOP_SAMPLE_MS,
+		BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG,
 		BENCHMARK_FENCE_QUEUE_DEPTH,
 		BENCHMARK_FENCE_RING_SIZE,
+		BENCHMARK_FENCE_STALL_ARTIFACT_RATIO,
+		BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO,
 		BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO,
 		BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO,
 		BENCHMARK_GPU_QUERY_POOL_SIZE,
@@ -199,7 +214,7 @@ export function buildCalibrationTrialPage(
 					<span class="pill">TEST ${step} / ${total}</span>
 					${isRetry ? '<span class="pill retry">RETRY</span>' : ''}
 					<span class="pill">${escapeHtml(candidate.backend.toUpperCase())}</span>
-					<span class="pill">${escapeHtml(candidate.framePolicy.toUpperCase())}</span>
+					<span class="pill">${escapeHtml(framePolicyLabel(candidate.framePolicy).toUpperCase())}</span>
 				</div>
 				<div class="progress-track"><div class="progress-fill" id="progress"></div></div>
 				<div class="status"><span id="phase">Preparing renderer</span><span id="live">Collecting samples</span></div>
@@ -428,14 +443,19 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 	const failureMarkup = representative.failureReason
 		? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>`
 		: '';
+	const fencePacingAffected = (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
+	const fencePacingMarkup = fencePacingAffected
+		? '<div class="result-note low-confidence">Benchmark artifact: the test\'s own frame pacing, not this backend, set these numbers. They are not comparable evidence and did not count against this profile.</div>'
+		: '';
 	return `<div class="result${recommended ? ' recommended' : ''}">
-			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(candidate.framePolicy)}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
-			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS` : 'Failed'}</div>
-			<div class="metric"><span class="label">1% low</span>${metrics.success ? `${metrics.onePercentLowFps.toFixed(1)} FPS` : 'N/A'}</div>
-			<div class="metric"><span class="label">p95 frame</span>${metrics.success ? `${metrics.p95FrameTimeMs.toFixed(2)} ms` : 'N/A'}</div>
-			<div class="metric"><span class="label">Relative score</span>${metrics.success ? representative.score.toFixed(2) : 'N/A'}</div>
+			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(framePolicyLabel(candidate.framePolicy))}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
+			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS${fencePacingAffected ? ' *' : ''}` : 'Failed'}</div>
+			<div class="metric"><span class="label">1% low</span>${metrics.success ? `${metrics.onePercentLowFps.toFixed(1)} FPS${fencePacingAffected ? ' *' : ''}` : 'N/A'}</div>
+			<div class="metric"><span class="label">p95 frame</span>${metrics.success ? `${metrics.p95FrameTimeMs.toFixed(2)} ms${fencePacingAffected ? ' *' : ''}` : 'N/A'}</div>
+			<div class="metric"><span class="label">Relative score</span>${fencePacingAffected ? 'not comparable' : metrics.success ? representative.score.toFixed(2) : 'N/A'}</div>
 			<div class="result-note">${escapeHtml(backendVerificationText(representative.backendVerification))} ${escapeHtml(gpuTimingText(representative))}</div>
 			${trialListMarkup(group)}
+			${fencePacingMarkup}
 			${lowConfidenceMarkup}
 			${failureMarkup}
 		</div>`;
@@ -454,10 +474,13 @@ export function buildCalibrationResultPage(
 	const resultsHtml = groups.map(group => resultMarkup(group, recommended?.candidate.id)).join('');
 	const applyLabel = wasCompetitiveModeEnabled ? 'Apply new profile' : 'Enable Competitive mode';
 	const keepLabel = wasCompetitiveModeEnabled ? 'Keep previous profile' : 'Keep current settings';
+	const artifactAffected = results.some(result => (result.metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
 	const summary = recommended
 		? retainedKnownGood
 			? `The new evidence did not meaningfully beat the existing known-good <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it remains recommended.`
-			: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(recommended.candidate.framePolicy)}</strong> frame delivery.`
+			: artifactAffected
+				? `The benchmark could not fairly compare these profiles (its own frame pacing dominated at least one trial), so the current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile is kept. Your next play sessions confirm it against real gameplay, which the benchmark cannot fake.`
+				: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(framePolicyLabel(recommended.candidate.framePolicy))}</strong> frame delivery.`
 		: 'Calibration could not collect enough valid frame samples. WOK Client will keep the current safe settings.';
 
 	return `<!doctype html>

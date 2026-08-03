@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+	assessIntegratedGpuUsage,
 	beginGraphicsLaunch,
 	clearKeptGraphicsBackend,
 	completeGraphicsLaunch,
@@ -326,4 +327,45 @@ test('legacy permanent blocks are migrated to a bounded cooldown', () => {
 	assert.ok(afterCooldown);
 	assert.deepEqual(afterCooldown.blockedBackends, []);
 	assert.equal(selectGraphicsBackend('auto', afterCooldown, 'win32', START_TIME + GRAPHICS_QUARANTINE_BASE_MS).backend, 'd3d11on12');
+});
+
+test('assessIntegratedGpuUsage flags Intel-active systems with an idle discrete adapter', () => {
+	const activeIntel = { active: true, deviceId: 0x46a6, vendorId: 0x8086 };
+	const idleNvidia = { active: false, deviceId: 0x2684, vendorId: 0x10de };
+	const idleAmd = { active: false, deviceId: 0x744c, vendorId: 0x1002 };
+
+	assert.deepEqual(assessIntegratedGpuUsage([activeIntel, idleNvidia]), {
+		discreteVendorPresent: true,
+		integratedActive: true,
+		suspectedIntegratedFallback: true
+	});
+	assert.equal(assessIntegratedGpuUsage([activeIntel, idleAmd]).suspectedIntegratedFallback, true);
+});
+
+test('assessIntegratedGpuUsage stays quiet without discrete evidence or on discrete-active systems', () => {
+	const activeIntel = { active: true, deviceId: 0x46a6, vendorId: 0x8086 };
+	const activeNvidia = { active: true, deviceId: 0x2684, vendorId: 0x10de };
+	const softwareDevice = { active: false, deviceId: 0x008c, vendorId: 0x1414 };
+
+	// Intel-only laptop (the software rasterizer is not discrete hardware).
+	assert.equal(assessIntegratedGpuUsage([activeIntel, softwareDevice]).suspectedIntegratedFallback, false);
+	// Discrete adapter is the active one.
+	assert.equal(assessIntegratedGpuUsage([{ ...activeIntel, active: false }, activeNvidia]).suspectedIntegratedFallback, false);
+	// Both marked active: Chromium is already using the discrete adapter for rendering.
+	assert.equal(assessIntegratedGpuUsage([activeIntel, activeNvidia]).suspectedIntegratedFallback, false);
+	// No devices at all.
+	assert.equal(assessIntegratedGpuUsage([]).suspectedIntegratedFallback, false);
+});
+
+test('assessIntegratedGpuUsage falls back to the renderer string when active flags are missing', () => {
+	const unflaggedIntel = { active: false, deviceId: 0x46a6, vendorId: 0x8086 };
+	const unflaggedNvidia = { active: false, deviceId: 0x2684, vendorId: 0x10de };
+	const intelRenderer = 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)';
+	const nvidiaRenderer = 'ANGLE (NVIDIA, NVIDIA GeForce RTX 4090 Direct3D11 vs_5_0 ps_5_0, D3D11)';
+
+	assert.equal(assessIntegratedGpuUsage([unflaggedIntel, unflaggedNvidia], intelRenderer).suspectedIntegratedFallback, true);
+	// Direct renderer evidence of the discrete vendor clears the suspicion.
+	assert.equal(assessIntegratedGpuUsage([unflaggedIntel, unflaggedNvidia], nvidiaRenderer).suspectedIntegratedFallback, false);
+	// No usable evidence in either direction.
+	assert.equal(assessIntegratedGpuUsage([unflaggedIntel, unflaggedNvidia], '').suspectedIntegratedFallback, false);
 });

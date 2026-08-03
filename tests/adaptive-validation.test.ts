@@ -304,3 +304,98 @@ test('summarizes only qualifying evidence with conservative cross-session bounds
 	assert.deepEqual(state.summary, expectedSummary);
 	assert.deepEqual(summarizeAdaptiveValidationEvidence(state), expectedSummary);
 });
+
+function fastSession(averageFps: number): AdaptiveValidationSession {
+	return stableSession({
+		metrics: {
+			averageFps,
+			onePercentLowFps: averageFps * 0.5,
+			p95FrameTimeMs: 6,
+			sampleCount: 7_000,
+			worstFrameTimeMs: 20
+		}
+	});
+}
+
+function validatedFastState(): AdaptiveValidationState {
+	return recordSessions([fastSession(400), fastSession(405), fastSession(395)]);
+}
+
+test('a profile change carries the validated history forward as a baseline', () => {
+	const validated = validatedFastState();
+	assert.equal(validated.classification, 'validated');
+
+	const switched = prepareAdaptiveValidationState(validated, { ...profile, activeBackend: 'default' }, 300_000);
+	assert.equal(switched.sessions.length, 0);
+	assert.equal(switched.baseline?.medianAverageFps, 400);
+	assert.equal(switched.baseline?.profile.activeBackend, 'd3d11on12');
+});
+
+test('healthy-looking sessions that halve the machine`s own FPS recommend recalibration', () => {
+	// Field reproduction: a 400 FPS machine was switched to a backend that plays at ~190 FPS.
+	// Every session passes the absolute severity thresholds; only the baseline can see the loss.
+	const switched = prepareAdaptiveValidationState(validatedFastState(), { ...profile, activeBackend: 'default' }, 300_000);
+	const observed = [
+		stableSession({ metrics: { averageFps: 192.3, onePercentLowFps: 79.2, p95FrameTimeMs: 7, sampleCount: 15_090, worstFrameTimeMs: 40 } }),
+		stableSession({ metrics: { averageFps: 196.6, onePercentLowFps: 66.4, p95FrameTimeMs: 6.25, sampleCount: 6_249, worstFrameTimeMs: 45 } }),
+		stableSession({ metrics: { averageFps: 177.2, onePercentLowFps: 55.8, p95FrameTimeMs: 8.75, sampleCount: 5_690, worstFrameTimeMs: 50 } })
+	];
+	const complete = observed.reduce((state, session, index) => recordAdaptiveValidationSession(state, session, 400_000 + index), switched);
+
+	assert.equal(complete.status, 'complete');
+	assert.equal(complete.classification, 'recalibration-recommended');
+});
+
+test('a modest dip within the regression bound still validates', () => {
+	const switched = prepareAdaptiveValidationState(validatedFastState(), { ...profile, activeBackend: 'default' }, 300_000);
+	const complete = [fastSession(350), fastSession(340), fastSession(360)]
+		.reduce((state, session, index) => recordAdaptiveValidationSession(state, session, 400_000 + index), switched);
+
+	assert.equal(complete.classification, 'validated');
+});
+
+test('baselines never cross frame policies or machines', () => {
+	const validated = validatedFastState();
+
+	const cappedSwitch = prepareAdaptiveValidationState(validated, { ...profile, activeBackend: 'default', framePolicy: 'capped' }, 300_000);
+	assert.equal(cappedSwitch.baseline, undefined);
+
+	const otherMachine = prepareAdaptiveValidationState(validated, { ...profile, activeBackend: 'default', hardwareFingerprint: '10de:2684' }, 300_000);
+	assert.equal(otherMachine.baseline, undefined);
+});
+
+test('the baseline survives a regressed interlude and a state round-trip', () => {
+	const switched = prepareAdaptiveValidationState(validatedFastState(), { ...profile, activeBackend: 'default' }, 300_000);
+	const regressed = [fastSession(120), fastSession(118), fastSession(122)]
+		.reduce((state, session, index) => recordAdaptiveValidationSession(state, session, 400_000 + index), switched);
+	assert.equal(regressed.classification, 'recalibration-recommended');
+
+	// Rolling back to the original profile keeps the trustworthy baseline for the next change.
+	const rolledBack = prepareAdaptiveValidationState(regressed, profile, 500_000);
+	assert.equal(rolledBack.baseline?.medianAverageFps, 400);
+
+	const roundTripped = parseAdaptiveValidationState(JSON.parse(JSON.stringify(regressed)));
+	assert.deepEqual(roundTripped, regressed);
+});
+
+test('fast machines with healthy absolute lows are never labeled severe', () => {
+	// Field session that the old ratio rule (1% low < 40% of average) wrongly flagged severe:
+	// 214 FPS average with 55.8 FPS lows is healthy frame delivery on any display.
+	const fieldSession = stableSession({
+		metrics: { averageFps: 214.4, onePercentLowFps: 55.8, p95FrameTimeMs: 7.9, sampleCount: 12_000, worstFrameTimeMs: 35 }
+	});
+	const complete = recordSessions([
+		fieldSession,
+		stableSession({ metrics: { averageFps: 220.1, onePercentLowFps: 60.2, p95FrameTimeMs: 7.4, sampleCount: 11_000, worstFrameTimeMs: 30 } }),
+		stableSession({ metrics: { averageFps: 208.7, onePercentLowFps: 52.4, p95FrameTimeMs: 8.2, sampleCount: 10_500, worstFrameTimeMs: 33 } })
+	]);
+	assert.equal(complete.classification, 'validated');
+
+	// A genuinely spiking tail still counts as severe regardless of a high average.
+	const spiky = recordSessions([
+		stableSession({ metrics: { averageFps: 240, onePercentLowFps: 24, p95FrameTimeMs: 9, sampleCount: 9_000, worstFrameTimeMs: 80 } }),
+		stableSession({ metrics: { averageFps: 235, onePercentLowFps: 22, p95FrameTimeMs: 9.5, sampleCount: 9_000, worstFrameTimeMs: 85 } }),
+		stableSession({ metrics: { averageFps: 238, onePercentLowFps: 25, p95FrameTimeMs: 8.8, sampleCount: 9_000, worstFrameTimeMs: 82 } })
+	]);
+	assert.equal(spiky.classification, 'recalibration-recommended');
+});

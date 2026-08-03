@@ -7,7 +7,21 @@ export const ADAPTIVE_VALIDATION_REQUIRED_SESSIONS = 3;
 export const ADAPTIVE_VALIDATION_MIN_SESSION_MS = 30_000;
 export const ADAPTIVE_VALIDATION_MIN_FRAME_SAMPLES = 100;
 export const ADAPTIVE_VALIDATION_SEVERE_P95_FRAME_TIME_MS = 25;
-export const ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_RATIO = 0.4;
+/**
+ * Severe means objectively bad frame delivery, expressed in one currency: frames slower than
+ * 25 ms. p95 above 25 ms catches sustained slowness; 1% lows under 40 FPS catch a spiking tail.
+ * The old ratio rule (1% low < 40% of average) punished fast machines — 214 FPS average with
+ * healthy 55 FPS lows was labeled severe, which blocked validation and baseline formation on
+ * exactly the machines that were fine. Relative degradation is the baseline comparison's job.
+ */
+export const ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_FPS = 40;
+/**
+ * Relative regression bound: a new profile whose median gameplay FPS falls below this fraction of
+ * the previous validated profile's median is recommended for recalibration even when every
+ * session looks healthy in absolute terms. Absolute thresholds cannot see a 400-to-200 collapse
+ * on a fast machine; only the machine's own history can.
+ */
+export const ADAPTIVE_VALIDATION_BASELINE_REGRESSION_RATIO = 0.75;
 
 export const ADAPTIVE_VALIDATION_LOW_CONFIDENCE_REASONS = [
 	'window-blurred',
@@ -47,7 +61,14 @@ export interface AdaptiveValidationSession {
 	metrics: AdaptiveValidationSessionMetrics;
 }
 
+/** Gameplay evidence carried over from the previous validated profile on the same machine. */
+export interface AdaptiveValidationBaseline {
+	medianAverageFps: number;
+	profile: AdaptiveValidationProfileIdentity;
+}
+
 export interface AdaptiveValidationState {
+	baseline?: AdaptiveValidationBaseline;
 	classification: AdaptiveValidationClassification;
 	completedAt?: number;
 	profile: AdaptiveValidationProfileIdentity;
@@ -213,14 +234,37 @@ function sessionQualifies(session: AdaptiveValidationSession): boolean {
 
 export function adaptiveValidationSessionHasSevereInstability(session: AdaptiveValidationSession): boolean {
 	if (!sessionHasEnoughEvidence(session)) return false;
-	const lowRatio = session.metrics.onePercentLowFps / session.metrics.averageFps;
 	return session.metrics.p95FrameTimeMs > ADAPTIVE_VALIDATION_SEVERE_P95_FRAME_TIME_MS
-		|| lowRatio < ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_RATIO;
+		|| session.metrics.onePercentLowFps < ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_FPS;
 }
 
-function classificationForSessions(sessions: readonly AdaptiveValidationSession[]): AdaptiveValidationClassification {
+function medianSessionAverageFps(sessions: readonly AdaptiveValidationSession[]): number {
+	const sorted = sessions.map(session => session.metrics.averageFps).sort((left, right) => left - right);
+	if (sorted.length === 0) return 0;
+	const middle = (sorted.length - 1) / 2;
+	return sorted.length % 2 === 1
+		? sorted[middle]
+		: (sorted[Math.floor(middle)] + sorted[Math.ceil(middle)]) / 2;
+}
+
+function sessionsRegressFromBaseline(
+	sessions: readonly AdaptiveValidationSession[],
+	baseline: AdaptiveValidationBaseline | undefined
+): boolean {
+	if (!baseline || baseline.medianAverageFps <= 0) return false;
+	return medianSessionAverageFps(sessions) < baseline.medianAverageFps * ADAPTIVE_VALIDATION_BASELINE_REGRESSION_RATIO;
+}
+
+function classificationForSessions(
+	sessions: readonly AdaptiveValidationSession[],
+	baseline?: AdaptiveValidationBaseline
+): AdaptiveValidationClassification {
 	if (sessions.length < ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return 'inconclusive';
 	if (sessions.some(session => !sessionQualifies(session))) return 'inconclusive';
+
+	// A relative collapse against this machine's own validated history is decisive on its own;
+	// mixed severity must not soften it to 'inconclusive'.
+	if (sessionsRegressFromBaseline(sessions, baseline)) return 'recalibration-recommended';
 
 	const severeSessions = sessions.filter(adaptiveValidationSessionHasSevereInstability).length;
 	if (severeSessions === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS) return 'recalibration-recommended';
@@ -260,9 +304,11 @@ export function summarizeAdaptiveValidationEvidence(state: AdaptiveValidationSta
 
 export function createAdaptiveValidationState(
 	profile: AdaptiveValidationProfileIdentity,
-	now: number = Date.now()
+	now: number = Date.now(),
+	baseline?: AdaptiveValidationBaseline
 ): AdaptiveValidationState {
 	return {
+		...(baseline ? { baseline } : {}),
 		classification: 'inconclusive',
 		profile,
 		profileChangeConfirmationRequired: true,
@@ -274,14 +320,49 @@ export function createAdaptiveValidationState(
 	};
 }
 
+/**
+ * Baselines only compare like with like: the same machine, driver, Electron build, and frame
+ * policy. The backend is allowed to differ — measuring backend changes against the machine's own
+ * gameplay history is the point.
+ */
+function baselineComparableToProfile(
+	baselineProfile: AdaptiveValidationProfileIdentity,
+	profile: AdaptiveValidationProfileIdentity
+): boolean {
+	return baselineProfile.hardwareFingerprint === profile.hardwareFingerprint
+		&& baselineProfile.driverFingerprint === profile.driverFingerprint
+		&& baselineProfile.electronVersion === profile.electronVersion
+		&& baselineProfile.framePolicy === profile.framePolicy
+		&& baselineProfile.framePolicy !== 'unknown';
+}
+
+function baselineForProfileChange(
+	existing: AdaptiveValidationState,
+	profile: AdaptiveValidationProfileIdentity
+): AdaptiveValidationBaseline | undefined {
+	if (
+		existing.status === 'complete'
+		&& existing.classification === 'validated'
+		&& baselineComparableToProfile(existing.profile, profile)
+	) {
+		return {
+			medianAverageFps: medianSessionAverageFps(existing.sessions),
+			profile: existing.profile
+		};
+	}
+	// A profile that never validated keeps the last trustworthy baseline alive (for example a
+	// regressed profile that is being rolled back, or an inconclusive interlude).
+	if (existing.baseline && baselineComparableToProfile(existing.baseline.profile, profile)) return existing.baseline;
+	return undefined;
+}
+
 export function prepareAdaptiveValidationState(
 	existing: AdaptiveValidationState | undefined,
 	profile: AdaptiveValidationProfileIdentity,
 	now: number = Date.now()
 ): AdaptiveValidationState {
-	return existing && adaptiveValidationProfileIdentitiesEqual(existing.profile, profile)
-		? existing
-		: createAdaptiveValidationState(profile, now);
+	if (existing && adaptiveValidationProfileIdentitiesEqual(existing.profile, profile)) return existing;
+	return createAdaptiveValidationState(profile, now, existing ? baselineForProfileChange(existing, profile) : undefined);
 }
 
 export function recordAdaptiveValidationSession(
@@ -302,7 +383,8 @@ export function recordAdaptiveValidationSession(
 	const sessions = [...state.sessions, session];
 	const complete = sessions.length === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS;
 	return {
-		classification: classificationForSessions(sessions),
+		...(state.baseline ? { baseline: state.baseline } : {}),
+		classification: classificationForSessions(sessions, state.baseline),
 		...(complete ? { completedAt: now } : {}),
 		profile: state.profile,
 		profileChangeConfirmationRequired: true,
@@ -331,12 +413,22 @@ export function dismissAdaptiveValidationRecommendation(
 	};
 }
 
+function parseAdaptiveValidationBaseline(value: unknown): AdaptiveValidationBaseline | undefined {
+	if (!isRecord(value)) return undefined;
+	const medianAverageFps = finiteNumberInRange(value.medianAverageFps, 100_000);
+	const profile = parseAdaptiveValidationProfileIdentity(value.profile);
+	if (medianAverageFps === undefined || medianAverageFps <= 0 || !profile) return undefined;
+	return { medianAverageFps, profile };
+}
+
 export function parseAdaptiveValidationState(value: unknown): AdaptiveValidationState | undefined {
 	if (!isRecord(value) || value.version !== ADAPTIVE_VALIDATION_STATE_VERSION || !Array.isArray(value.sessions)) return undefined;
 	if (value.sessions.length > ADAPTIVE_VALIDATION_REQUIRED_SESSIONS || value.profileChangeConfirmationRequired !== true) return undefined;
 	const profile = parseAdaptiveValidationProfileIdentity(value.profile);
 	const sessions = value.sessions.map(parseAdaptiveValidationSession);
 	if (!profile || sessions.some(session => !session || !sessionQualifies(session))) return undefined;
+	const baseline = parseAdaptiveValidationBaseline(value.baseline);
+	if (value.baseline !== undefined && baseline === undefined) return undefined;
 
 	const parsedSessions = sessions as AdaptiveValidationSession[];
 	if (
@@ -344,7 +436,7 @@ export function parseAdaptiveValidationState(value: unknown): AdaptiveValidation
 		|| parsedSessions.some((session, index) => index > 0 && session.completedAt <= parsedSessions[index - 1].completedAt)
 	) return undefined;
 	const status: AdaptiveValidationStatus = parsedSessions.length === ADAPTIVE_VALIDATION_REQUIRED_SESSIONS ? 'complete' : 'sampling';
-	const classification = classificationForSessions(parsedSessions);
+	const classification = classificationForSessions(parsedSessions, baseline);
 	const summary = summarizeSessions(parsedSessions);
 	if (value.status !== status || value.classification !== classification || !evidenceSummaryMatches(value.summary, summary)) return undefined;
 	const updatedAt = finiteNumberInRange(value.updatedAt, Number.MAX_SAFE_INTEGER);
@@ -359,6 +451,7 @@ export function parseAdaptiveValidationState(value: unknown): AdaptiveValidation
 	) return undefined;
 
 	return {
+		...(baseline ? { baseline } : {}),
 		classification,
 		...(completedAt !== undefined ? { completedAt } : {}),
 		profile,

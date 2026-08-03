@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG } from '../src/calibration-benchmark.ts';
 import { buildCalibrationResultPage, buildCalibrationTrialPage } from '../src/calibration-window.ts';
 import {
 	CALIBRATION_VERSION,
@@ -101,32 +102,18 @@ test('stages a short uncapped-first Windows candidate plan', () => {
 	assert.equal(candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 });
 
-test('stages a capped recovery only after clean severe uncapped instability', () => {
+test('never stages a capped (vsync) recovery candidate, even after severe uncapped instability', () => {
 	const candidates = createWindowsCandidates();
 	let healthyState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	healthyState = recordCalibrationResult(healthyState, candidates[0], stableMetrics);
 	assert.equal(healthyState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 
-	let contaminatedState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
-	contaminatedState = recordCalibrationResult(contaminatedState, candidates[0], unstableMetrics({
-		lowConfidenceReasons: ['window-blurred']
-	}));
-	assert.equal(contaminatedState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
-
+	// A competitive preset never auto-applies vsync on synthetic evidence: instability that is
+	// real gets caught by the real-gameplay validation loop, not traded for hidden latency.
 	let unstableState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	unstableState = recordCalibrationResult(unstableState, candidates[0], unstableMetrics());
-	assert.deepEqual(unstableState.candidates.map(candidate => candidate.id), [
-		'd3d11on12:uncapped',
-		'd3d11on12:capped',
-		'default:uncapped'
-	]);
-	// Recovery slots are appended as their own late stage; the screen stage finishes first (design §3.2).
-	assert.deepEqual(unstableState.plan.map(slot => `${slot.candidateId}:${slot.stage}`), [
-		'd3d11on12:uncapped:screen',
-		'default:uncapped:screen',
-		'd3d11on12:capped:recovery',
-		'd3d11on12:capped:recovery'
-	]);
+	assert.equal(unstableState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+	assert.equal(unstableState.plan.some(slot => slot.stage === 'recovery'), false);
 	assert.equal(getPendingCalibrationCandidate(unstableState)?.id, 'default:uncapped');
 });
 
@@ -240,51 +227,36 @@ test('does not accept an explicit candidate whose renderer reports another backe
 	assert.equal(state.recommendedSelection?.candidate.backend, 'default');
 });
 
-test('does not trade a healthy uncapped profile for synchronized frame pacing', () => {
+test('recommends only uncapped profiles from the automatic path, even under instability', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
-	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
-	assert.ok(cappedCandidate);
-
-	state = recordCalibrationResult(state, candidates[0], {
-		...stableMetrics,
-		averageFps: 144,
-		eventLoopP95Ms: 9.4,
-		onePercentLowFps: 77,
-		p95FrameTimeMs: 9.9
-	});
-	state = recordCalibrationResult(state, cappedCandidate, {
-		...stableMetrics,
-		averageFps: 120,
-		eventLoopP95Ms: 2.5,
-		onePercentLowFps: 113,
-		p95FrameTimeMs: 8.5
-	});
+	state = recordCalibrationResult(state, candidates[1], unstableMetrics({
+		averageFps: 130,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	}));
 	state = finalizeCalibration(state);
 
 	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'uncapped');
-	assert.equal(state.recommendedSelection?.candidate.backend, 'd3d11on12');
+	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 });
 
-test('uses a cap only as meaningful recovery evidence for severely unstable uncapped rendering', () => {
+test('legacy persisted capped evidence is only used when no uncapped evidence exists', () => {
+	// A resumed pre-removal plan can still hold capped results; they may win only by default.
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
-	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
-	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
-	assert.ok(cappedCandidate);
-
-	state = recordCalibrationResult(state, cappedCandidate, {
+	const legacyCapped = { backend: 'd3d11on12' as const, framePolicy: 'capped' as const, id: 'd3d11on12:capped' };
+	state = { ...state, candidates: [...state.candidates, legacyCapped] };
+	state = recordCalibrationResult(state, legacyCapped, {
 		...stableMetrics,
 		averageFps: 132,
-		longFrameRatio: 0.01,
 		onePercentLowFps: 110,
-		p95FrameTimeMs: 8,
-		worstFrameTimeMs: 11
+		p95FrameTimeMs: 8
 	});
-	state = finalizeCalibration(state);
+	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'capped');
 
-	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'capped');
+	state = recordCalibrationResult(state, candidates[0], stableMetrics);
+	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'uncapped');
 });
 
 test('v3 signatures stamp the current benchmark and workload versions', () => {
@@ -625,4 +597,158 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	assert.match(page, /Trial 2:/);
 	assert.match(page, /provisionally/);
 	assert.match(page, /automatically reverts to the previous profile/);
+});
+
+test('a fence-pacing artifact invalidates the comparison and keeps the current backend', () => {
+	// Field reproduction (Iris Xe): the benchmark stalled 75% of ticks on d3d11on12 with ~2 ms of
+	// measured GPU time, scored it 2x below default, and switched a machine whose real gameplay
+	// runs 2x FASTER on d3d11on12. The artifact flag must keep the benchmark from deciding.
+	const artifactMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 106.29,
+		contaminationFlags: [BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG],
+		gpuTimeP50Ms: 1.6,
+		gpuTimeP95Ms: 2,
+		gpuTimingStatus: 'measured',
+		longFrameRatio: 0.01,
+		onePercentLowFps: 27.45,
+		p95FrameTimeMs: 14.7,
+		sampleCount: 555,
+		stallRatio: 0.75,
+		worstFrameTimeMs: 30
+	};
+	const defaultWinnerMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 197.76,
+		onePercentLowFps: 88.89,
+		p95FrameTimeMs: 6.6,
+		stallRatio: 0,
+		webglRenderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	};
+
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], artifactMetrics);
+
+	// Synthetic instability from the artifact must not stage a capped recovery launch.
+	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+
+	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
+
+	// Repeating trials reproduces a deterministic artifact; no ABAB stage may be scheduled.
+	assert.equal(state.plan.some(slot => slot.stage === 'repeat'), false);
+
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
+});
+
+test('the same slow trial without the artifact flag still lets the numeric winner switch backends', () => {
+	const honestSlowMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 106.29,
+		longFrameRatio: 0.01,
+		onePercentLowFps: 27.45,
+		p95FrameTimeMs: 14.7,
+		sampleCount: 555,
+		worstFrameTimeMs: 30
+	};
+	const defaultWinnerMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 197.76,
+		onePercentLowFps: 88.89,
+		p95FrameTimeMs: 6.6,
+		webglRenderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	};
+
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], honestSlowMetrics);
+	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
+
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, 'default:uncapped');
+});
+
+test('non-Intel Windows machines get a real challenger, not ANGLE-D3D11 against itself', () => {
+	// Chromium's `default` on Windows is already ANGLE-D3D11, so a d3d11 challenger would spend
+	// the whole calibration budget comparing the incumbent against itself.
+	const nvidiaCandidates = createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'win32',
+		recommendedBackend: 'default'
+	});
+	assert.deepEqual(nvidiaCandidates.map(candidate => candidate.id), [
+		'default:uncapped',
+		'd3d11on12:uncapped'
+	]);
+
+	// A quarantined d3d11on12 leaves a single-candidate plan instead of a tautological pair.
+	const quarantinedCandidates = createCalibrationCandidates({
+		blockedBackends: ['d3d11on12'],
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'win32',
+		recommendedBackend: 'default'
+	});
+	assert.deepEqual(quarantinedCandidates.map(candidate => candidate.id), ['default:uncapped']);
+});
+
+test('the results page explains an artifact-affected verdict instead of claiming a measured win', () => {
+	const artifactResult: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 90.95,
+		contaminationFlags: [BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG],
+		onePercentLowFps: 20.7,
+		p95FrameTimeMs: 16.3,
+		stallRatio: 0.73
+	};
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], artifactResult);
+	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 151.15, webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)' });
+	const finalized = finalizeCalibration(state);
+
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+	assert.ok(page.includes('could not fairly compare'), 'summary must explain the invalidated comparison');
+	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
+	assert.ok(page.includes('not comparable'), 'the artifact score must not print as a number');
+	assert.ok(!page.includes('The strongest measured profile'), 'must not claim a measured win');
+});
+
+test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped profile', () => {
+	// Exact field reproduction: default:uncapped trips the low-ratio instability heuristic and
+	// stages default:capped recovery; d3d11on12 wins the uncapped bracket via the artifact
+	// guard; the capped rescue must not then use the artifact numbers to swap in default:capped.
+	const candidates = createWindowsCandidates(); // d3d11on12 current, default challenger
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[1].id);
+
+	state = recordCalibrationResult(state, candidates[1], {
+		...stableMetrics,
+		averageFps: 127.96,
+		longFrameRatio: 0.01,
+		onePercentLowFps: 33.33,
+		p95FrameTimeMs: 10.5,
+		stallRatio: 0.01,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	});
+	// Even genuine instability no longer stages a capped (vsync) candidate.
+	assert.deepEqual(state.candidates.map(candidate => candidate.id), [
+		'd3d11on12:uncapped',
+		'default:uncapped'
+	]);
+
+	state = recordCalibrationResult(state, candidates[0], {
+		...stableMetrics,
+		averageFps: 68.89,
+		contaminationFlags: [BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG],
+		gpuTimeP95Ms: 6.67,
+		gpuTimingStatus: 'measured',
+		longFrameRatio: 0.01,
+		onePercentLowFps: 18.13,
+		p95FrameTimeMs: 22.9,
+		stallRatio: 0.75
+	});
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
 });

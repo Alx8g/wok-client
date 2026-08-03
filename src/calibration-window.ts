@@ -443,6 +443,9 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 	const failureMarkup = representative.failureReason
 		? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>`
 		: '';
+	const fencePacingMarkup = (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG)
+		? '<div class="result-note low-confidence">Benchmark artifact: the test\'s own frame pacing, not this backend, set these numbers. They are not comparable evidence and did not count against this profile.</div>'
+		: '';
 	return `<div class="result${recommended ? ' recommended' : ''}">
 			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(framePolicyLabel(candidate.framePolicy))}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
 			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS` : 'Failed'}</div>
@@ -451,6 +454,7 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 			<div class="metric"><span class="label">Relative score</span>${metrics.success ? representative.score.toFixed(2) : 'N/A'}</div>
 			<div class="result-note">${escapeHtml(backendVerificationText(representative.backendVerification))} ${escapeHtml(gpuTimingText(representative))}</div>
 			${trialListMarkup(group)}
+			${fencePacingMarkup}
 			${lowConfidenceMarkup}
 			${failureMarkup}
 		</div>`;
@@ -469,10 +473,13 @@ export function buildCalibrationResultPage(
 	const resultsHtml = groups.map(group => resultMarkup(group, recommended?.candidate.id)).join('');
 	const applyLabel = wasCompetitiveModeEnabled ? 'Apply new profile' : 'Enable Competitive mode';
 	const keepLabel = wasCompetitiveModeEnabled ? 'Keep previous profile' : 'Keep current settings';
+	const artifactAffected = results.some(result => (result.metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
 	const summary = recommended
 		? retainedKnownGood
 			? `The new evidence did not meaningfully beat the existing known-good <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it remains recommended.`
-			: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(framePolicyLabel(recommended.candidate.framePolicy))}</strong> frame delivery.`
+			: artifactAffected
+				? `The benchmark could not fairly compare these profiles (its own frame pacing dominated at least one trial), so the current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile is kept. Your next play sessions confirm it against real gameplay, which the benchmark cannot fake.`
+				: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(framePolicyLabel(recommended.candidate.framePolicy))}</strong> frame delivery.`
 		: 'Calibration could not collect enough valid frame samples. WOK Client will keep the current safe settings.';
 
 	return `<!doctype html>

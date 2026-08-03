@@ -722,3 +722,24 @@ test('non-Intel Windows machines get a real challenger, not ANGLE-D3D11 against 
 	});
 	assert.deepEqual(quarantinedCandidates.map(candidate => candidate.id), ['default:uncapped']);
 });
+
+test('the results page explains an artifact-affected verdict instead of claiming a measured win', () => {
+	const artifactResult: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 90.95,
+		contaminationFlags: [BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG],
+		onePercentLowFps: 20.7,
+		p95FrameTimeMs: 16.3,
+		stallRatio: 0.73
+	};
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], artifactResult);
+	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 151.15, webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)' });
+	const finalized = finalizeCalibration(state);
+
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+	assert.ok(page.includes('could not fairly compare'), 'summary must explain the invalidated comparison');
+	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
+	assert.ok(!page.includes('The strongest measured profile'), 'must not claim a measured win');
+});

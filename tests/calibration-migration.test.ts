@@ -2,6 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
 	calibrationResumeRequired,
+	calibrationSignatureOnlyVersionsDiffer,
+	calibrationSignaturesEqual,
+	completeCalibration,
 	createCalibrationCandidates,
 	createCalibrationSignature,
 	finalizeCalibration,
@@ -197,6 +200,63 @@ test('cross-workload-version scores are never compared numerically', () => {
 	});
 	const comparableFinalized = finalizeCalibration(comparableState);
 	assert.equal(comparableFinalized.recommendedSelection?.candidate.id, candidates[1].id);
+});
+
+test('workload v2 invalidates workload v1 verdicts through the signature machinery', () => {
+	// The version-discipline proof for the WORKLOAD_VERSION 1 -> 2 bump (design §1.3, §5.2):
+	// workloadVersion is a first-class signature field, so v1 verdicts go stale on sight and
+	// their scores are never numeric evidence against v2 trials.
+	const workloadOneSignature = { ...currentSignature, workloadVersion: 1 };
+	assert.equal(calibrationSignaturesEqual(workloadOneSignature, currentSignature), false, 'a workloadVersion change alone must invalidate');
+	assert.equal(calibrationSignaturesEqual(workloadOneSignature, { ...workloadOneSignature }), true);
+	assert.equal(
+		calibrationSignatureOnlyVersionsDiffer(workloadOneSignature, currentSignature),
+		true,
+		'machine identity is unchanged, so the invalidation takes the opportunistic-rerun path'
+	);
+
+	const candidates = createWindowsCandidates();
+	const cleanMetrics = (workloadVersion: number): CalibrationMetrics => ({
+		averageFps: 250,
+		eventLoopP95Ms: 0.8,
+		eventLoopWorstMs: 3,
+		longFrameRatio: 0,
+		lowConfidenceReasons: [],
+		onePercentLowFps: 250,
+		p95FrameTimeMs: 4,
+		sampleCount: 800,
+		success: true,
+		webglRenderer: d3d11on12Renderer,
+		workloadVersion,
+		worstFrameTimeMs: 4
+	});
+
+	// A calibration completed under workload v1 keeps its user-confirmed selection applied but
+	// is marked stale the moment the v2 signature appears — it never blocks startup and never
+	// silently passes for v2 evidence.
+	let completed = startCalibrationRun(prepareCalibrationState(undefined, workloadOneSignature, candidates, true), 0);
+	completed = recordCalibrationResult(completed, candidates[0], cleanMetrics(1));
+	completed = completeCalibration(finalizeCalibration(completed), true);
+	assert.equal(completed.results[0].metrics.workloadVersion, 1, 'v1-era trials carry their workload stamp');
+
+	const prepared = prepareCalibrationState(completed, currentSignature, candidates, true);
+	assert.equal(prepared.signatureStale, true);
+	assert.equal(prepared.status, 'complete');
+	assert.equal(prepared.activeSelection?.candidate.id, candidates[0].id);
+	assert.equal(calibrationResumeRequired(prepared), false);
+
+	// Numeric blocking: a v2 challenger that hugely outscores the stale v1 incumbent still
+	// cannot beat it on numbers — the incumbent competes only through the tie preferences.
+	let state = startCalibrationRun(prepareCalibrationState(undefined, currentSignature, candidates, true), 0);
+	state = { ...state, activeSelection: completed.activeSelection };
+	state = recordCalibrationResult(state, candidates[1], {
+		...cleanMetrics(2),
+		averageFps: 500,
+		onePercentLowFps: 500,
+		webglRenderer: 'Unknown renderer'
+	});
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, candidates[0].id, 'cross-workload scores never decide');
 });
 
 test('a mid-run version-1 document parses but resumes nothing after the signature reset', () => {

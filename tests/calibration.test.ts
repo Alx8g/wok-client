@@ -259,8 +259,9 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'uncapped');
 });
 
-test('v3 signatures stamp the current benchmark and workload versions', () => {
-	assert.equal(CALIBRATION_VERSION, 3);
+test('v4 signatures stamp the current benchmark and workload versions', () => {
+	// Benchmark 4 = depth-6 fence pacing; both bumps invalidate every earlier verdict.
+	assert.equal(CALIBRATION_VERSION, 4);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
 	assert.equal(WORKLOAD_VERSION, 1);

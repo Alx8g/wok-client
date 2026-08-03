@@ -23,6 +23,8 @@ const TIMER_EXT: BenchmarkTimerQueryExt = { GPU_DISJOINT_EXT: 0x8fbb, TIME_ELAPS
 interface FakeGlOptions {
 	disjoint?: () => boolean;
 	queryResultNs?: (issueIndex: number) => number;
+	/** Fences signal a fixed number of ticks after creation — the probe-measured latency model. */
+	signalDelayTicks?: number;
 	statusPollsRequired?: (frameIndex: number) => number;
 }
 
@@ -57,7 +59,7 @@ function createFakeGl(options: FakeGlOptions = {}): FakeGl {
 		createQuery: () => ({ query: true }),
 		deleteSync: (sync: unknown) => { fake.deletedSyncs.push(sync); },
 		endQuery: () => {},
-		fenceSync: () => ({ frameIndex: fake.fenceCount++ }),
+		fenceSync: () => ({ createdTick: fake.currentTick, frameIndex: fake.fenceCount++ }),
 		flush: () => {},
 		getParameter: (parameter: number) => (parameter === TIMER_EXT.GPU_DISJOINT_EXT ? Boolean(options.disjoint?.()) : undefined),
 		getQueryParameter: (query: object, parameter: number) => {
@@ -66,7 +68,10 @@ function createFakeGl(options: FakeGlOptions = {}): FakeGl {
 			if (parameter === 0x8867) return fake.currentTick > issue.issueTick;
 			return options.queryResultNs ? options.queryResultNs(issue.issueIndex) : 3_000_000;
 		},
-		getSyncParameter: (sync: { frameIndex: number }, _parameter: number) => {
+		getSyncParameter: (sync: { createdTick: number; frameIndex: number }, _parameter: number) => {
+			if (options.signalDelayTicks !== undefined) {
+				return fake.currentTick - sync.createdTick >= options.signalDelayTicks ? 0x9119 : 0x9118;
+			}
 			const polls = (statusPolls.get(sync) ?? 0) + 1;
 			statusPolls.set(sync, polls);
 			const required = options.statusPollsRequired ? options.statusPollsRequired(sync.frameIndex) : 1;
@@ -363,8 +368,33 @@ test('twice-rejected trials resolve to the better attempt as warn-and-continue e
 	assert.equal(retrySucceeded.result, clean);
 });
 
-test('fence queue depth matches the design freeze', () => {
-	assert.equal(BENCHMARK_FENCE_QUEUE_DEPTH, 2);
+test('fence queue depth matches the v4 pacing freeze', () => {
+	// Depth 6 per the probe matrix (.working/fence-artifact-rootcause/results/summary.md):
+	// the shallowest depth with zero stalls on every measured backend. Never 2 again — at
+	// depth 2 the gate, not the backend, paced d3d11on12 (findings §2).
+	assert.equal(BENCHMARK_FENCE_QUEUE_DEPTH, 6);
+});
+
+test('the depth-6 horizon absorbs the measured D3D11on12 fence observability latency', async () => {
+	// Under continuous submission the probe measured fences becoming observable ~6 ticks after
+	// their submission tick on d3d11on12 (V3d6/V4 latency p50/p95 of 5-6/6 ticks). Latency at
+	// exactly the horizon must never stall a tick: the gate is a tripwire, not the pacer.
+	const { result } = await driveTrial({ fake: createFakeGl({ signalDelayTicks: BENCHMARK_FENCE_QUEUE_DEPTH }) });
+
+	assert.equal(result.stalledTicks, 0);
+	assert.equal(result.stallRatio, 0);
+	assert.equal(result.rejected, false);
+	assert.ok(result.sampleCount >= FAST_CONFIG.minSamples);
+});
+
+test('fence latency beyond the depth-6 horizon still trips the gate', async () => {
+	// The tripwire is not weakened: one tick past the horizon and the gate stalls submission,
+	// so a backend whose fence observability defeats even depth 6 is still caught and flagged
+	// by the stall evidence rather than silently masked.
+	const { result } = await driveTrial({ fake: createFakeGl({ signalDelayTicks: BENCHMARK_FENCE_QUEUE_DEPTH + 1 }) });
+
+	assert.ok(result.stalledTicks > 0, 'the gate must still bound in-flight work');
+	assert.ok(result.stallRatio > 0);
 });
 
 test('flags fence-pacing artifacts when stalls dominate while the GPU has headroom', async () => {

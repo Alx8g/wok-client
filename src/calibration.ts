@@ -8,7 +8,8 @@ import {
 } from './calibration-benchmark.ts';
 
 const CALIBRATION_STATE_VERSION = 2;
-export const CALIBRATION_VERSION = 3;
+/** v4: fence ring depth 2 -> 6 — pacing semantics changed, so v3 verdicts never compare silently. */
+export const CALIBRATION_VERSION = 4;
 export const CALIBRATION_BENCHMARK_MS = 2_800;
 export const CALIBRATION_MIN_SAMPLES = 45;
 export const CALIBRATION_SCORE_TIE_MINIMUM = 5;

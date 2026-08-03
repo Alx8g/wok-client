@@ -443,15 +443,16 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 	const failureMarkup = representative.failureReason
 		? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>`
 		: '';
-	const fencePacingMarkup = (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG)
+	const fencePacingAffected = (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
+	const fencePacingMarkup = fencePacingAffected
 		? '<div class="result-note low-confidence">Benchmark artifact: the test\'s own frame pacing, not this backend, set these numbers. They are not comparable evidence and did not count against this profile.</div>'
 		: '';
 	return `<div class="result${recommended ? ' recommended' : ''}">
 			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(framePolicyLabel(candidate.framePolicy))}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
-			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS` : 'Failed'}</div>
-			<div class="metric"><span class="label">1% low</span>${metrics.success ? `${metrics.onePercentLowFps.toFixed(1)} FPS` : 'N/A'}</div>
-			<div class="metric"><span class="label">p95 frame</span>${metrics.success ? `${metrics.p95FrameTimeMs.toFixed(2)} ms` : 'N/A'}</div>
-			<div class="metric"><span class="label">Relative score</span>${metrics.success ? representative.score.toFixed(2) : 'N/A'}</div>
+			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS${fencePacingAffected ? ' *' : ''}` : 'Failed'}</div>
+			<div class="metric"><span class="label">1% low</span>${metrics.success ? `${metrics.onePercentLowFps.toFixed(1)} FPS${fencePacingAffected ? ' *' : ''}` : 'N/A'}</div>
+			<div class="metric"><span class="label">p95 frame</span>${metrics.success ? `${metrics.p95FrameTimeMs.toFixed(2)} ms${fencePacingAffected ? ' *' : ''}` : 'N/A'}</div>
+			<div class="metric"><span class="label">Relative score</span>${fencePacingAffected ? 'not comparable' : metrics.success ? representative.score.toFixed(2) : 'N/A'}</div>
 			<div class="result-note">${escapeHtml(backendVerificationText(representative.backendVerification))} ${escapeHtml(gpuTimingText(representative))}</div>
 			${trialListMarkup(group)}
 			${fencePacingMarkup}

@@ -741,6 +741,7 @@ test('the results page explains an artifact-affected verdict instead of claiming
 	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
 	assert.ok(page.includes('could not fairly compare'), 'summary must explain the invalidated comparison');
 	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
+	assert.ok(page.includes('not comparable'), 'the artifact score must not print as a number');
 	assert.ok(!page.includes('The strongest measured profile'), 'must not claim a measured win');
 });
 

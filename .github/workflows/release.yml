@@ -31,6 +31,15 @@ jobs:
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
+      - name: Verify tag matches package version
+        shell: bash
+        run: |
+          package_version="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          if [[ "v${package_version}" != "${GITHUB_REF_NAME}" ]]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match package version ${package_version}." >&2
+            exit 1
+          fi
+
       - name: Install source dependencies without lifecycle scripts
         run: pnpm install --frozen-lockfile --ignore-scripts
 
@@ -113,18 +122,19 @@ jobs:
       - name: Create checksums and release notes
         shell: bash
         run: |
+          version="${GITHUB_REF_NAME#v}"
           find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
-          cat > release-notes.txt <<'EOF'
-          WOK Client 1.0.0 is the first public WOK release.
+          cat > release-notes.txt <<EOF
+          WOK Client ${version} contains the unified WOK client, including the adaptive startup-video system, hardware calibration and graphics selection, hardened IPC and packaging, and the verified offline runtime laboratory.
 
           Included platforms:
           - Windows x64 installer
           - Linux x64 AppImage
           - macOS arm64 DMG
 
-          These binaries are unsigned and the Linux and macOS packages have not yet received native gameplay smoke testing. Treat this as an early prerelease and verify SHA256SUMS.txt before use.
+          These binaries are unsigned. Windows may display a SmartScreen warning, and the Linux and macOS packages have not yet received native gameplay smoke testing. Treat this as a release candidate and verify SHA256SUMS.txt before use.
 
-          WOK Client is an independent GPL-3.0 project based on Crankshaft. It is not affiliated with, endorsed by, or approved by FRVR. Performance results vary by hardware, drivers, thermals, game updates, and scene complexity. Terms-sensitive legacy features remain disabled by default.
+          WOK Client is a GPL-3.0 project based on Crankshaft. It is not affiliated with, endorsed by, or approved by FRVR. Performance results vary by hardware, drivers, thermals, game updates, and scene complexity. Terms-sensitive legacy features remain disabled by default.
           EOF
 
       - name: Publish GitHub prerelease
@@ -137,7 +147,7 @@ jobs:
             gh release create "${GITHUB_REF_NAME}" --prerelease
           gh release edit "${GITHUB_REF_NAME}" \
             --prerelease \
-            --title "WOK Client 1.0.0" \
+            --title "WOK Client ${GITHUB_REF_NAME#v}" \
             --notes-file release-notes.txt
           while IFS= read -r -d '' file; do
             gh release upload "${GITHUB_REF_NAME}" "$file" --clobber

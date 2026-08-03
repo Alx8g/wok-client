@@ -75,7 +75,7 @@ export default {
             /^\/(?!(bundle|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
             /^\/bundle\/metafile\.json$/,
             /^\/bundle\/.*\.mjs\.map$/,
-            /^\/assets\/(?!(?:blockFilters\.txt|full_logo\.svg|wok-mark\.svg|hideAds\.css|intro-short-1080\.webm|intro-short-1440\.webm|intro-long-1080\.webm|intro-long-1440\.webm|intro\.html|intro\.js|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash-frame\.webp|splash\.css)$)/
+            /^\/assets\/(?!(?:blockFilters\.txt|wok-mark\.svg|hideAds\.css|intro-short-1080\.webm|intro-short-1440\.webm|intro-long-1080\.webm|intro-long-1440\.webm|intro\.html|intro\.js|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash-frame\.webp|splash\.css)$)/
         ],
         prune: true,
         asar: true,

@@ -1,3 +1,11 @@
+## WOK Client 1.1.0-rc.3 (2026-08-03)
+
+### WOK fixes
+- Replaced the yellow loading card restored from an incorrect reference image with the intended black WOK weapon particle-morph presentation.
+- Kept the intro's exact final WOK frame mounted through the loading handoff so the logo remains fixed while the weapon silhouettes morph beneath it.
+- Restored the original optimized 13-weapon particle dataset and morph renderer, with the source images pre-baked out of the runtime loading path.
+- Preserved the corrected Krunker readiness gate so the weapon loader remains visible until the actionable play prompt replaces the loading spinner.
+
 ## WOK Client 1.1.0-rc.2 (2026-08-03)
 
 ### WOK fixes

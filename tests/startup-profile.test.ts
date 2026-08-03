@@ -36,7 +36,7 @@ test('a mid-speed machine takes the short animation', () => {
 
 test('this machine, measured at 7.1-7.8s, keeps the long animation', () => {
 	// Real launches from the cost A/B: 7066, 7277, 7298, 7812 (median 7288). The long variant
-	// overshoots readiness by ~330ms. Rejecting it would expose the static loading card for ~3.1s.
+	// overshoots readiness by ~330ms. Rejecting it would expose the weapon morph loader for ~3.1s.
 	assert.equal(selectIntroVariant({ readyMs: [7_066, 7_277, 7_298, 7_812] }), 'long');
 });
 

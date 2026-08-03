@@ -1,7 +1,7 @@
 {
 	"name": "wok-client",
 	"productName": "WOK Client",
-	"version": "1.1.0-rc.2",
+	"version": "1.1.0-rc.3",
 	"private": true,
 	"description": "Hardware-adaptive, performance-focused Krunker desktop client based on Crankshaft",
 	"main": "./bundle/main.mjs",

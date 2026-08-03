@@ -377,3 +377,25 @@ test('the baseline survives a regressed interlude and a state round-trip', () =>
 	const roundTripped = parseAdaptiveValidationState(JSON.parse(JSON.stringify(regressed)));
 	assert.deepEqual(roundTripped, regressed);
 });
+
+test('fast machines with healthy absolute lows are never labeled severe', () => {
+	// Field session that the old ratio rule (1% low < 40% of average) wrongly flagged severe:
+	// 214 FPS average with 55.8 FPS lows is healthy frame delivery on any display.
+	const fieldSession = stableSession({
+		metrics: { averageFps: 214.4, onePercentLowFps: 55.8, p95FrameTimeMs: 7.9, sampleCount: 12_000, worstFrameTimeMs: 35 }
+	});
+	const complete = recordSessions([
+		fieldSession,
+		stableSession({ metrics: { averageFps: 220.1, onePercentLowFps: 60.2, p95FrameTimeMs: 7.4, sampleCount: 11_000, worstFrameTimeMs: 30 } }),
+		stableSession({ metrics: { averageFps: 208.7, onePercentLowFps: 52.4, p95FrameTimeMs: 8.2, sampleCount: 10_500, worstFrameTimeMs: 33 } })
+	]);
+	assert.equal(complete.classification, 'validated');
+
+	// A genuinely spiking tail still counts as severe regardless of a high average.
+	const spiky = recordSessions([
+		stableSession({ metrics: { averageFps: 240, onePercentLowFps: 24, p95FrameTimeMs: 9, sampleCount: 9_000, worstFrameTimeMs: 80 } }),
+		stableSession({ metrics: { averageFps: 235, onePercentLowFps: 22, p95FrameTimeMs: 9.5, sampleCount: 9_000, worstFrameTimeMs: 85 } }),
+		stableSession({ metrics: { averageFps: 238, onePercentLowFps: 25, p95FrameTimeMs: 8.8, sampleCount: 9_000, worstFrameTimeMs: 82 } })
+	]);
+	assert.equal(spiky.classification, 'recalibration-recommended');
+});

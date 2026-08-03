@@ -7,7 +7,14 @@ export const ADAPTIVE_VALIDATION_REQUIRED_SESSIONS = 3;
 export const ADAPTIVE_VALIDATION_MIN_SESSION_MS = 30_000;
 export const ADAPTIVE_VALIDATION_MIN_FRAME_SAMPLES = 100;
 export const ADAPTIVE_VALIDATION_SEVERE_P95_FRAME_TIME_MS = 25;
-export const ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_RATIO = 0.4;
+/**
+ * Severe means objectively bad frame delivery, expressed in one currency: frames slower than
+ * 25 ms. p95 above 25 ms catches sustained slowness; 1% lows under 40 FPS catch a spiking tail.
+ * The old ratio rule (1% low < 40% of average) punished fast machines — 214 FPS average with
+ * healthy 55 FPS lows was labeled severe, which blocked validation and baseline formation on
+ * exactly the machines that were fine. Relative degradation is the baseline comparison's job.
+ */
+export const ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_FPS = 40;
 /**
  * Relative regression bound: a new profile whose median gameplay FPS falls below this fraction of
  * the previous validated profile's median is recommended for recalibration even when every
@@ -227,9 +234,8 @@ function sessionQualifies(session: AdaptiveValidationSession): boolean {
 
 export function adaptiveValidationSessionHasSevereInstability(session: AdaptiveValidationSession): boolean {
 	if (!sessionHasEnoughEvidence(session)) return false;
-	const lowRatio = session.metrics.onePercentLowFps / session.metrics.averageFps;
 	return session.metrics.p95FrameTimeMs > ADAPTIVE_VALIDATION_SEVERE_P95_FRAME_TIME_MS
-		|| lowRatio < ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_RATIO;
+		|| session.metrics.onePercentLowFps < ADAPTIVE_VALIDATION_SEVERE_ONE_PERCENT_LOW_FPS;
 }
 
 function medianSessionAverageFps(sessions: readonly AdaptiveValidationSession[]): number {

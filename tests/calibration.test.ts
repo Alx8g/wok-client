@@ -743,3 +743,62 @@ test('the results page explains an artifact-affected verdict instead of claiming
 	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
 	assert.ok(!page.includes('The strongest measured profile'), 'must not claim a measured win');
 });
+
+test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped profile', () => {
+	// Exact field reproduction: default:uncapped trips the low-ratio instability heuristic and
+	// stages default:capped recovery; d3d11on12 wins the uncapped bracket via the artifact
+	// guard; the capped rescue must not then use the artifact numbers to swap in default:capped.
+	const candidates = createWindowsCandidates(); // d3d11on12 current, default challenger
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[1].id);
+
+	state = recordCalibrationResult(state, candidates[1], {
+		...stableMetrics,
+		averageFps: 127.96,
+		longFrameRatio: 0.01,
+		onePercentLowFps: 33.33,
+		p95FrameTimeMs: 10.5,
+		stallRatio: 0.01,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	});
+	// The genuine (non-artifact) instability on default staged a capped recovery for default.
+	assert.deepEqual(state.candidates.map(candidate => candidate.id), [
+		'd3d11on12:uncapped',
+		'default:uncapped',
+		'default:capped'
+	]);
+
+	state = recordCalibrationResult(state, candidates[0], {
+		...stableMetrics,
+		averageFps: 68.89,
+		contaminationFlags: [BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG],
+		gpuTimeP95Ms: 6.67,
+		gpuTimingStatus: 'measured',
+		longFrameRatio: 0.01,
+		onePercentLowFps: 18.13,
+		p95FrameTimeMs: 22.9,
+		stallRatio: 0.75
+	});
+	const cappedCandidate = state.candidates.find(candidate => candidate.id === 'default:capped');
+	assert.ok(cappedCandidate);
+	state = recordCalibrationResult(state, cappedCandidate, {
+		...stableMetrics,
+		averageFps: 106.87,
+		longFrameRatio: 0,
+		onePercentLowFps: 22.86,
+		p95FrameTimeMs: 16.6,
+		stallRatio: 0.05,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	});
+	state = recordCalibrationResult(state, cappedCandidate, {
+		...stableMetrics,
+		averageFps: 112.19,
+		longFrameRatio: 0,
+		onePercentLowFps: 26.72,
+		p95FrameTimeMs: 8.7,
+		stallRatio: 0.02,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	});
+
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
+});

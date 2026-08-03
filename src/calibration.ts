@@ -1068,7 +1068,11 @@ export function finalizeCalibration(state: CalibrationState): CalibrationState {
 	const bestCapped = selectBestSummary(state, state.candidates.filter(candidate => candidate.framePolicy === 'capped'))?.representative;
 
 	let recommendedSelection = bestUncapped ?? bestCapped;
-	if (bestUncapped && bestCapped) {
+	// The capped rescue is a numeric comparison too: a fence-pacing artifact on the winning
+	// uncapped profile fakes both the "instability" and the low throughput that would let a
+	// capped profile "rescue" it, so an unmeasurable uncapped winner can never be rescued on
+	// numbers (field evidence: artifact-retained d3d11on12 was rescue-swapped to default:capped).
+	if (bestUncapped && bestCapped && !metricsShowFencePacingArtifact(bestUncapped.metrics)) {
 		const uncappedIsUnstable = uncappedMetricsShowSevereInstability(bestUncapped.metrics);
 		const cappedFixesInstability = bestCapped.metrics.longFrameRatio <= bestUncapped.metrics.longFrameRatio * 0.5
 			&& bestCapped.metrics.onePercentLowFps >= bestUncapped.metrics.onePercentLowFps * 1.25;

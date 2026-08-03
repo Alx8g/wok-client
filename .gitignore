@@ -3,6 +3,7 @@ app/
 bundle/
 node_modules/
 .working/
+.claude/
 coverage/
 *.log
 !tests/fixtures/*.log

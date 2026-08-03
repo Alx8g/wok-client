@@ -260,11 +260,12 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 });
 
 test('v4 signatures stamp the current benchmark and workload versions', () => {
-	// Benchmark 4 = depth-6 fence pacing; both bumps invalidate every earlier verdict.
+	// Benchmark 4 = depth-6 fence pacing; workload 2 = the submission lane. Both bumps
+	// invalidate every earlier verdict through the signature.
 	assert.equal(CALIBRATION_VERSION, 4);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
-	assert.equal(WORKLOAD_VERSION, 1);
+	assert.equal(WORKLOAD_VERSION, 2);
 });
 
 test('treats app version as informational while relevant signature fields invalidate', () => {

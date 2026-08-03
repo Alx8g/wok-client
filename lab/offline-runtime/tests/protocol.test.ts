@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { validateRuntimeLabResult } from '../src/shared/protocol.ts';
+import { RUNTIME_LAB_WORKLOAD_VERSION, validateRuntimeLabResult } from '../src/shared/protocol.ts';
 import { createTestResult } from './test-result.ts';
 
 const expected = {
@@ -8,7 +8,7 @@ const expected = {
 	inputMode: 'off' as const,
 	pageSha256: 'a'.repeat(64),
 	runId: 'run-a',
-	workloadVersion: 1
+	workloadVersion: RUNTIME_LAB_WORKLOAD_VERSION
 };
 
 test('valid runtime-lab result is normalized and accepted', () => {

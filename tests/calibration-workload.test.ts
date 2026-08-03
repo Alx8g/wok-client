@@ -112,9 +112,10 @@ function renderFrames(seed: number, frameCount: number): { digest: string; drawC
 	return { digest: commandStreamDigest(recording.calls), drawCalls: workload.drawCallsPerFrame, perFrame };
 }
 
-test('workload v1 constants match the frozen design table', () => {
-	assert.equal(WORKLOAD_VERSION, 1);
-	assert.equal(WORKLOAD_DRAWS_PER_FRAME, 300);
+test('workload v2 constants match the frozen design table', () => {
+	assert.equal(WORKLOAD_VERSION, 2);
+	assert.equal(WORKLOAD_DRAWS_PER_FRAME, 1_000);
+	// GPU lane: the WORKLOAD_VERSION 1 freeze, carried unchanged.
 	assert.equal(WORKLOAD_CONSTANTS.opaqueDraws, 240);
 	assert.equal(WORKLOAD_CONSTANTS.transparentDraws, 44);
 	assert.equal(WORKLOAD_CONSTANTS.uiDraws, 16);
@@ -127,7 +128,14 @@ test('workload v1 constants match the frozen design table', () => {
 	assert.equal(WORKLOAD_CONSTANTS.warmupMaxMs, 2_000);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleFrames, 30);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleRatio, 3);
-	assert.equal(WORKLOAD_SHADER_SOURCES.length, 8);
+	// Submission lane: the v2 freeze (findings §5 — many small draws, dense churn, streaming).
+	assert.equal(WORKLOAD_CONSTANTS.submissionDraws, 700);
+	assert.equal(WORKLOAD_CONSTANTS.submissionProgramSwitchInterval, 4);
+	assert.equal(WORKLOAD_CONSTANTS.submissionTextureBindInterval, 2);
+	assert.equal(WORKLOAD_CONSTANTS.submissionBlendToggleInterval, 16);
+	assert.equal(WORKLOAD_CONSTANTS.streamChunkBytes, 4_096);
+	assert.equal(WORKLOAD_CONSTANTS.streamChunksPerFrame, 16);
+	assert.equal(WORKLOAD_SHADER_SOURCES.length, 10);
 	assert.deepEqual(WORKLOAD_SHADER_SOURCES.map(shader => shader.name), [
 		'lit-textured',
 		'unlit-textured',
@@ -136,7 +144,9 @@ test('workload v1 constants match the frozen design table', () => {
 		'transparent-soft',
 		'transparent-additive',
 		'ui-quad',
-		'post-tint'
+		'post-tint',
+		'sprite',
+		'sprite-additive'
 	]);
 });
 
@@ -184,17 +194,22 @@ test('per-frame command stream matches the design lane shape', () => {
 	const { drawCalls, perFrame } = renderFrames(WORKLOAD_SEED, 2);
 	assert.equal(drawCalls, WORKLOAD_DRAWS_PER_FRAME);
 
+	const laneProgramSwitches = WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionProgramSwitchInterval;
+	const laneTextureBinds = WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionTextureBindInterval;
 	for (const frame of perFrame) {
 		const count = (method: string) => frame.filter(call => call.method === method).length;
 		assert.equal(count('drawElements') + count('drawArrays'), WORKLOAD_DRAWS_PER_FRAME);
-		// All eight programs are exercised; switches stay far below draw count.
+		// All ten programs are exercised. The GPU lane batches coarsely (<= 60 switches, the v1
+		// band); the submission lane adds its tuned churn on top.
 		const programSwitches = count('useProgram');
-		assert.ok(programSwitches >= 8, `expected at least 8 program switches, got ${programSwitches}`);
-		assert.ok(programSwitches <= 60, `expected coarse program batching, got ${programSwitches} switches`);
-		// Texture binds land in the measured ~64/frame band.
+		assert.ok(programSwitches >= 10 + laneProgramSwitches, `expected lane program churn, got ${programSwitches}`);
+		assert.ok(programSwitches <= 60 + laneProgramSwitches, `program switches out of band: ${programSwitches}`);
+		// GPU-lane texture binds land in the measured ~64/frame band; the lane adds one bind per
+		// submissionTextureBindInterval draws.
 		const textureBinds = frame.filter(call => call.method === 'bindTexture').length;
-		assert.ok(textureBinds >= 48 && textureBinds <= 90, `texture binds out of band: ${textureBinds}`);
-		// Blend and depth-mask state toggles happen (blend on/off + UI, depth-mask off/on).
+		assert.ok(textureBinds >= 48 + laneTextureBinds && textureBinds <= 90 + laneTextureBinds, `texture binds out of band: ${textureBinds}`);
+		// Blend and depth-mask state toggles happen (blend on/off + UI, depth-mask off/on, plus
+		// the submission lane's blend toggling).
 		assert.ok(count('depthMask') >= 2);
 		assert.ok(count('enable') + count('disable') >= 4);
 		// Per-draw uniform uploads: a mat4 model matrix and a vec4 tint for every draw.
@@ -203,11 +218,33 @@ test('per-frame command stream matches the design lane shape', () => {
 	}
 });
 
+test('the v2 submission lane streams vertex data and churns state at the tuned intervals', () => {
+	const { perFrame } = renderFrames(WORKLOAD_SEED, 2);
+
+	for (const frame of perFrame) {
+		const count = (method: string) => frame.filter(call => call.method === method).length;
+		// Per-frame bufferSubData streaming: exactly one upload per chunk, covering the buffer.
+		assert.equal(count('bufferSubData'), WORKLOAD_CONSTANTS.streamChunksPerFrame);
+		// drawArrays covers the fullscreen layers (3), the UI quads, and every submission draw.
+		assert.equal(count('drawArrays'), 3 + WORKLOAD_CONSTANTS.uiDraws + WORKLOAD_CONSTANTS.submissionDraws);
+		// Blend enable/disable alternates between lane blocks: real blend-state churn, not a
+		// single set-and-forget (about one toggle per two blocks, both directions exercised).
+		const laneBlocks = WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionBlendToggleInterval;
+		assert.ok(count('enable') + count('disable') >= laneBlocks - 2, `expected lane blend toggling, got ${count('enable')}e/${count('disable')}d`);
+		assert.ok(count('blendFunc') >= laneBlocks / 2, `expected lane blend-func flips, got ${count('blendFunc')}`);
+	}
+
+	// The stream is live: the uploaded chunk contents must differ frame-to-frame, so a backend
+	// cannot satisfy the lane by caching the first upload.
+	const uploads = (frame: RecordedCall[]) => frame.filter(call => call.method === 'bufferSubData').map(call => call.args);
+	assert.notDeepEqual(uploads(perFrame[0]), uploads(perFrame[1]));
+});
+
 test('static resources are game-shaped: programs, meshes, and seeded textures', () => {
 	const recording = createRecordingGl();
 	createWorkload(recording.gl, createWorkloadSpec(WORKLOAD_SEED), 1_920, 1_080);
 	const creations = recording.calls.filter(call => call.method === 'createProgram').length;
-	assert.equal(creations, 8);
+	assert.equal(creations, 10);
 	const textures = recording.calls.filter(call => call.method === 'createTexture').length;
 	assert.equal(textures, WORKLOAD_CONSTANTS.sceneTextureCount + 1);
 	const mipmaps = recording.calls.filter(call => call.method === 'generateMipmap').length;

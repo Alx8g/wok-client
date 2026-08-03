@@ -1,16 +1,24 @@
 /**
- * Calibration workload v1 (design §1): a deterministic, self-contained scene shaped like the
- * measured Krunker menu frame (draw-call count, state changes, texture binds, overdraw, JS spin,
- * DOM overlay handled by the page). The command stream is a pure function of (seed, frameIndex):
- * no wall-clock reads happen anywhere in the command path, so every trial replays the identical
- * stream frame-for-frame.
+ * Calibration workload v2 (design §1 + findings §5): a deterministic, self-contained scene with
+ * two lanes. The GPU lane (v1, carried unchanged) is shaped like the measured Krunker menu frame
+ * — draw-call count, state changes, texture binds, overdraw, JS spin, DOM overlay handled by the
+ * page. The submission lane (new in v2) is CPU/submission-bound: many small screen-space draws
+ * with per-draw uniform uploads, dense texture/program/blend churn, and per-frame bufferSubData
+ * vertex streaming. It exists because the fence-artifact investigation proved the GPU lane alone
+ * cannot rank backends whose advantage is API-thread/driver submission relief (D3D11on12's
+ * batched deferred context): with pacing fully fixed, v1 still ranked default above d3d11on12 on
+ * the reference machine while real gameplay runs ~2x faster on d3d11on12
+ * (.working/fence-artifact-rootcause/findings.md §3, §5).
+ *
+ * The command stream is a pure function of (seed, frameIndex): no wall-clock reads happen
+ * anywhere in the command path, so every trial replays the identical stream frame-for-frame.
  *
  * The page generator embeds `mulberry32`, `createWorkload`, and `createWorkloadSpin` by function
  * serialization, so those functions must stay self-contained: they may reference each other by
  * name but must not capture any other module-level binding.
  */
 
-export const WORKLOAD_VERSION = 1;
+export const WORKLOAD_VERSION = 2;
 export const WORKLOAD_SEED = 0x574f4b31;
 
 export interface CalibrationWorkloadConstants {
@@ -24,6 +32,18 @@ export interface CalibrationWorkloadConstants {
 	programSwitchInterval: number;
 	sceneTextureCount: number;
 	sceneTextureSize: number;
+	/** Bytes re-uploaded per bufferSubData call in the submission lane. */
+	streamChunkBytes: number;
+	/** bufferSubData calls per frame; chunkBytes x chunksPerFrame is the whole stream buffer. */
+	streamChunksPerFrame: number;
+	/** Blend enable/disable + blend-func flips every this many submission draws. */
+	submissionBlendToggleInterval: number;
+	/** Small screen-space draws in the CPU/submission-bound lane. */
+	submissionDraws: number;
+	/** Program switches every this many submission draws (3-program sprite cycle). */
+	submissionProgramSwitchInterval: number;
+	/** Texture binds every this many submission draws (8-texture cycle). */
+	submissionTextureBindInterval: number;
 	textureBindInterval: number;
 	transparentDraws: number;
 	uiDraws: number;
@@ -33,11 +53,23 @@ export interface CalibrationWorkloadConstants {
 	warmupSettleRatio: number;
 }
 
-// Frozen as WORKLOAD_VERSION 1 after reference-machine lane tuning (design §1.4), measured on the
-// Iris Xe reference machine with the WOK_CALIBRATION_TUNING=1 + WOK_TRACE_MS harness. Final lanes
-// per workload frame across 3 consecutive runs: renderer-main busy 4.17/4.21/4.34 ms (gate 4-6),
-// script 2.81/2.84/2.93 ms (menu lane 2.68 ms), GPU-main busy 3.66/3.72/3.81 ms (gate 3-5).
-// Session record: .working/perf-round2/quiet-session.md. Any re-tune bumps WORKLOAD_VERSION.
+// Frozen as WORKLOAD_VERSION 2 (design §1.4 discipline: any re-tune bumps WORKLOAD_VERSION).
+//
+// GPU-lane constants are the WORKLOAD_VERSION 1 freeze, carried unchanged. v1 tuning on the Iris
+// Xe reference machine (WOK_CALIBRATION_TUNING=1 + WOK_TRACE_MS harness, 3 consecutive runs):
+// renderer-main busy 4.17/4.21/4.34 ms (gate 4-6), script 2.81/2.84/2.93 ms (menu lane 2.68 ms),
+// GPU-main busy 3.66/3.72/3.81 ms (gate 3-5). Record: .working/perf-round2/quiet-session.md.
+//
+// Submission-lane constants (v2) target the findings §5 lane: several hundred to ~1.5k small
+// draws total per frame with heavier per-draw state churn and per-frame bufferSubData traffic.
+// 700 sprite draws + the 300-draw GPU lane land at 1,000 draws/frame; texture binds every 2 and
+// program switches every 4 lane draws push state translation (input layouts, sampler/blend
+// state, root signatures on D3D11on12) well past the GPU lane's coarse batching; 16 x 4 KiB
+// bufferSubData chunks per frame (64 KiB) stream vertex data the lane draws actually consume,
+// exercising the rename/versioning path. Sprites cover a few pixels each, so the lane's GPU cost
+// is negligible by construction and its evidence lands in frame intervals and cpuSubmitP50/P95.
+// Reference-machine acceptance evidence for this freeze (v2 must rank d3d11on12:uncapped above
+// default:uncapped, matching real gameplay): .working/simulator-v2-acceptance/results.md.
 export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 	atlasTextureSize: 1_024,
 	heightfieldSize: 64,
@@ -49,6 +81,12 @@ export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 	programSwitchInterval: 40,
 	sceneTextureCount: 8,
 	sceneTextureSize: 256,
+	streamChunkBytes: 4_096,
+	streamChunksPerFrame: 16,
+	submissionBlendToggleInterval: 16,
+	submissionDraws: 700,
+	submissionProgramSwitchInterval: 4,
+	submissionTextureBindInterval: 2,
 	textureBindInterval: 4,
 	transparentDraws: 44,
 	uiDraws: 16,
@@ -58,11 +96,14 @@ export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 	warmupSettleRatio: 3
 };
 
-export const WORKLOAD_DRAWS_PER_FRAME = WORKLOAD_CONSTANTS.opaqueDraws + WORKLOAD_CONSTANTS.transparentDraws + WORKLOAD_CONSTANTS.uiDraws;
+export const WORKLOAD_DRAWS_PER_FRAME = WORKLOAD_CONSTANTS.opaqueDraws
+	+ WORKLOAD_CONSTANTS.transparentDraws
+	+ WORKLOAD_CONSTANTS.uiDraws
+	+ WORKLOAD_CONSTANTS.submissionDraws;
 
-// Frozen with WORKLOAD_VERSION 1. Matches game-like defaults; `desynchronized` is
-// deliberately absent-equivalent (false) because Krunker does not use it and it changes the
-// present path under comparison (audit C1).
+// Frozen with WORKLOAD_VERSION 1, carried unchanged into v2. Matches game-like defaults;
+// `desynchronized` is deliberately absent-equivalent (false) because Krunker does not use it
+// and it changes the present path under comparison (audit C1).
 export const WORKLOAD_CONTEXT_ATTRIBUTES = {
 	alpha: false,
 	antialias: false,
@@ -100,8 +141,11 @@ void main() {
 	gl_Position = modelMatrix * vec4(position, 1.0);
 }`;
 
-// Eight programs (design §1.2): state-change translation (input layouts, sampler/blend state,
-// root signatures on D3D11on12) is the largest backend differentiator ANGLE exercises.
+// Ten programs (design §1.2; v2 adds the two sprite programs): state-change translation (input
+// layouts, sampler/blend state, root signatures on D3D11on12) is the largest backend
+// differentiator ANGLE exercises. The submission lane cycles the three screen-space programs
+// (sprite, ui-quad, sprite-additive) so its pipeline churn hits the same translation path the
+// game's HUD/particle passes hit.
 export const WORKLOAD_SHADER_SOURCES: readonly WorkloadShaderSource[] = [
 	{
 		fragment: `precision mediump float; varying vec3 vNormal; varying vec2 vUv; varying vec3 vPosition;
@@ -177,6 +221,28 @@ void main() {
 }`,
 		name: 'post-tint',
 		vertex: SCREEN_VERTEX_SHADER
+	},
+	{
+		fragment: `precision mediump float; varying vec2 vUv;
+uniform sampler2D map; uniform vec4 tint;
+void main() {
+	vec4 texel = texture2D(map, vUv);
+	float fade = smoothstep(1.0, 0.2, length(vUv * 2.0 - 1.0));
+	gl_FragColor = vec4(texel.rgb * tint.rgb, texel.a * tint.a * fade);
+}`,
+		name: 'sprite',
+		vertex: SCREEN_VERTEX_SHADER
+	},
+	{
+		fragment: `precision mediump float; varying vec2 vUv;
+uniform sampler2D map; uniform vec4 tint;
+void main() {
+	vec4 texel = texture2D(map, vUv);
+	float fade = smoothstep(1.0, 0.2, length(vUv * 2.0 - 1.0));
+	gl_FragColor = vec4(texel.rgb * tint.rgb * (tint.a * fade), 1.0);
+}`,
+		name: 'sprite-additive',
+		vertex: SCREEN_VERTEX_SHADER
 	}
 ];
 
@@ -239,6 +305,7 @@ export interface WorkloadGl {
 	COLOR_BUFFER_BIT: number;
 	DEPTH_BUFFER_BIT: number;
 	DEPTH_TEST: number;
+	DYNAMIC_DRAW: number;
 	ELEMENT_ARRAY_BUFFER: number;
 	FLOAT: number;
 	FRAGMENT_SHADER: number;
@@ -269,6 +336,7 @@ export interface WorkloadGl {
 	bindTexture(target: number, texture: GlObject): void;
 	blendFunc(source: number, destination: number): void;
 	bufferData(target: number, data: ArrayBufferView, usage: number): void;
+	bufferSubData(target: number, offset: number, data: ArrayBufferView): void;
 	clear(mask: number): void;
 	clearColor(red: number, green: number, blue: number, alpha: number): void;
 	compileShader(shader: GlObject): void;
@@ -611,6 +679,61 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 		});
 	}
 
+	// Submission lane (v2): a dynamic stream buffer rewritten every frame via bufferSubData and
+	// consumed by the lane's draws, so the upload is real work (buffer rename/versioning), not a
+	// dead store. Layout matches the static meshes (position3 normal3 uv2): six vertices per
+	// screen-space unit quad, placed and scaled per draw through the model matrix.
+	const streamFloats = (constants.streamChunkBytes * constants.streamChunksPerFrame) / 4;
+	const streamData = new Float32Array(streamFloats);
+	const streamQuadCount = Math.floor(streamFloats / (FLOATS_PER_VERTEX * 6));
+	const streamCorners = [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]];
+	for (let quad = 0; quad < streamQuadCount; quad++) {
+		for (let vertex = 0; vertex < 6; vertex++) {
+			const offset = (quad * 6 + vertex) * FLOATS_PER_VERTEX;
+			streamData[offset] = streamCorners[vertex][0];
+			streamData[offset + 1] = streamCorners[vertex][1];
+			streamData[offset + 5] = 1;
+			streamData[offset + 6] = (streamCorners[vertex][0] + 1) / 2;
+			streamData[offset + 7] = (streamCorners[vertex][1] + 1) / 2;
+		}
+	}
+	const streamBuffer = gl.createBuffer();
+	gl.bindBuffer(gl.ARRAY_BUFFER, streamBuffer);
+	gl.bufferData(gl.ARRAY_BUFFER, streamData, gl.DYNAMIC_DRAW);
+	// Chunk views are pre-sliced so the per-frame upload loop allocates nothing.
+	const streamChunkFloats = constants.streamChunkBytes / 4;
+	const streamChunkViews: Float32Array[] = [];
+	for (let chunk = 0; chunk < constants.streamChunksPerFrame; chunk++) {
+		streamChunkViews.push(streamData.subarray(chunk * streamChunkFloats, (chunk + 1) * streamChunkFloats));
+	}
+
+	interface SubmissionDrawSpec {
+		phase: number;
+		programIndex: number;
+		quadIndex: number;
+		size: number;
+		speed: number;
+		textureIndex: number;
+		tint: [number, number, number, number];
+		x: number;
+		y: number;
+	}
+	const submissionDraws: SubmissionDrawSpec[] = [];
+	for (let index = 0; index < constants.submissionDraws; index++) {
+		submissionDraws.push({
+			phase: random() * Math.PI * 2,
+			// The program index is resolved at render time so this spec block stays data-only.
+			programIndex: Math.floor(index / constants.submissionProgramSwitchInterval) % 3,
+			quadIndex: index % streamQuadCount,
+			size: 0.004 + random() * 0.014,
+			speed: 0.01 + random() * 0.05,
+			textureIndex: Math.floor(index / constants.submissionTextureBindInterval) % constants.sceneTextureCount,
+			tint: [0.5 + random() * 0.5, 0.5 + random() * 0.5, 0.5 + random() * 0.5, 0.2 + random() * 0.5],
+			x: random() * 1.8 - 0.9,
+			y: random() * 1.8 - 0.9
+		});
+	}
+
 	const modelMatrix = new Float32Array(16);
 	const viewProjectionMatrix = new Float32Array(16);
 	const identityMatrix = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
@@ -675,7 +798,7 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 
 	let boundProgramIndex = -1;
 	let boundTextureIndex = -2;
-	let boundMesh: Mesh | 'screen-quad' | undefined;
+	let boundMesh: Mesh | 'screen-quad' | 'stream' | undefined;
 
 	const bindProgram = (programIndex: number): ProgramInfo => {
 		const info = programs[programIndex];
@@ -697,10 +820,11 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 		boundTextureIndex = textureIndex;
 	};
 
-	const bindMeshAttributes = (info: ProgramInfo, mesh: Mesh | 'screen-quad') => {
+	const bindMeshAttributes = (info: ProgramInfo, mesh: Mesh | 'screen-quad' | 'stream') => {
 		if (boundMesh === mesh) return;
 		const stride = FLOATS_PER_VERTEX * 4;
 		if (mesh === 'screen-quad') gl.bindBuffer(gl.ARRAY_BUFFER, screenQuadBuffer);
+		else if (mesh === 'stream') gl.bindBuffer(gl.ARRAY_BUFFER, streamBuffer);
 		else {
 			gl.bindBuffer(gl.ARRAY_BUFFER, mesh.vertexBuffer);
 			gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
@@ -800,8 +924,56 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 		gl.uniform4f(info.uniforms.tint, 0.03, 0.03, 0.05, 0.35);
 		gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-		// UI pass: NEAREST atlas quads, depth test off (blend stays on: toggles 3/4 close the pass).
+		// Submission lane (v2, findings §5): the CPU/submission-bound axis the GPU lane holds
+		// constant. Each sprite covers a few pixels, so by construction the lane's cost is API
+		// calls — per-draw matrix + tint uniform uploads, texture binds, program switches, blend
+		// toggles — landing on the renderer thread, the command-buffer service, and the driver or
+		// translation layer. Its evidence reaches the score through frame intervals and shows up
+		// diagnostically in cpuSubmitP50/P95.
 		gl.disable(gl.DEPTH_TEST);
+		// Per-frame vertex streaming: rewrite the head of every chunk (frame-index-derived jitter
+		// the draws below actually consume), then re-upload the chunk in place.
+		gl.bindBuffer(gl.ARRAY_BUFFER, streamBuffer);
+		for (let chunk = 0; chunk < streamChunkViews.length; chunk++) {
+			const view = streamChunkViews[chunk];
+			const wobble = Math.sin(frameIndex * 0.11 + chunk * 0.7) * 0.05;
+			for (let vertex = 0; vertex < 6 && (vertex + 1) * FLOATS_PER_VERTEX <= view.length; vertex++) {
+				view[vertex * FLOATS_PER_VERTEX + 2] = wobble;
+			}
+			gl.bufferSubData(gl.ARRAY_BUFFER, chunk * constants.streamChunkBytes, view);
+		}
+		// The raw bindBuffer above bypassed the cache; force a clean attribute rebind.
+		boundMesh = undefined;
+		const submissionProgramCycle = [programIndexByName.sprite, programIndexByName['ui-quad'], programIndexByName['sprite-additive']];
+		let submissionBlendOn = true;
+		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+		for (let index = 0; index < submissionDraws.length; index++) {
+			const draw = submissionDraws[index];
+			if (index % constants.submissionBlendToggleInterval === 0) {
+				const blockBlendOn = Math.floor(index / constants.submissionBlendToggleInterval) % 2 === 0;
+				if (blockBlendOn !== submissionBlendOn) {
+					if (blockBlendOn) gl.enable(gl.BLEND);
+					else gl.disable(gl.BLEND);
+					submissionBlendOn = blockBlendOn;
+				}
+				if (blockBlendOn) {
+					if (Math.floor(index / constants.submissionBlendToggleInterval) % 4 === 0) gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+					else gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+				}
+			}
+			info = bindProgram(submissionProgramCycle[draw.programIndex]);
+			bindSceneTexture(draw.textureIndex);
+			bindMeshAttributes(info, 'stream');
+			const drift = draw.phase + frameIndex * draw.speed;
+			writeScreenMatrix(draw.x + Math.sin(drift) * 0.02, draw.y + Math.cos(drift) * 0.02, draw.size, draw.size);
+			gl.uniformMatrix4fv(info.uniforms.modelMatrix, false, modelMatrix);
+			gl.uniform4f(info.uniforms.tint, draw.tint[0], draw.tint[1], draw.tint[2], draw.tint[3]);
+			gl.drawArrays(gl.TRIANGLES, draw.quadIndex * 6, 6);
+		}
+		if (!submissionBlendOn) gl.enable(gl.BLEND);
+		gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+
+		// UI pass: NEAREST atlas quads, depth test off, blend on.
 		info = bindProgram(programIndexByName['ui-quad']);
 		bindSceneTexture(-1);
 		bindMeshAttributes(info, 'screen-quad');
@@ -818,7 +990,7 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 	};
 
 	return {
-		drawCallsPerFrame: 2 + opaqueDraws.length + transparentDraws.length + fullscreenLayerCount + uiDraws.length,
+		drawCallsPerFrame: 2 + opaqueDraws.length + transparentDraws.length + fullscreenLayerCount + uiDraws.length + submissionDraws.length,
 		renderFrame
 	};
 }

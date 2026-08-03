@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { readFile, writeFile } from 'fs/promises';
 import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
+import { buildDiagnosticsReport } from './diagnostics-report.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
 import { runBeforeDeadline } from './absolute-deadline.ts';
@@ -1961,6 +1962,24 @@ app.on('ready', async () => {
 				click: () => {
 					const copiedUrl = parseKrunkerUrl(clipboard.readText());
 					if (copiedUrl?.searchParams.has('game')) void mainWindow.webContents.loadURL(copiedUrl.toString());
+				}
+			},
+			{
+				label: 'Copy diagnostics report',
+				accelerator: 'CommandOrControl+F9',
+				click: () => {
+					clipboard.writeText(buildDiagnosticsReport({
+						appVersion: app.getVersion(),
+						calibration: calibrationState,
+						electronVersion: process.versions.electron,
+						gpuFeatureStatus,
+						graphicsProfile: graphicsProfileState,
+						graphicsSelection,
+						osVersion: process.getSystemVersion(),
+						platform: process.platform,
+						preferences: userPrefs,
+						...(adaptiveValidationState ? { adaptiveValidation: adaptiveValidationState } : {})
+					}));
 				}
 			},
 			{ type: 'separator' },

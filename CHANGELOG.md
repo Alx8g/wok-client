@@ -1,3 +1,11 @@
+## WOK Client 1.1.0-rc.2 (2026-08-03)
+
+### WOK fixes
+- Fixed current Krunker loading-spinner markup being mistaken for a playable game state, which skipped future intro videos and removed the WOK splash several seconds too early.
+- Invalidated startup samples recorded by the obsolete readiness predicate so affected installations immediately relearn correct timings and show the adaptive intro again.
+- Restored the full WOK loading card, version, attribution, loading indicator, and rotating flavor text after the morphing intro.
+- Kept the WOK splash mounted until Krunker's loading overlay clears and its actionable play prompt replaces the spinner.
+
 ## WOK Client 1.1.0-rc.1 (2026-08-03)
 
 ### WOK changes

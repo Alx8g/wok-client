@@ -6,15 +6,21 @@ import {
 } from '../src/game-usability.ts';
 
 class FakeElement {
-	public childCount = 0;
+	public hasLoadingSpinner = false;
+	public hidden = false;
+	public readonly style = { display: '' };
+	public textContent = '';
 
-	public hasChildNodes(): boolean {
-		return this.childCount > 0;
+	public querySelector(selector: string): FakeElement | null {
+		return selector === '.lds-ring' && this.hasLoadingSpinner
+			? new FakeElement()
+			: null;
 	}
 }
 
 class FakeDocument {
 	public instructions: FakeElement | null = null;
+	public loadingBackground: FakeElement | null = null;
 	public pointerLockElement: object | null = null;
 	private readonly listeners = new Map<
 		string,
@@ -45,14 +51,21 @@ class FakeDocument {
 	}
 
 	public getElementById(id: string): FakeElement | null {
-		return id === 'instructions'
-			? this.instructions
-			: null;
+		if (id === 'instructions') return this.instructions;
+		if (id === 'loadingBg') return this.loadingBackground;
+		return null;
 	}
 
 	public listenerCount(type: string): number {
 		return this.listeners.get(type)?.size ?? 0;
 	}
+}
+
+function completeInitialLoading(document: FakeDocument): void {
+	document.instructions = new FakeElement();
+	document.instructions.textContent = 'CLICK TO PLAY';
+	document.loadingBackground = new FakeElement();
+	document.loadingBackground.style.display = 'none';
 }
 
 function createObservationHarness() {
@@ -61,6 +74,7 @@ function createObservationHarness() {
 	let disconnectCount = 0;
 	let reportCount = 0;
 	const observedTargets: Node[] = [];
+	const observedOptions: (MutationObserverInit | undefined)[] = [];
 	const stop = observeGameUsability({
 		createMutationObserver: nextCallback => {
 			callback = nextCallback;
@@ -68,8 +82,9 @@ function createObservationHarness() {
 				disconnect: () => {
 					disconnectCount += 1;
 				},
-				observe: target => {
+				observe: (target, options) => {
 					observedTargets.push(target);
+					observedOptions.push(options);
 				}
 			};
 		},
@@ -87,6 +102,7 @@ function createObservationHarness() {
 		get reportCount() {
 			return reportCount;
 		},
+		observedOptions,
 		observedTargets,
 		stop,
 		triggerMutation: () => {
@@ -152,20 +168,38 @@ test('late game usability subscriptions are asynchronous and cancellable', () =>
 	assert.equal(listenerCount, 1);
 });
 
-test('readiness observation follows instructions created after startup', () => {
+test('readiness ignores Krunker loading instructions until the overlay clears', () => {
 	const harness = createObservationHarness();
 	assert.equal(harness.observedTargets.length, 1);
+	assert.deepEqual(harness.observedOptions[0], {
+		attributeFilter: ['class', 'hidden', 'style'],
+		attributes: true,
+		characterData: true,
+		childList: true,
+		subtree: true
+	});
 	assert.equal(harness.reportCount, 0);
 	assert.equal(
 		harness.document.listenerCount('pointerlockchange'),
 		1
 	);
 
+	// Current Krunker creates this populated spinner around nine seconds before it is playable.
 	harness.document.instructions = new FakeElement();
+	harness.document.instructions.hasLoadingSpinner = true;
+	harness.document.loadingBackground = new FakeElement();
 	harness.triggerMutation();
 	assert.equal(harness.reportCount, 0);
 
-	harness.document.instructions.childCount = 1;
+	// Neither a prompt behind the loading overlay nor a hidden overlay with a spinner is sufficient.
+	harness.document.instructions.textContent = 'CLICK TO PLAY';
+	harness.triggerMutation();
+	assert.equal(harness.reportCount, 0);
+	harness.document.loadingBackground.style.display = 'none';
+	harness.triggerMutation();
+	assert.equal(harness.reportCount, 0);
+
+	harness.document.instructions.hasLoadingSpinner = false;
 	harness.triggerMutation();
 	assert.equal(harness.reportCount, 1);
 	assert.equal(harness.disconnectCount, 1);
@@ -191,8 +225,7 @@ test('pointer lock independently reports usability and cancellation detaches obs
 
 	const cancelledHarness = createObservationHarness();
 	cancelledHarness.stop();
-	cancelledHarness.document.instructions = new FakeElement();
-	cancelledHarness.document.instructions.childCount = 1;
+	completeInitialLoading(cancelledHarness.document);
 	cancelledHarness.triggerMutation();
 	assert.equal(cancelledHarness.reportCount, 0);
 	assert.equal(cancelledHarness.disconnectCount, 1);

@@ -32,6 +32,7 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'resourceSwapper',
 	'safeFlags_disableBackgrounding',
 	'safeFlags_gpuRasterizing',
+	'safeFlags_highPerformanceGpu',
 	'saveMatchResultJSONButton'
 ]);
 

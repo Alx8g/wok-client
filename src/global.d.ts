@@ -23,6 +23,8 @@ interface GraphicsRuntimeInfo {
 	reason: string;
 	source: string;
 	features: Record<string, string>;
+	/** Present when the active adapter looks integrated while a discrete adapter exists. */
+	gpuAdvisory?: string;
 }
 
 interface CompetitiveModeRuntimeInfo {

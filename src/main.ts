@@ -19,6 +19,7 @@ import {
 	type StartupProfile
 } from './startup-profile.ts';
 import {
+	assessIntegratedGpuUsage,
 	beginGraphicsLaunch,
 	clearKeptGraphicsBackend,
 	completeGraphicsLaunch,
@@ -320,6 +321,7 @@ const settingsSkeleton = {
 	alwaysWaitForDevTools: false,
 	safeFlags_disableBackgrounding: true,
 	safeFlags_gpuRasterizing: true,
+	safeFlags_highPerformanceGpu: true,
 	experimentalFlags_increaseLimits: false,
 	experimentalFlags_experimental: false,
 	matchmaker: false,
@@ -739,13 +741,17 @@ app.on('gpu-info-update', () => {
 });
 
 function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
+	const integratedGpuAssessment = assessIntegratedGpuUsage(graphicsProfileState.devices);
 	return {
 		activeBackend: graphicsSelection.backend,
 		preference: graphicsSelection.preference,
 		recommendation: graphicsProfileState.recommendedBackend,
 		reason: graphicsSelection.reason,
 		source: graphicsSelection.source,
-		features: gpuFeatureStatus
+		features: gpuFeatureStatus,
+		...(integratedGpuAssessment.suspectedIntegratedFallback
+			? { gpuAdvisory: 'Running on the integrated GPU while a discrete GPU is present. Set the high-performance GPU for WOK Client in your OS graphics settings.' }
+			: {})
 	};
 }
 

@@ -156,6 +156,7 @@ const settingsDesc: SettingsDesc = {
 
 	overrideURL: { title: 'Override URL', desc: 'Advanced testing override. Only HTTPS URLs on krunker.io or its subdomains are accepted.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 3 },
 	alwaysWaitForDevTools: { title: 'Always wait for DevTools', desc: 'WOK Client uses an alternative method to open DevTools in a new window if they take too long. This disables that. Might cause DevTools to not work', type: 'bool', safety: 3, cat: 3 },
+	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On dual-GPU systems (most gaming laptops), asks Chromium to run on the discrete GPU instead of the power-saving one. If diagnostics still report integrated graphics, set the preference for WOK Client in your OS graphics settings. Takes effect on the next launch.', safety: 1, cat: 3 },
 	safeFlags_gpuRasterizing: { title: 'GPU Rasterization', type: 'bool', desc: 'Requests Chromium GPU page rasterization without bypassing driver protections. Krunker WebGL is already GPU rendered.', safety: 2, cat: 3 },
 	safeFlags_disableBackgrounding: { title: 'Disable background optimizations', type: 'bool', desc: 'When tabbed out, keep the game running as if you were tabbed in. Uses more resources, but avoids catch-up', safety: 2, cat: 3 },
 	experimentalFlags_increaseLimits: { title: 'Increase Renderer Limit', type: 'bool', desc: 'Raises the renderer-process ceiling. It does not bypass the GPU blocklist or guarantee better performance.', safety: 4, cat: 3 },

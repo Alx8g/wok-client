@@ -75,6 +75,13 @@ function validationSection(validation: AdaptiveValidationState | undefined): str
 export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
 	const profile = input.graphicsProfile;
 	const quarantined = profile.blockedBackends.length > 0 ? profile.blockedBackends.join(', ') : 'none';
+	// The full failure history, not just active quarantines: manual selections record failures
+	// without ever being quarantined (audit C5), and this line is where they become actionable.
+	const backendFailures = profile.backendFailures.length > 0
+		? profile.backendFailures
+			.map(failure => `${failure.backend} x${failure.failureCount}${failure.reason ? ` — ${failure.reason}` : ''}`)
+			.join('; ')
+		: 'none';
 	const features = Object.entries(input.gpuFeatureStatus)
 		.filter(([key]) => key === 'webgl' || key === 'webgl2' || key === 'gpu_compositing' || key === 'rasterization')
 		.map(([key, value]) => `${key}=${value}`)
@@ -90,6 +97,7 @@ export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
 		`backend: ${profile.lastAppliedBackend} (source: ${profile.lastSelectionSource}) — ${input.graphicsSelection.reason}`,
 		`recommendation: ${profile.recommendedBackend} — ${profile.recommendationReason}`,
 		`quarantined backends: ${quarantined}`,
+		`backend failures: ${backendFailures}`,
 		`last launch: ${profile.lastLaunchOutcome}${profile.lastFailureReason ? ` — ${profile.lastFailureReason}` : ''}`,
 		`gpu features: ${features}`,
 		...calibrationSection(input.calibration),

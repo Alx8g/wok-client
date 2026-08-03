@@ -25,12 +25,14 @@ import {
 	clearKeptGraphicsBackend,
 	completeGraphicsLaunch,
 	createGraphicsProfileState,
+	describeManualBackendFailures,
 	isGraphicsBackendQuarantined,
 	keepCurrentGraphicsBackend,
 	normalizeGraphicsDevices,
 	parseGraphicsProfileState,
 	recordCleanGraphicsLaunchInterruption,
 	recordGraphicsGpuFailure,
+	recordManualGraphicsGpuFailure,
 	recordUnknownGraphicsLaunchInterruption,
 	recoverInterruptedGraphicsLaunch,
 	releaseExpiredGraphicsQuarantines,
@@ -743,6 +745,9 @@ app.on('gpu-info-update', () => {
 
 function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
 	const integratedGpuAssessment = assessIntegratedGpuUsage(graphicsProfileState.devices);
+	// A crash-looping manual backend outranks the integrated-GPU hint: manual selections are
+	// never quarantined, so this advisory is the only surface where those failures show up.
+	const manualFailureAdvisory = describeManualBackendFailures(graphicsProfileState, graphicsSelection);
 	return {
 		activeBackend: graphicsSelection.backend,
 		preference: graphicsSelection.preference,
@@ -750,9 +755,14 @@ function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
 		reason: graphicsSelection.reason,
 		source: graphicsSelection.source,
 		features: gpuFeatureStatus,
-		...(integratedGpuAssessment.suspectedIntegratedFallback
-			? { gpuAdvisory: 'Running on the integrated GPU while a discrete GPU is present. Set the high-performance GPU for WOK Client in your OS graphics settings.' }
-			: {})
+		...(manualFailureAdvisory
+			? { gpuAdvisory: manualFailureAdvisory, gpuAdvisoryKind: 'manual-backend-failure' as const }
+			: integratedGpuAssessment.suspectedIntegratedFallback
+				? {
+					gpuAdvisory: 'Running on the integrated GPU while a discrete GPU is present. Set the high-performance GPU for WOK Client in your OS graphics settings.',
+					gpuAdvisoryKind: 'integrated-fallback' as const
+				}
+				: {})
 	};
 }
 
@@ -879,11 +889,17 @@ app.on('child-process-gone', (_event, details) => {
 		appQuitting
 		|| details.type !== 'GPU'
 		|| !graphicsFailureReasons.has(details.reason)
-		|| !['auto', 'calibration', 'retained'].includes(graphicsSelection.source)
+		// Recovery launches already run the safest fallback; there is no better backend to
+		// steer to and no user choice to advise about.
+		|| graphicsSelection.source === 'recovery'
 	) return;
 
 	const reason = `GPU process ${details.reason} with exit code ${details.exitCode}.`;
-	const failedState = recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
+	// A manual selection is recorded without quarantine (audit C5): the explicit choice keeps
+	// applying, but the crash loop becomes visible in diagnostics and the settings advisory.
+	const failedState = graphicsSelection.source === 'manual'
+		? recordManualGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason)
+		: recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
 	if (failedState === graphicsProfileState) {
 		console.error(`Additional GPU teardown event after the ${graphicsSelection.backend} launch failure: ${reason}`);
 		return;
@@ -891,7 +907,11 @@ app.on('child-process-gone', (_event, details) => {
 	graphicsProfileState = failedState;
 	persistGraphicsProfile();
 	if (queuedCalibrationCandidate) activeCalibrationFailureReason = reason;
-	console.error(`${graphicsSelection.source === 'calibration' ? 'Calibrated' : 'Automatic'} graphics backend ${graphicsSelection.backend} failed and will fall back on the next launch.`);
+	if (graphicsSelection.source === 'manual') {
+		console.error(`Manually selected graphics backend ${graphicsSelection.backend} failed; it stays selected (manual choices are never quarantined) and the failure was recorded for diagnostics.`);
+	} else {
+		console.error(`${graphicsSelection.source === 'calibration' ? 'Calibrated' : 'Automatic'} graphics backend ${graphicsSelection.backend} failed and will fall back on the next launch.`);
+	}
 });
 
 function observeGraphicsLaunchRenderer(window: BrowserWindow, onRendererGone?: () => void) {

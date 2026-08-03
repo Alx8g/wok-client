@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { buildDiagnosticsReport, type DiagnosticsReportInput } from '../src/diagnostics-report.ts';
-import { createGraphicsProfileState, updateGraphicsDetection } from '../src/graphics-profile.ts';
+import { createGraphicsProfileState, recordManualGraphicsGpuFailure, updateGraphicsDetection } from '../src/graphics-profile.ts';
 
 const intelDevice = { active: true, deviceId: 0x46a6, vendorId: 0x8086 };
 const softwareDevice = { active: false, deviceId: 0x008c, vendorId: 0x1414 };
@@ -27,10 +27,28 @@ test('reports hardware, selection, and graceful placeholders without calibration
 	assert.ok(report.startsWith('WOK CLIENT DIAGNOSTICS — 2026-08-03T12:00:00.000Z'));
 	assert.ok(report.includes('GPU: 8086:46a6 (active), 1414:8c'));
 	assert.ok(report.includes('recommendation: d3d11on12'));
+	assert.ok(report.includes('backend failures: none'));
 	assert.ok(report.includes('CALIBRATION: never run'));
 	assert.ok(report.includes('VALIDATION: no gameplay evidence yet'));
 	assert.ok(report.includes('safeFlags_highPerformanceGpu=true'));
 	assert.ok(report.includes('safeFlags_gpuRasterizing=unset'));
+});
+
+test('surfaces non-quarantining manual backend failures in the failure history', () => {
+	const input = baseInput();
+	input.graphicsProfile = recordManualGraphicsGpuFailure(
+		{ ...input.graphicsProfile, launchPending: true },
+		'd3d11',
+		'GPU process crashed with exit code 5.',
+		2_000
+	);
+	input.graphicsSelection = { backend: 'd3d11', preference: 'd3d11', reason: 'Using the manually selected d3d11 graphics backend.', source: 'manual' };
+
+	const report = buildDiagnosticsReport(input);
+	// Recorded and visible, yet never quarantined (audit C5).
+	assert.ok(report.includes('quarantined backends: none'));
+	assert.ok(report.includes('backend failures: d3d11 x1 — GPU process crashed with exit code 5.'));
+	assert.ok(report.includes('last launch: gpu-failure — GPU process crashed with exit code 5.'));
 });
 
 test('surfaces artifact flags, verdicts, and validation sessions in the calibration sections', () => {

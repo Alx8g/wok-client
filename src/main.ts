@@ -88,6 +88,7 @@ import {
 import { WORKLOAD_CONSTANTS, WORKLOAD_VERSION } from './calibration-workload.ts';
 import type { CompetitiveGameSettings } from './competitive-mode.ts';
 import { containsObsoletePreferences, parseUserPreferencePatch } from './user-preferences.ts';
+import { resolveGameplayWindowGeometry } from './window-geometry.ts';
 import {
 	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
 	adaptiveValidationProfileIdentitiesEqual,
@@ -691,12 +692,6 @@ if (typeof userPrefs.fullscreen === 'boolean') {
 	if (userPrefs.fullscreen === true) userPrefs.fullscreen = 'fullscreen'; else userPrefs.fullscreen = 'windowed';
 }
 
-// borderless is now broken on windows, and I don't think there's a fix?
-if (process.platform === "win32" && userPrefs.fullscreen === 'borderless') {
-	userPrefs.fullscreen = 'windowed';
-	modifiedSettings = true;
-}
-
 // initially, hideAds was a true/false, now it's "block", "hide" or "off"
 if (typeof userPrefs.hideAds === 'boolean') {
 	modifiedSettings = true;
@@ -1209,26 +1204,7 @@ function calibrationDataUrl(html: string): string {
 
 /** Keeps calibration and gameplay on the same primary-display surface and window mode. */
 function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
-	const display = screen.getPrimaryDisplay();
-	const geometry: BrowserWindowConstructorOptions = {
-		center: true,
-		fullscreen: false,
-		height: Math.round(display.size.height * windowScale),
-		width: Math.round(display.size.width * windowScale)
-	};
-
-	if (userPrefs.fullscreen === 'fullscreen') return { ...geometry, fullscreen: true };
-	if (userPrefs.fullscreen === 'borderless') {
-		return {
-			...geometry,
-			frame: false,
-			fullscreenable: false,
-			height: display.bounds.height,
-			kiosk: true,
-			width: display.bounds.width
-		};
-	}
-	return geometry;
+	return resolveGameplayWindowGeometry(userPrefs.fullscreen, screen.getPrimaryDisplay(), windowScale);
 }
 
 const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;

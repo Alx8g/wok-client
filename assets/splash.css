@@ -1,18 +1,15 @@
 /*
- * Branded WOK loading screen shown after the launch animation while Krunker finishes initialising.
- * It is mounted on <body>, outside #uiBase, so Krunker's UI-scale transform cannot shrink or move it.
+ * WOK loading handoff shown after the launch animation while Krunker finishes initialising.
+ * It carries the animation's exact final frame and adds the optimized weapon particle morph.
  */
 
 html {
-	background: #0a0a0a !important;
+	background: #000000 !important;
 }
 
 .crankshaft-loading-background {
-	align-items: center;
-	background-color: #0a0a0a;
-	display: flex;
+	background-color: #000000;
 	height: 100%;
-	justify-content: center;
 	left: 0;
 	overflow: hidden;
 	pointer-events: auto;
@@ -22,78 +19,35 @@ html {
 	z-index: 2147483000;
 }
 
-.crankshaft-loading-background.immersive {
-	background-color: #0a0a0a;
-}
-
-.wok-loading-card {
-	background-color: #0a0a0a;
-	border: 1px solid #fbc02d;
-	border-radius: 8px;
-	box-sizing: border-box;
-	color: #ffffff;
-	max-width: calc(100vw - 40px);
-	padding: 3rem 2rem;
-	position: relative;
-	width: min(760px, calc(100vw - 40px));
-}
-
-.wok-loading-card > svg {
-	display: block;
-	height: auto;
-	width: 100%;
-}
-
-.wok-loading-credit,
-.wok-loading-flavor,
-.wok-loading-indicator,
-.wok-loading-version {
-	display: block;
-	font-size: clamp(14px, 1.05vw, 20px);
-	line-height: 1.2;
+/*
+ * Reproduce the rectangle occupied by the 16:9 intro under object-fit: cover. Keeping both the
+ * final-frame image and particle host on this stage preserves their relative geometry at any
+ * window aspect ratio.
+ */
+.wok-splash-stage {
+	background-position: center;
+	background-repeat: no-repeat;
+	background-size: 100% 100%;
+	height: max(100vh, calc(100vw * 9 / 16));
+	left: 50%;
 	position: absolute;
-	white-space: nowrap;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	width: max(100vw, calc(100vh * 16 / 9));
 }
 
-.wok-loading-version {
-	bottom: 16px;
-	color: rgba(255, 255, 255, 0.72);
-	left: 16px;
+.wok-weapon-loader {
+	height: 20%;
+	left: 50%;
+	pointer-events: none;
+	position: absolute;
+	top: 50.5%;
+	transform: translateX(-50%);
+	width: 26%;
 }
 
-.wok-loading-credit {
-	bottom: 16px;
-	color: rgba(255, 255, 255, 0.72);
-	right: 16px;
-	text-align: right;
-}
-
-.wok-loading-flavor {
-	color: rgba(255, 255, 255, 0.72);
-	left: 16px;
-	top: calc(100% + 10px);
-}
-
-.wok-loading-indicator {
-	bottom: calc(100% + 10px);
-	color: #fbc02d;
-	right: 16px;
-	text-align: right;
-}
-
-@media (max-width: 700px) {
-	.wok-loading-card {
-		padding: 2.5rem 1.25rem;
-	}
-
-	.wok-loading-credit,
-	.wok-loading-flavor,
-	.wok-loading-indicator,
-	.wok-loading-version {
-		font-size: 13px;
-	}
-
-	.wok-loading-credit {
-		display: none;
-	}
+.wok-weapon-loader > canvas {
+	display: block;
+	height: 100%;
+	width: 100%;
 }

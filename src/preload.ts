@@ -5,7 +5,7 @@ import { ipcRenderer, webFrame } from 'electron';
 import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
 import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
 import { GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
-import { selectSplashFlavor } from './splash-flavor.ts';
+import { mountWeaponParticleLoader } from './weapon-particle-loader.ts';
 
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
@@ -524,24 +524,18 @@ function observeGameUsable(): void {
 let splashMountAttempted = false;
 
 async function mountClientSplash(
-	_userPrefs: UserPrefs,
-	version: string
+	_userPrefs: UserPrefs
 ): Promise<void> {
 	if (splashMountAttempted) return;
 	splashMountAttempted = true;
-	const {
-		immersiveSplash,
-		immersiveSplashBackgroundColor
-	} = _userPrefs;
 
-	const [splashCSS, logoSVGSource] = await Promise.all([
+	const [splashCSS, splashFrame] = await Promise.all([
 		readFile(
 			pathJoin($assets, 'splash.css'),
 			{ encoding: 'utf-8' }
 		),
 		readFile(
-			pathJoin($assets, 'full_logo.svg'),
-			{ encoding: 'utf-8' }
+			pathJoin($assets, 'splash-frame.webp')
 		)
 	]);
 	webFrame.insertCSS(splashCSS);
@@ -559,44 +553,39 @@ async function mountClientSplash(
 		'div',
 		{ class: ['crankshaft-loading-background'] }
 	);
-	if (immersiveSplash) {
-		splashBackground.classList.add('immersive');
-		splashBackground.style.setProperty(
-			'background-color',
-			`${immersiveSplashBackgroundColor}`
-		);
-	}
+	splashBackground.setAttribute(
+		'aria-label',
+		'WOK Client loading'
+	);
+	splashBackground.setAttribute('role', 'status');
 
-	const loadingCard = createElement('div', {
-		class: 'wok-loading-card',
-		innerHTML: logoSVGSource
+	/*
+	 * Carry the intro's exact final frame into the loading phase, then run the optimized WOK weapon
+	 * particle animation beneath the lockup. Its pre-baked point data avoids loading source images
+	 * while Krunker is initialising.
+	 */
+	const stage = createElement('div', {
+		class: 'wok-splash-stage'
 	});
-	loadingCard.setAttribute('aria-label', 'WOK Client loading');
-	loadingCard.setAttribute('role', 'status');
-	loadingCard.appendChild(createElement('div', {
-		class: 'wok-loading-version',
-		text: `v${version}`
-	}));
-	loadingCard.appendChild(createElement('div', {
-		class: 'wok-loading-credit',
-		text: 'WOK Client • Based on Crankshaft'
-	}));
-	loadingCard.appendChild(createElement('div', {
-		class: 'wok-loading-flavor',
-		text: selectSplashFlavor()
-	}));
-	loadingCard.appendChild(createElement('div', {
-		class: 'wok-loading-indicator',
-		text: 'LOADING...'
-	}));
-	splashBackground.appendChild(loadingCard);
+	stage.style.setProperty(
+		'background-image',
+		`url("data:image/webp;base64,${splashFrame.toString('base64')}")`
+	);
+	const weaponLoaderHost = createElement('div', {
+		class: 'wok-weapon-loader'
+	});
+	stage.appendChild(weaponLoaderHost);
+	splashBackground.appendChild(stage);
 
 	/*
 	 * Mounted on <body>, NOT inside #uiBase. Krunker applies its UI scale to #uiBase as a CSS
-	 * transform, which would rescale and move the loading card. Waiting for #uiBase still gives us
-	 * an early, stable parser milestone without inheriting that transform.
+	 * transform, which would rescale and move the handoff. Waiting for #uiBase still gives us an
+	 * early, stable parser milestone without inheriting that transform.
 	 */
 	document.body.appendChild(splashBackground);
+	const weaponParticles = await mountWeaponParticleLoader(
+		weaponLoaderHost
+	);
 
 	let splashCleared = false;
 	let removeGameUsableListener: () => void = () => {};
@@ -604,6 +593,7 @@ async function mountClientSplash(
 		if (splashCleared) return;
 		splashCleared = true;
 		sendPerfMark('splash-cleared');
+		weaponParticles.destroy();
 		splashBackground.remove();
 		removeGameUsableListener();
 	};
@@ -654,7 +644,7 @@ function injectKeyframeFix() {
  * payload is available and again on the injectClientCSS IPC message; every step is
  * idempotent per document and later calls reconcile preference changes (reload flow).
  */
-async function applyClientVisuals(_userPrefs: UserPrefs, version: string, cssPath: string): Promise<void> {
+async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	applyClientHotkeys(_userPrefs);
 	observeGameUsable();
 
@@ -671,7 +661,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, version: string, cssPat
 	}
 
 	if (clientSplash && !splashMountAttempted) {
-		void mountClientSplash(_userPrefs, version).catch(error => {
+		void mountClientSplash(_userPrefs).catch(error => {
 			strippedConsole.error('Failed to mount the client splash screen', error);
 		});
 	}

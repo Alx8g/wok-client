@@ -12,7 +12,7 @@
  *
  * So the client measures how long its own launches actually take and picks the longest variant that
  * fits, allowing a small overshoot. Every variant is the same render trimmed from a different start
- * point, so all of them end on the same WOK lockup before the branded loading card takes over.
+ * point, so all of them end on the same WOK lockup before the weapon particle-morph loader takes over.
  *
  * First launch has no history and deliberately gets the longest variant: a cold profile pays for
  * an empty HTTP cache, an empty shader cache and an empty V8 cache, and is the slowest launch a
@@ -30,7 +30,7 @@ const READINESS_SIGNAL_VERSION = 2;
  *
  * Overshoot and undershoot are not symmetric costs, so the selector must not treat them as if they
  * are. A slightly long animation costs only a fraction of a second of waiting. Undershooting exposes
- * the static loading card for longer, which with only two variants can create a gap of seconds.
+ * the weapon morph loader for longer, which with only two variants can create a gap of seconds.
  *
  * Readiness is observed in the renderer and persisted by the main process, so IPC scheduling and
  * the final visual settle can still move the handoff by a few hundred milliseconds. The allowance
@@ -59,8 +59,8 @@ export interface IntroVariantTiming {
 
 /*
  * Every variant is the same render, trimmed from the START - never a separate export. Each one
- * therefore ends on the identical WOK lockup before handing over to the branded loading card, and
- * there is only ever one animation source to keep current.
+ * therefore ends on the identical WOK lockup before handing over to the weapon particle-morph
+ * loader, and there is only ever one animation source to keep current.
  *
  * The cut points are not arbitrary. The animation pulses rather than ramping monotonically, and is
  * measured fully transparent (mean alpha exactly 0) across frames 47-58 and 101-108. Cutting inside

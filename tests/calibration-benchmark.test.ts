@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+	BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG,
 	BENCHMARK_FENCE_QUEUE_DEPTH,
+	BENCHMARK_FENCE_STALL_ARTIFACT_RATIO,
 	BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
 	BENCHMARK_GPU_QUERY_POOL_SIZE,
 	BENCHMARK_RUN_RETRY_BUDGET,
@@ -363,4 +365,37 @@ test('twice-rejected trials resolve to the better attempt as warn-and-continue e
 
 test('fence queue depth matches the design freeze', () => {
 	assert.equal(BENCHMARK_FENCE_QUEUE_DEPTH, 2);
+});
+
+test('flags fence-pacing artifacts when stalls dominate while the GPU has headroom', async () => {
+	// Every fence needs three status polls, so roughly two of three ticks stall on the fence
+	// gate while measured GPU time stays near 2 ms — the D3D11on12-on-Iris-Xe field signature.
+	const { result } = await driveTrial({
+		config: { benchmarkMs: 1_500 },
+		fake: createFakeGl({ queryResultNs: () => 2_000_000, statusPollsRequired: () => 3 })
+	});
+
+	assert.equal(result.rejected, false);
+	assert.ok(result.stallRatio > BENCHMARK_FENCE_STALL_ARTIFACT_RATIO);
+	assert.equal(result.gpuTimingStatus, 'measured');
+	assert.ok(result.contaminationFlags.includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
+});
+
+test('does not flag fence pacing when the GPU is genuinely the bottleneck', async () => {
+	// Same stall pattern, but the GPU reports ~40 ms per frame: the fence waits reflect real
+	// GPU cost, so the frame times are honest evidence rather than a pacing artifact.
+	const { result } = await driveTrial({
+		config: { benchmarkMs: 1_500 },
+		fake: createFakeGl({ queryResultNs: () => 40_000_000, statusPollsRequired: () => 3 })
+	});
+
+	assert.ok(result.stallRatio > BENCHMARK_FENCE_STALL_ARTIFACT_RATIO);
+	assert.equal(result.contaminationFlags.includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG), false);
+});
+
+test('does not flag fence pacing on a healthy trial without stalls', async () => {
+	const { result } = await driveTrial({ config: { benchmarkMs: 1_500 } });
+
+	assert.equal(result.stallRatio, 0);
+	assert.equal(result.contaminationFlags.includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG), false);
 });

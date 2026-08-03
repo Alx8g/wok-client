@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG } from '../src/calibration-benchmark.ts';
 import { buildCalibrationResultPage, buildCalibrationTrialPage } from '../src/calibration-window.ts';
 import {
 	CALIBRATION_VERSION,
@@ -625,4 +626,74 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	assert.match(page, /Trial 2:/);
 	assert.match(page, /provisionally/);
 	assert.match(page, /automatically reverts to the previous profile/);
+});
+
+test('a fence-pacing artifact invalidates the comparison and keeps the current backend', () => {
+	// Field reproduction (Iris Xe): the benchmark stalled 75% of ticks on d3d11on12 with ~2 ms of
+	// measured GPU time, scored it 2x below default, and switched a machine whose real gameplay
+	// runs 2x FASTER on d3d11on12. The artifact flag must keep the benchmark from deciding.
+	const artifactMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 106.29,
+		contaminationFlags: [BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG],
+		gpuTimeP50Ms: 1.6,
+		gpuTimeP95Ms: 2,
+		gpuTimingStatus: 'measured',
+		longFrameRatio: 0.01,
+		onePercentLowFps: 27.45,
+		p95FrameTimeMs: 14.7,
+		sampleCount: 555,
+		stallRatio: 0.75,
+		worstFrameTimeMs: 30
+	};
+	const defaultWinnerMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 197.76,
+		onePercentLowFps: 88.89,
+		p95FrameTimeMs: 6.6,
+		stallRatio: 0,
+		webglRenderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	};
+
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], artifactMetrics);
+
+	// Synthetic instability from the artifact must not stage a capped recovery launch.
+	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+
+	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
+
+	// Repeating trials reproduces a deterministic artifact; no ABAB stage may be scheduled.
+	assert.equal(state.plan.some(slot => slot.stage === 'repeat'), false);
+
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
+});
+
+test('the same slow trial without the artifact flag still lets the numeric winner switch backends', () => {
+	const honestSlowMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 106.29,
+		longFrameRatio: 0.01,
+		onePercentLowFps: 27.45,
+		p95FrameTimeMs: 14.7,
+		sampleCount: 555,
+		worstFrameTimeMs: 30
+	};
+	const defaultWinnerMetrics: CalibrationMetrics = {
+		...stableMetrics,
+		averageFps: 197.76,
+		onePercentLowFps: 88.89,
+		p95FrameTimeMs: 6.6,
+		webglRenderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	};
+
+	const candidates = createWindowsCandidates();
+	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
+	state = recordCalibrationResult(state, candidates[0], honestSlowMetrics);
+	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
+
+	const finalized = finalizeCalibration(state);
+	assert.equal(finalized.recommendedSelection?.candidate.id, 'default:uncapped');
 });

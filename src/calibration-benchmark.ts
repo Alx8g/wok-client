@@ -18,6 +18,10 @@ export const BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO = 0.2;
 export const BENCHMARK_GPU_SAMPLE_MIN_MS = 0.05;
 export const BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO = 4;
 export const BENCHMARK_GPU_QUEUE_FLAG_RATIO = 1.3;
+/** Above this stalled-tick share, fence pacing (not rendering) is setting the frame interval. */
+export const BENCHMARK_FENCE_STALL_ARTIFACT_RATIO = 0.5;
+/** GPU headroom bound: measured GPU time this far under the frame interval proves the GPU was not the bottleneck. */
+export const BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO = 0.5;
 export const BENCHMARK_EVENT_LOOP_SAMPLE_MS = 16;
 export const BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS = 100;
 export const BENCHMARK_LONG_FRAME_MS = 33.34;
@@ -41,6 +45,7 @@ export const BENCHMARK_REJECTION_REASONS = [
 export type BenchmarkRejectionReason = (typeof BENCHMARK_REJECTION_REASONS)[number];
 
 export const BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG = 'gpu-queue-exceeds-frame-budget';
+export const BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG = 'fence-pacing-dominates-frame-interval';
 
 export interface BenchmarkEnvironmentInfo {
 	devicePixelRatio: number;
@@ -180,6 +185,21 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		// evidence that submission speed masks GPU cost; never a scored input.
 		if (gpuTimingStatus === 'measured' && gpuTimeP95Ms !== undefined && p95FrameTimeMs > 0 && gpuTimeP95Ms > p95FrameTimeMs * BENCHMARK_GPU_QUEUE_FLAG_RATIO) {
 			contaminationFlags.push(BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG);
+		}
+		// Fence-pacing artifact check: when most ticks stall on the fence gate while measured GPU
+		// time stays far below the frame interval, the fence ring itself — not the backend's
+		// rendering throughput — produced the frame times. Backends translate fence signaling
+		// differently (D3D11on12 in particular), so such a trial is not comparable evidence
+		// against a backend that did not stall. Diagnostic, never a scored input.
+		const stallRatioValue = totalTicks > 0 ? stalledTicks / totalTicks : 0;
+		if (
+			gpuTimingStatus === 'measured'
+			&& gpuTimeP95Ms !== undefined
+			&& p95FrameTimeMs > 0
+			&& stallRatioValue > BENCHMARK_FENCE_STALL_ARTIFACT_RATIO
+			&& gpuTimeP95Ms < p95FrameTimeMs * BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO
+		) {
+			contaminationFlags.push(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
 		}
 
 		return {

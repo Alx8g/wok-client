@@ -1,6 +1,7 @@
 import type { AppliedGraphicsBackend } from './graphics-profile.ts';
 import { WORKLOAD_VERSION } from './calibration-workload.ts';
 import {
+	BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG,
 	BENCHMARK_REJECTION_REASONS,
 	BENCHMARK_RUN_RETRY_BUDGET,
 	type BenchmarkRejectionReason
@@ -574,6 +575,20 @@ function resultHasLowConfidenceEvidence(result: CalibrationResult): boolean {
 	return metricsLowConfidenceReasons(result.metrics).length > 0;
 }
 
+/**
+ * True when the benchmark flagged this trial's frame times as products of its own fence pacing
+ * rather than the backend's rendering throughput. Such a trial is real evidence that the
+ * benchmark could not measure the candidate — not evidence that the candidate is slow — so it
+ * must never decide a cross-candidate comparison in either direction.
+ */
+export function metricsShowFencePacingArtifact(metrics: CalibrationMetrics): boolean {
+	return (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
+}
+
+function resultShowsFencePacingArtifact(result: CalibrationResult): boolean {
+	return metricsShowFencePacingArtifact(result.metrics);
+}
+
 function resultVerificationConfidence(result: CalibrationResult): number {
 	if (result.backendVerification.status === 'verified' || result.candidate.backend === 'default') return 1;
 	return 0;
@@ -631,6 +646,8 @@ function stageCappedRecoveryCandidate(
 		|| metricsLowConfidenceReasons(metrics).length > 0
 		|| backendVerification.status === 'mismatch'
 		|| !uncappedMetricsShowSevereInstability(metrics)
+		// Fence-pacing artifacts produce synthetic "instability" that capping cannot fix.
+		|| metricsShowFencePacingArtifact(metrics)
 		|| state.candidates.some(existing => existing.framePolicy === 'capped')
 	) return state.candidates;
 
@@ -653,7 +670,8 @@ function isValidCalibrationResult(result: CalibrationResult): boolean {
 function isCleanCalibrationResult(result: CalibrationResult): boolean {
 	return isValidCalibrationResult(result)
 		&& !result.failureReason
-		&& !resultHasLowConfidenceEvidence(result);
+		&& !resultHasLowConfidenceEvidence(result)
+		&& !resultShowsFencePacingArtifact(result);
 }
 
 function isKnownGoodCalibrationResult(result: CalibrationResult | undefined): result is CalibrationResult {
@@ -675,6 +693,9 @@ function appendRepeatStageIfNeeded(plan: CalibrationTrialSlot[], results: Calibr
 	if (!firstResult || !secondResult) return plan;
 	// A candidate excluded by the validity gates cannot win, so repeating the other is pointless.
 	if (!isValidCalibrationResult(firstResult) || !isValidCalibrationResult(secondResult)) return plan;
+	// A fence-pacing artifact is deterministic for a backend on a given machine; repeating the
+	// trials reproduces the artifact and can never make the comparison numeric.
+	if (resultShowsFencePacingArtifact(firstResult) || resultShowsFencePacingArtifact(secondResult)) return plan;
 
 	const bothClean = isCleanCalibrationResult(firstResult) && isCleanCalibrationResult(secondResult);
 	const loserScore = Math.min(firstResult.score, secondResult.score);
@@ -965,11 +986,36 @@ function resolveTiedCandidates(state: CalibrationState, left: CandidateTrialSumm
 	return leftIndex <= rightIndex ? left : right;
 }
 
+function summaryShowsFencePacingArtifact(summary: CandidateTrialSummary): boolean {
+	return summary.validTrials.some(resultShowsFencePacingArtifact);
+}
+
+/**
+ * When a fence-pacing artifact invalidates the numeric comparison, neither candidate may win on
+ * scores. The status quo is kept: a known-good active selection first, otherwise candidate order
+ * (the current backend is always staged first). The prefer-default tie rung is deliberately
+ * skipped — it presumes both candidates were fairly measured, which is exactly what the artifact
+ * disproves. The provisional confirmation loop remains the authority on the retained choice.
+ */
+function resolveArtifactAffectedCandidates(state: CalibrationState, left: CandidateTrialSummary, right: CandidateTrialSummary): CandidateTrialSummary {
+	const active = state.activeSelection;
+	if (isKnownGoodCalibrationResult(active)) {
+		if (active.candidate.id === left.candidate.id) return left;
+		if (active.candidate.id === right.candidate.id) return right;
+	}
+	const leftIndex = state.candidates.findIndex(candidate => candidate.id === left.candidate.id);
+	const rightIndex = state.candidates.findIndex(candidate => candidate.id === right.candidate.id);
+	return leftIndex <= rightIndex ? left : right;
+}
+
 /** Pairwise decision per design §3.3: validity gates, range overlap, minimum effect size, tie ladder. */
 function decideBetweenCandidates(state: CalibrationState, left: CandidateTrialSummary, right: CandidateTrialSummary): CandidateTrialSummary {
 	if (left.validTrials.length === 0 && right.validTrials.length === 0) return resolveTiedCandidates(state, left, right);
 	if (left.validTrials.length === 0) return right;
 	if (right.validTrials.length === 0) return left;
+	if (summaryShowsFencePacingArtifact(left) || summaryShowsFencePacingArtifact(right)) {
+		return resolveArtifactAffectedCandidates(state, left, right);
+	}
 
 	const planHasRepeatSlots = state.plan.some(slot => slot.stage === 'repeat');
 	const requiredCleanTrialsToWin = planHasRepeatSlots ? 2 : 1;

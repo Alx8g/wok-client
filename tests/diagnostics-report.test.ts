@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { CALIBRATION_NO_COMPARISON_REASON, createCalibrationSignature, prepareCalibrationState } from '../src/calibration.ts';
 import { buildDiagnosticsReport, type DiagnosticsReportInput } from '../src/diagnostics-report.ts';
 import { createGraphicsProfileState, recordManualGraphicsGpuFailure, updateGraphicsDetection } from '../src/graphics-profile.ts';
 
@@ -49,6 +50,22 @@ test('surfaces non-quarantining manual backend failures in the failure history',
 	assert.ok(report.includes('quarantined backends: none'));
 	assert.ok(report.includes('backend failures: d3d11 x1 — GPU process crashed with exit code 5.'));
 	assert.ok(report.includes('last launch: gpu-failure — GPU process crashed with exit code 5.'));
+});
+
+test('explains a calibration that completed without a benchmark cycle', () => {
+	const input = baseInput();
+	input.platform = 'linux';
+	input.calibration = prepareCalibrationState(
+		undefined,
+		createCalibrationSignature('1.0.0', '44.0.0', '8086:46a6', 'driver-a'),
+		[{ backend: 'default', framePolicy: 'uncapped', id: 'default:uncapped' }],
+		false,
+		'linux'
+	);
+
+	const report = buildDiagnosticsReport(input);
+	assert.ok(report.includes('CALIBRATION: complete'));
+	assert.ok(report.includes(`  ${CALIBRATION_NO_COMPARISON_REASON}`));
 });
 
 test('surfaces artifact flags, verdicts, and validation sessions in the calibration sections', () => {

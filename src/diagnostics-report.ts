@@ -54,6 +54,9 @@ function calibrationResultLine(result: CalibrationResult): string {
 function calibrationSection(calibration: CalibrationState | undefined): string[] {
 	if (!calibration) return ['CALIBRATION: never run'];
 	const lines = [`CALIBRATION: ${calibration.status}${calibration.confirmation ? ` (confirmation: ${calibration.confirmation})` : ''}`];
+	// A completion without a benchmark cycle (no backend comparison available, audit C2) must
+	// read differently from a measured run that produced no results.
+	if (calibration.completionReason) lines.push(`  ${calibration.completionReason}`);
 	for (const result of calibration.results) lines.push(calibrationResultLine(result));
 	if (calibration.recommendedSelection) lines.push(`  recommended: ${calibration.recommendedSelection.candidate.id}`);
 	if (calibration.activeSelection) lines.push(`  applied: ${calibration.activeSelection.candidate.id}`);

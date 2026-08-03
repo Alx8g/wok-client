@@ -1401,8 +1401,16 @@ function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
 		platform: process.platform,
 		recommendedBackend: graphicsProfileState.recommendedBackend
 	});
-	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, Boolean(userPrefs.competitiveMode));
-	if (preparedState !== calibrationState) writeCalibrationStateSync(preparedState);
+	const previousCalibrationState = calibrationState;
+	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, Boolean(userPrefs.competitiveMode), process.platform);
+	if (preparedState !== previousCalibrationState) {
+		writeCalibrationStateSync(preparedState);
+		// Off Windows the candidate space offers no backend comparison, so calibration completes
+		// immediately instead of consenting, relaunching, and benchmarking one candidate (C2).
+		if (preparedState.completionReason && preparedState.completionReason !== previousCalibrationState?.completionReason) {
+			console.log(`Calibration completed without a benchmark cycle: ${preparedState.completionReason}`);
+		}
+	}
 	calibrationState = preparedState;
 	return preparedState;
 }

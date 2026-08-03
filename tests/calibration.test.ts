@@ -3,8 +3,11 @@ import test from 'node:test';
 import { BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG } from '../src/calibration-benchmark.ts';
 import { buildCalibrationResultPage, buildCalibrationTrialPage } from '../src/calibration-window.ts';
 import {
+	CALIBRATION_NO_COMPARISON_REASON,
 	CALIBRATION_VERSION,
 	calculateCalibrationScore,
+	calibrationOffersBackendComparison,
+	calibrationResumeRequired,
 	calibrationSignaturesEqual,
 	collectStableGraphicsDriverFields,
 	completeCalibration,
@@ -751,4 +754,110 @@ test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped 
 	});
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
+});
+
+function createLinuxCandidates() {
+	return createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'linux',
+		recommendedBackend: 'default'
+	});
+}
+
+test('only multi-backend plans count as a comparison off Windows; Windows plans always run', () => {
+	const singleDefault = createLinuxCandidates();
+	assert.equal(calibrationOffersBackendComparison(singleDefault, 'linux'), false);
+	assert.equal(calibrationOffersBackendComparison(singleDefault, 'darwin'), false);
+
+	// A frame-policy pair of one backend is still one backend: nothing to compare off Windows.
+	const policyPair = createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'capped',
+		platform: 'linux',
+		recommendedBackend: 'default'
+	});
+	assert.equal(policyPair.length, 2);
+	assert.equal(calibrationOffersBackendComparison(policyPair, 'linux'), false);
+
+	// A manual vulkan selection contributes a genuinely different backend on Linux.
+	const vulkanChallenge = createCalibrationCandidates({
+		currentBackend: 'vulkan',
+		currentFramePolicy: 'uncapped',
+		platform: 'linux',
+		recommendedBackend: 'default'
+	});
+	assert.equal(calibrationOffersBackendComparison(vulkanChallenge, 'linux'), true);
+
+	// Windows keeps today's behavior for every plan shape, including same-backend policy pairs.
+	assert.equal(calibrationOffersBackendComparison(createWindowsCandidates(), 'win32'), true);
+	assert.equal(calibrationOffersBackendComparison(singleDefault, 'win32'), true);
+});
+
+test('non-Windows calibration completes immediately with the default profile, clearly reasoned', () => {
+	const state = prepareCalibrationState(undefined, signature, createLinuxCandidates(), false, 'linux');
+
+	assert.equal(state.status, 'complete');
+	assert.equal(state.completionReason, CALIBRATION_NO_COMPARISON_REASON);
+	assert.equal(typeof state.completedAt, 'number');
+	// Nothing was applied or planned: the automatic default profile stays in charge and no
+	// consent, relaunch, or trial cycle is owed on the next startup.
+	assert.equal(state.activeSelection, undefined);
+	assert.equal(state.recommendedSelection, undefined);
+	assert.deepEqual(state.plan, []);
+	assert.deepEqual(state.results, []);
+	assert.equal(state.rerunRequested, false);
+	assert.equal(calibrationResumeRequired(state), false);
+	assert.equal(getPendingCalibrationCandidate(state), undefined);
+});
+
+test('an explicit rerun off Windows never enters the running state', () => {
+	const completed = prepareCalibrationState(undefined, signature, createLinuxCandidates(), false, 'linux');
+	const rerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, createLinuxCandidates(), false, 'linux');
+
+	assert.equal(rerun.status, 'complete');
+	assert.equal(rerun.rerunRequested, false);
+	assert.equal(rerun.completionReason, CALIBRATION_NO_COMPARISON_REASON);
+	assert.equal(calibrationResumeRequired(rerun), false);
+});
+
+test('a genuine backend comparison still runs off Windows', () => {
+	const vulkanChallenge = createCalibrationCandidates({
+		currentBackend: 'vulkan',
+		currentFramePolicy: 'uncapped',
+		platform: 'linux',
+		recommendedBackend: 'default'
+	});
+	const prepared = prepareCalibrationState(undefined, signature, vulkanChallenge, false, 'linux');
+	assert.equal(prepared.status, 'uncalibrated');
+
+	const running = prepareCalibrationState(requestCalibrationRerun(prepared), signature, vulkanChallenge, false, 'linux');
+	assert.equal(running.status, 'running');
+	assert.equal(running.completionReason, undefined);
+	assert.equal(running.plan.length, 2);
+});
+
+test('single-backend Windows plans keep running exactly as before', () => {
+	const cappedPair = createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'capped',
+		platform: 'win32',
+		recommendedBackend: 'default'
+	});
+	assert.deepEqual(cappedPair.map(candidate => candidate.id), ['default:capped', 'default:uncapped']);
+
+	const prepared = prepareCalibrationState(undefined, signature, cappedPair, false, 'win32');
+	assert.equal(prepared.status, 'uncalibrated');
+	assert.equal(prepareCalibrationState(requestCalibrationRerun(prepared), signature, cappedPair, false, 'win32').status, 'running');
+});
+
+test('the unmeasured completion reason survives the persistence round trip', () => {
+	const state = prepareCalibrationState(undefined, signature, createLinuxCandidates(), false, 'linux');
+	const parsed = parseCalibrationState(JSON.parse(JSON.stringify(state)));
+
+	assert.ok(parsed);
+	assert.equal(parsed.status, 'complete');
+	assert.equal(parsed.completionReason, CALIBRATION_NO_COMPARISON_REASON);
+	// A later same-signature prepare leaves the completed state untouched.
+	assert.equal(prepareCalibrationState(parsed, signature, createLinuxCandidates(), false, 'linux'), parsed);
 });

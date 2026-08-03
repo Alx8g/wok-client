@@ -697,3 +697,28 @@ test('the same slow trial without the artifact flag still lets the numeric winne
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'default:uncapped');
 });
+
+test('non-Intel Windows machines get a real challenger, not ANGLE-D3D11 against itself', () => {
+	// Chromium's `default` on Windows is already ANGLE-D3D11, so a d3d11 challenger would spend
+	// the whole calibration budget comparing the incumbent against itself.
+	const nvidiaCandidates = createCalibrationCandidates({
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'win32',
+		recommendedBackend: 'default'
+	});
+	assert.deepEqual(nvidiaCandidates.map(candidate => candidate.id), [
+		'default:uncapped',
+		'd3d11on12:uncapped'
+	]);
+
+	// A quarantined d3d11on12 leaves a single-candidate plan instead of a tautological pair.
+	const quarantinedCandidates = createCalibrationCandidates({
+		blockedBackends: ['d3d11on12'],
+		currentBackend: 'default',
+		currentFramePolicy: 'uncapped',
+		platform: 'win32',
+		recommendedBackend: 'default'
+	});
+	assert.deepEqual(quarantinedCandidates.map(candidate => candidate.id), ['default:uncapped']);
+});

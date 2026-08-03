@@ -271,8 +271,11 @@ export function createCalibrationCandidates({
 	addCandidate(currentBackend, currentFramePolicy);
 	addCandidate(recommendedBackend, 'uncapped');
 
+	// On Windows, Chromium's `default` IS ANGLE-D3D11, so a d3d11 challenger would benchmark the
+	// incumbent against itself and waste the whole run. D3D11on12 is the only distinct backend the
+	// automatic plan can offer, and the quarantine plus provisional-confirmation loop contain it.
 	const fallbackBackend: AppliedGraphicsBackend = platform === 'win32' && recommendedBackend === 'default'
-		? 'd3d11'
+		? 'd3d11on12'
 		: 'default';
 	addCandidate(fallbackBackend, 'uncapped');
 

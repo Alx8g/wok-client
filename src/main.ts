@@ -87,6 +87,7 @@ import {
 } from './calibration.ts';
 import { WORKLOAD_CONSTANTS, WORKLOAD_VERSION } from './calibration-workload.ts';
 import type { CompetitiveGameSettings } from './competitive-mode.ts';
+import { parseSettingsBaselineMarker, planSettingsBaseline, type SettingsBaselineMarker } from './settings-baseline.ts';
 import { containsObsoletePreferences, parseUserPreferencePatch } from './user-preferences.ts';
 import { resolveGameplayWindowGeometry } from './window-geometry.ts';
 import {
@@ -664,26 +665,31 @@ if (userPrefs.cssSwapper !== 'None') ensureCssStorage();
 
 // convert legacy settings files to newer formats
 let modifiedSettings = settingsNeedCanonicalRewrite;
-let writeSafetyBaseline = false;
 
 const indexedUserPrefs = userPrefs as UserPrefs;
 
-// Existing Crankshaft/WOK profiles may have Terms-sensitive features enabled by default.
-// Reset them once, then preserve any later explicit user choice.
-if (!existsSync(safetyBaselinePath)) {
-	const safeFeatureDefaults: Partial<UserPrefs> = {
-		competitionAutomation: false,
-		customFilters: false,
-		hideAds: 'off',
-		matchmaker: false,
-		resourceSwapper: false
-	};
-	for (const [key, value] of Object.entries(safeFeatureDefaults)) {
-		if (indexedUserPrefs[key] === value || value === undefined) continue;
-		indexedUserPrefs[key] = value;
-		modifiedSettings = true;
+// Existing profiles may carry defaults this project no longer ships (Terms-sensitive features
+// and the default-on safeFlags_gpuRasterizing era). Each baseline version resets them once and
+// then preserves any later explicit user choice; see src/settings-baseline.ts. A marker that
+// exists but cannot be parsed leaves everything untouched: never rewrite preferences on
+// ambiguous evidence.
+let settingsBaselineMarker: SettingsBaselineMarker | undefined;
+let settingsBaselineMarkerUnreadable = false;
+if (existsSync(safetyBaselinePath)) {
+	try {
+		settingsBaselineMarker = parseSettingsBaselineMarker(JSON.parse(readFileSync(safetyBaselinePath, 'utf-8')));
+		settingsBaselineMarkerUnreadable = settingsBaselineMarker === undefined;
+	} catch (error) {
+		console.error('Failed to read the settings baseline marker; leaving preferences unchanged', error);
+		settingsBaselineMarkerUnreadable = true;
 	}
-	writeSafetyBaseline = true;
+}
+const settingsBaselinePlan = settingsBaselineMarkerUnreadable
+	? { patch: {} }
+	: planSettingsBaseline(settingsBaselineMarker, indexedUserPrefs);
+for (const [key, value] of Object.entries(settingsBaselinePlan.patch)) {
+	indexedUserPrefs[key] = value;
+	modifiedSettings = true;
 }
 
 // initially, fullscreen was a true/false, now it's "windowed", "fullscreen" or "borderless"
@@ -705,11 +711,10 @@ if (userPrefs.immersiveSplashBackgroundColor === '#171717') {
 }
 // write the new settings format to the settings.json file right after the conversion
 if (modifiedSettings) writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
-if (writeSafetyBaseline) {
-	writeFileSync(safetyBaselinePath, JSON.stringify({ appliedAt: Date.now(), version: 1 }, null, 2), {
-		encoding: 'utf-8',
-		flag: 'wx'
-	});
+if (settingsBaselinePlan.marker) {
+	// May overwrite a version-1 marker during the upgrade; the preference patch above has
+	// already been applied and persisted, so the marker is safe to advance.
+	writeFileSync(safetyBaselinePath, JSON.stringify(settingsBaselinePlan.marker, null, 2), { encoding: 'utf-8' });
 }
 
 let mainWindow: BrowserWindow;

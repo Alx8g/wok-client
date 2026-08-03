@@ -5,6 +5,7 @@ import { ipcRenderer, webFrame } from 'electron';
 import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
 import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
 import { GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
+import { selectSplashFlavor } from './splash-flavor.ts';
 
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
@@ -506,10 +507,10 @@ function onGameUsable(listener: () => void): () => void {
 }
 
 /**
- * Krunker's populated #instructions UI is the earliest stable readiness signal used by the
- * original splash. Pointer lock is an independent definitive signal. Observe both on every
+ * Krunker's loading overlay clearing together with a non-spinner #instructions prompt marks the
+ * initial menu as usable. Pointer lock is an independent definitive signal. Observe both on every
  * launch so disabled or failed presentation code cannot prevent the adaptive intro profile from
- * learning, including when #instructions is created after the window load event.
+ * learning, including when the relevant elements are created after the window load event.
  */
 function observeGameUsable(): void {
 	if (gameUsableObservationStarted) return;
@@ -522,53 +523,78 @@ function observeGameUsable(): void {
 
 let splashMountAttempted = false;
 
-async function mountClientSplash(_userPrefs: UserPrefs): Promise<void> {
+async function mountClientSplash(
+	_userPrefs: UserPrefs,
+	version: string
+): Promise<void> {
 	if (splashMountAttempted) return;
 	splashMountAttempted = true;
-	// The title-card colour preference no longer applies: the loading screen carries the launch
-	// animation's final frame rather than a card that can be recoloured.
-	const { immersiveSplash, immersiveSplashBackgroundColor } = _userPrefs;
+	const {
+		immersiveSplash,
+		immersiveSplashBackgroundColor
+	} = _userPrefs;
 
-	const [splashCSS, splashFrame] = await Promise.all([
-		readFile(pathJoin($assets, 'splash.css'), { encoding: 'utf-8' }),
-		// The launch animation's own final frame. Inlined as a data URI because this stylesheet is
-		// injected into Krunker's document, where a relative url() would resolve against
-		// krunker.io and a file:// URL would be blocked.
-		readFile(pathJoin($assets, 'splash-frame.webp'))
+	const [splashCSS, logoSVGSource] = await Promise.all([
+		readFile(
+			pathJoin($assets, 'splash.css'),
+			{ encoding: 'utf-8' }
+		),
+		readFile(
+			pathJoin($assets, 'full_logo.svg'),
+			{ encoding: 'utf-8' }
+		)
 	]);
 	webFrame.insertCSS(splashCSS);
 
 	// Mount as soon as the parser creates #uiBase so the splash covers the page-load window.
 	const uiBaseElement = await waitForElementById('uiBase');
 	if (uiBaseElement === null) {
-		strippedConsole.error("Krunker didn't create #uiBase; skipping the client splash.");
+		strippedConsole.error(
+			"Krunker didn't create #uiBase; skipping the client splash."
+		);
 		return;
 	}
 
-	const splashBackground = createElement('div', { class: ['crankshaft-loading-background'] });
+	const splashBackground = createElement(
+		'div',
+		{ class: ['crankshaft-loading-background'] }
+	);
 	if (immersiveSplash) {
 		splashBackground.classList.add('immersive');
-		splashBackground.style.setProperty('background-color', `${immersiveSplashBackgroundColor}`);
+		splashBackground.style.setProperty(
+			'background-color',
+			`${immersiveSplashBackgroundColor}`
+		);
 	}
 
-	/*
-	 * The stage reproduces exactly the rectangle the launch animation occupies under
-	 * object-fit: cover, and paints that animation's own final frame into it. The video therefore
-	 * hands over to this screen without the lockup moving by a pixel - which matters because the
-	 * V8 lockup in the animation does not match assets/full_logo.svg (its mark is 1.40x the
-	 * wordmark cap height rather than 1.26x, with a much tighter gap), so redrawing it from the
-	 * SVG would land in a visibly different place.
-	 */
-	const stage = createElement('div', { class: 'wok-splash-stage' });
-	stage.style.setProperty('background-image', `url("data:image/webp;base64,${splashFrame.toString('base64')}")`);
-	splashBackground.appendChild(stage);
+	const loadingCard = createElement('div', {
+		class: 'wok-loading-card',
+		innerHTML: logoSVGSource
+	});
+	loadingCard.setAttribute('aria-label', 'WOK Client loading');
+	loadingCard.setAttribute('role', 'status');
+	loadingCard.appendChild(createElement('div', {
+		class: 'wok-loading-version',
+		text: `v${version}`
+	}));
+	loadingCard.appendChild(createElement('div', {
+		class: 'wok-loading-credit',
+		text: 'WOK Client • Based on Crankshaft'
+	}));
+	loadingCard.appendChild(createElement('div', {
+		class: 'wok-loading-flavor',
+		text: selectSplashFlavor()
+	}));
+	loadingCard.appendChild(createElement('div', {
+		class: 'wok-loading-indicator',
+		text: 'LOADING...'
+	}));
+	splashBackground.appendChild(loadingCard);
 
 	/*
 	 * Mounted on <body>, NOT inside #uiBase. Krunker applies its UI scale to #uiBase as a CSS
-	 * transform (measured: matrix(0.869, 0, 0, 0.869, 0, 0)), which rescaled this overlay to 86.9%
-	 * and shrank the lockup by 13% relative to the launch animation that hands over to it. The
-	 * element still waits for #uiBase to exist, because that is the earliest reliable signal that
-	 * the parser has reached Krunker's UI, but it must not inherit that transform.
+	 * transform, which would rescale and move the loading card. Waiting for #uiBase still gives us
+	 * an early, stable parser milestone without inheriting that transform.
 	 */
 	document.body.appendChild(splashBackground);
 
@@ -628,9 +654,7 @@ function injectKeyframeFix() {
  * payload is available and again on the injectClientCSS IPC message; every step is
  * idempotent per document and later calls reconcile preference changes (reload flow).
  */
-// _version is retained to keep the boot-payload and injectClientCSS IPC shapes unchanged; the
-// loading screen no longer prints a version string.
-async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
+async function applyClientVisuals(_userPrefs: UserPrefs, version: string, cssPath: string): Promise<void> {
 	applyClientHotkeys(_userPrefs);
 	observeGameUsable();
 
@@ -647,7 +671,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 	}
 
 	if (clientSplash && !splashMountAttempted) {
-		void mountClientSplash(_userPrefs).catch(error => {
+		void mountClientSplash(_userPrefs, version).catch(error => {
 			strippedConsole.error('Failed to mount the client splash screen', error);
 		});
 	}

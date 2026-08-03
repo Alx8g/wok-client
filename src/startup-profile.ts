@@ -12,9 +12,7 @@
  *
  * So the client measures how long its own launches actually take and picks the longest variant that
  * fits, allowing a small overshoot. Every variant is the same render trimmed from a different start
- * point, so all of them end on the same final frame, and the loading screen carries that frame too -
- * verified at a mean difference of 0.21%, which is VP9 edge ringing rather than any shift. Switching
- * variants is therefore invisible.
+ * point, so all of them end on the same WOK lockup before the branded loading card takes over.
  *
  * First launch has no history and deliberately gets the longest variant: a cold profile pays for
  * an empty HTTP cache, an empty shader cache and an empty V8 cache, and is the slowest launch a
@@ -24,18 +22,19 @@
 /** How many recent launches to keep. Enough to absorb one bad launch without chasing noise. */
 const SAMPLE_LIMIT = 7;
 
+/** Invalidates samples recorded by older, materially different readiness predicates. */
+const READINESS_SIGNAL_VERSION = 2;
+
 /**
  * How far an animation may run PAST the game becoming ready and still be chosen.
  *
  * Overshoot and undershoot are not symmetric costs, so the selector must not treat them as if they
- * are. Because the loading screen carries the animation's own final frame, an animation that runs
- * slightly long hands over invisibly - it costs a fraction of a second of waiting and nothing else.
- * Undershooting drops the user onto a still image for the remainder, which with only two variants
- * is a gap of seconds.
+ * are. A slightly long animation costs only a fraction of a second of waiting. Undershooting exposes
+ * the static loading card for longer, which with only two variants can create a gap of seconds.
  *
- * The readiness samples also understate reality: they come from Krunker's `#instructions` mutation,
- * measured firing 336-757 ms *before* the menu is actually stable. So a variant that appears to
- * overshoot by a few hundred milliseconds most likely does not overshoot at all.
+ * Readiness is observed in the renderer and persisted by the main process, so IPC scheduling and
+ * the final visual settle can still move the handoff by a few hundred milliseconds. The allowance
+ * avoids dropping to a much shorter animation because of that small boundary cost.
  */
 const OVERSHOOT_ALLOWANCE_MS = 600;
 
@@ -59,10 +58,9 @@ export interface IntroVariantTiming {
 }
 
 /*
- * Every variant is the same render, trimmed from the START - never a separate export. That matters
- * twice over: each one necessarily ends on the identical final frame (which the loading screen also
- * carries, so the handoff is invisible whichever is chosen), and there is only ever one piece of
- * artwork to keep current.
+ * Every variant is the same render, trimmed from the START - never a separate export. Each one
+ * therefore ends on the identical WOK lockup before handing over to the branded loading card, and
+ * there is only ever one animation source to keep current.
  *
  * The cut points are not arbitrary. The animation pulses rather than ramping monotonically, and is
  * measured fully transparent (mean alpha exactly 0) across frames 47-58 and 101-108. Cutting inside
@@ -83,12 +81,20 @@ export const INTRO_VARIANTS: Readonly<Record<Exclude<IntroVariant, 'none'>, Intr
 const VARIANTS_BY_LENGTH: readonly Exclude<IntroVariant, 'none'>[] = ['long', 'short'];
 
 export interface StartupProfile {
+	/**
+	 * Version of the DOM predicate that produced readyMs. Optional so selector callers can provide
+	 * synthetic profiles without persistence metadata.
+	 */
+	readonly readinessSignalVersion?: number;
 	/** Time from process start to the game being usable, most recent last. */
 	readonly readyMs: readonly number[];
 }
 
 export function createStartupProfile(): StartupProfile {
-	return { readyMs: [] };
+	return {
+		readinessSignalVersion: READINESS_SIGNAL_VERSION,
+		readyMs: []
+	};
 }
 
 /**
@@ -110,17 +116,30 @@ export function startupReadyMs(processUptimeSeconds: number): number | undefined
 /** Tolerates a hand-edited or partially written file rather than throwing during startup. */
 export function parseStartupProfile(value: unknown): StartupProfile {
 	if (!value || typeof value !== 'object' || Array.isArray(value)) return createStartupProfile();
-	const candidate = (value as Record<string, unknown>).readyMs;
+	const record = value as Record<string, unknown>;
+
+	// Version 1 treated Krunker's early loading spinner as usable. Those samples were commonly around
+	// 1.8 s even when the actual load took 8-10 s, so mixing them with corrected samples would suppress
+	// the intro for several more launches. Start fresh whenever the predicate version changes.
+	if (record.readinessSignalVersion !== READINESS_SIGNAL_VERSION) return createStartupProfile();
+
+	const candidate = record.readyMs;
 	if (!Array.isArray(candidate)) return createStartupProfile();
 	const readyMs = candidate
 		.filter((entry): entry is number => typeof entry === 'number' && Number.isFinite(entry) && entry > 0 && entry < 120_000)
 		.slice(-SAMPLE_LIMIT);
-	return { readyMs };
+	return {
+		readinessSignalVersion: READINESS_SIGNAL_VERSION,
+		readyMs
+	};
 }
 
 export function recordStartupSample(profile: StartupProfile, readyMs: number): StartupProfile {
 	if (!Number.isFinite(readyMs) || readyMs <= 0 || readyMs >= 120_000) return profile;
-	return { readyMs: [...profile.readyMs, Math.round(readyMs)].slice(-SAMPLE_LIMIT) };
+	return {
+		readinessSignalVersion: READINESS_SIGNAL_VERSION,
+		readyMs: [...profile.readyMs, Math.round(readyMs)].slice(-SAMPLE_LIMIT)
+	};
 }
 
 /**

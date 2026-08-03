@@ -36,8 +36,7 @@ test('a mid-speed machine takes the short animation', () => {
 
 test('this machine, measured at 7.1-7.8s, keeps the long animation', () => {
 	// Real launches from the cost A/B: 7066, 7277, 7298, 7812 (median 7288). The long variant
-	// overshoots readiness by ~330ms, which hands over invisibly because the loading screen carries
-	// the same final frame. Rejecting it would have meant ~3.1s of static screen instead.
+	// overshoots readiness by ~330ms. Rejecting it would expose the static loading card for ~3.1s.
 	assert.equal(selectIntroVariant({ readyMs: [7_066, 7_277, 7_298, 7_812] }), 'long');
 });
 
@@ -76,10 +75,35 @@ test('implausible samples are rejected rather than stored', () => {
 });
 
 test('a corrupt or hand-edited profile falls back instead of throwing', () => {
-	assert.deepEqual(parseStartupProfile(undefined), { readyMs: [] });
-	assert.deepEqual(parseStartupProfile('nonsense'), { readyMs: [] });
-	assert.deepEqual(parseStartupProfile({ readyMs: 'nope' }), { readyMs: [] });
-	assert.deepEqual(parseStartupProfile({ readyMs: [1_000, 'x', -2, 8_000] }), { readyMs: [1_000, 8_000] });
+	const freshProfile = createStartupProfile();
+	assert.deepEqual(parseStartupProfile(undefined), freshProfile);
+	assert.deepEqual(parseStartupProfile('nonsense'), freshProfile);
+	assert.deepEqual(
+		parseStartupProfile({
+			readinessSignalVersion: 2,
+			readyMs: 'nope'
+		}),
+		freshProfile
+	);
+	assert.deepEqual(
+		parseStartupProfile({
+			readinessSignalVersion: 2,
+			readyMs: [1_000, 'x', -2, 8_000]
+		}),
+		{
+			readinessSignalVersion: 2,
+			readyMs: [1_000, 8_000]
+		}
+	);
+});
+
+test('samples from the premature loading-spinner predicate are invalidated', () => {
+	const migrated = parseStartupProfile({
+		readyMs: [1_873, 1_737, 1_742, 1_823, 2_076, 1_912, 1_825]
+	});
+
+	assert.deepEqual(migrated, createStartupProfile());
+	assert.equal(selectIntroVariant(migrated), 'long');
 });
 
 test('every variant ends its audio after its picture, and is opaque before it ends', () => {
@@ -91,6 +115,6 @@ test('every variant ends its audio after its picture, and is opaque before it en
 
 test('a machine that just fits keeps the long animation rather than falling off a cliff', () => {
 	// Regression: a measured 8198 ms launch previously computed 8217 ms and downgraded by 19 ms,
-	// dropping the user from 7.2s of animation to 3.7s. The readiness signal already reads early.
+	// dropping the user from 7.2s of animation to 3.7s over a negligible handoff boundary.
 	assert.equal(selectIntroVariant({ readyMs: [8_198] }), 'long');
 });

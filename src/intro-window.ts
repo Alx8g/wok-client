@@ -11,9 +11,8 @@ import type { IntroVariantTiming } from './startup-profile.ts';
  *
  * Several length variants ship (see startup-profile.ts); the client picks one to match how long
  * its own launches actually take. Every variant is a VP9 WebM whose video and audio tracks end at
- * different times on purpose, and every variant ends on a pixel-identical final frame - verified by
- * diffing the 3.733 s and 7.167 s renders - which is also the frame the loading screen carries, so
- * switching variants never changes the handoff.
+ * different times on purpose, and every variant ends on the same WOK lockup before handing over to
+ * the branded loading card. Switching variants therefore never changes the final intro frame.
  *
  * Taking the short variant as the example:
  *

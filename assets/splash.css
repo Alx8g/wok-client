@@ -1,33 +1,21 @@
 /*
- * Client loading screen.
- *
- * This is the second half of the launch sequence. The intro window plays the identity animation
- * over the desktop and ends holding a static lockup on black; this screen then carries that exact
- * image while Krunker finishes initialising. The two must be pixel-identical at the handoff, so
- * the stage below reproduces the video's object-fit: cover geometry rather than laying the logo
- * out independently.
- *
- * Geometry measured from the animation's final frame (3840x2160 source):
- *   lockup bounding box  x 1512..2329, y 830..977  (818 x 148 px)
- *   horizontal centre    0.5003 of frame width  (centred)
- *   vertical centre      0.4185 of frame height
- *   lockup bottom edge   0.4528 of frame height
+ * Branded WOK loading screen shown after the launch animation while Krunker finishes initialising.
+ * It is mounted on <body>, outside #uiBase, so Krunker's UI-scale transform cannot shrink or move it.
  */
 
 html {
-	background: #000000 !important;
+	background: #0a0a0a !important;
 }
 
-/*
- * Fixed, not absolute: this element is mounted on <body> rather than inside #uiBase, so that
- * Krunker's UI-scale transform on #uiBase cannot rescale it away from the launch animation's
- * geometry. z-index has to clear Krunker's own UI layers.
- */
 .crankshaft-loading-background {
-	background-color: #000000;
+	align-items: center;
+	background-color: #0a0a0a;
+	display: flex;
 	height: 100%;
+	justify-content: center;
 	left: 0;
 	overflow: hidden;
+	pointer-events: auto;
 	position: fixed;
 	top: 0;
 	width: 100%;
@@ -35,23 +23,77 @@ html {
 }
 
 .crankshaft-loading-background.immersive {
-	background-color: #000000;
+	background-color: #0a0a0a;
 }
 
-/*
- * Exactly the rectangle a 16:9 source occupies under object-fit: cover - always 16:9, always
- * covering the viewport, always centred. Because the stage is the cover rect itself, the frame can
- * be painted at 100% 100% without distortion, and percentage-positioned children land on the same
- * spot in every window shape.
- */
-.wok-splash-stage {
-	background-position: center;
-	background-repeat: no-repeat;
-	background-size: 100% 100%;
-	height: max(100vh, calc(100vw * 9 / 16));
-	left: 50%;
+.wok-loading-card {
+	background-color: #0a0a0a;
+	border: 1px solid #fbc02d;
+	border-radius: 8px;
+	box-sizing: border-box;
+	color: #ffffff;
+	max-width: calc(100vw - 40px);
+	padding: 3rem 2rem;
+	position: relative;
+	width: min(760px, calc(100vw - 40px));
+}
+
+.wok-loading-card > svg {
+	display: block;
+	height: auto;
+	width: 100%;
+}
+
+.wok-loading-credit,
+.wok-loading-flavor,
+.wok-loading-indicator,
+.wok-loading-version {
+	display: block;
+	font-size: clamp(14px, 1.05vw, 20px);
+	line-height: 1.2;
 	position: absolute;
-	top: 50%;
-	transform: translate(-50%, -50%);
-	width: max(100vw, calc(100vh * 16 / 9));
+	white-space: nowrap;
+}
+
+.wok-loading-version {
+	bottom: 16px;
+	color: rgba(255, 255, 255, 0.72);
+	left: 16px;
+}
+
+.wok-loading-credit {
+	bottom: 16px;
+	color: rgba(255, 255, 255, 0.72);
+	right: 16px;
+	text-align: right;
+}
+
+.wok-loading-flavor {
+	color: rgba(255, 255, 255, 0.72);
+	left: 16px;
+	top: calc(100% + 10px);
+}
+
+.wok-loading-indicator {
+	bottom: calc(100% + 10px);
+	color: #fbc02d;
+	right: 16px;
+	text-align: right;
+}
+
+@media (max-width: 700px) {
+	.wok-loading-card {
+		padding: 2.5rem 1.25rem;
+	}
+
+	.wok-loading-credit,
+	.wok-loading-flavor,
+	.wok-loading-indicator,
+	.wok-loading-version {
+		font-size: 13px;
+	}
+
+	.wok-loading-credit {
+		display: none;
+	}
 }

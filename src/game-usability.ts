@@ -77,9 +77,15 @@ export interface GameUsabilityObservationOptions {
 }
 
 /**
- * Watches the whole document until Krunker's instructions UI has content or gameplay acquires
- * pointer lock. Observing the document, rather than an element captured at load, covers late
- * creation and replacement of #instructions.
+ * Watches the whole document until Krunker's initial loading overlay is gone and its instructions
+ * UI has changed from the loading spinner to an actionable prompt. Pointer lock remains an
+ * independent definitive signal.
+ *
+ * Krunker creates a populated #instructions element very early: during a live 2026-08-03 trace it
+ * contained .lds-ring at 1.2 s, while #loadingBg did not clear and "CLICK TO PLAY" did not appear
+ * until 10.3 s. Treating any child node as readiness therefore removed WOK's splash roughly nine
+ * seconds too early. Observing the document, rather than elements captured at load, also covers
+ * late creation and replacement.
  */
 export function observeGameUsability(
 	options: GameUsabilityObservationOptions
@@ -102,18 +108,37 @@ export function observeGameUsability(
 		cleanup();
 		options.onUsable();
 	};
-	const instructionsAreReady = (): boolean =>
-		options.document
-			.getElementById('instructions')
-			?.hasChildNodes() === true;
-	const evaluateInstructions = (): void => {
-		if (instructionsAreReady()) finish();
+	const initialLoadingIsComplete = (): boolean => {
+		const instructions =
+			options.document.getElementById('instructions');
+		const loadingBackground =
+			options.document.getElementById('loadingBg');
+
+		if (!instructions || !loadingBackground) return false;
+
+		const loadingBackgroundIsHidden =
+			loadingBackground.hidden
+			|| loadingBackground.style.display === 'none'
+			|| options.document.defaultView
+				?.getComputedStyle(loadingBackground)
+				.display === 'none';
+		const instructionsHavePrompt =
+			(instructions.textContent ?? '').trim().length > 0;
+		const instructionsHaveSpinner =
+			instructions.querySelector('.lds-ring') !== null;
+
+		return loadingBackgroundIsHidden
+			&& instructionsHavePrompt
+			&& !instructionsHaveSpinner;
+	};
+	const evaluateReadiness = (): void => {
+		if (initialLoadingIsComplete()) finish();
 	};
 	const onPointerLockChange = (): void => {
 		if (options.document.pointerLockElement) finish();
 	};
 	const observer = createMutationObserver(
-		evaluateInstructions
+		evaluateReadiness
 	);
 
 	options.document.addEventListener(
@@ -121,10 +146,13 @@ export function observeGameUsability(
 		onPointerLockChange
 	);
 	observer.observe(options.document, {
+		attributeFilter: ['class', 'hidden', 'style'],
+		attributes: true,
+		characterData: true,
 		childList: true,
 		subtree: true
 	});
-	evaluateInstructions();
+	evaluateReadiness();
 
 	return () => {
 		if (finished) return;

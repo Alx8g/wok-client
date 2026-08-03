@@ -9,6 +9,7 @@ import { extractFile, listPackage } from '@electron/asar';
 
 const REQUIRED_ASSETS = new Set([
 	'assets/blockFilters.txt',
+	'assets/full_logo.svg',
 	'assets/hideAds.css',
 	'assets/intro-long-1080.webm',
 	'assets/intro-long-1440.webm',

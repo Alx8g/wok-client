@@ -419,6 +419,13 @@ test('trial page embeds the workload and completion-honest measurement modules',
 	assert.match(page, /const createWorkloadSpin = /);
 	assert.match(page, /const runBenchmarkTrial = /);
 	assert.match(page, /"jsSpinIterations":2560000/);
+	// v2 constants travel with the page: the submission lane inside WORKLOAD_SPEC and the
+	// depth-6 pacing constants through the embedded-constant block.
+	assert.match(page, /"submissionDraws":700/);
+	assert.match(page, /"streamChunksPerFrame":16/);
+	assert.match(page, /const BENCHMARK_FENCE_QUEUE_DEPTH = 6;/);
+	assert.match(page, /const BENCHMARK_FENCE_RING_SIZE = 7;/);
+	assert.match(page, /bufferSubData/);
 	assert.match(page, /EXT_disjoint_timer_query_webgl2/);
 	assert.match(page, /fenceSync/);
 	assert.match(page, /"desynchronized":false/);

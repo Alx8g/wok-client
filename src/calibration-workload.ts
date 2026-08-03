@@ -68,8 +68,9 @@ export interface CalibrationWorkloadConstants {
 // bufferSubData chunks per frame (64 KiB) stream vertex data the lane draws actually consume,
 // exercising the rename/versioning path. Sprites cover a few pixels each, so the lane's GPU cost
 // is negligible by construction and its evidence lands in frame intervals and cpuSubmitP50/P95.
-// Reference-machine acceptance evidence for this freeze (v2 must rank d3d11on12:uncapped above
-// default:uncapped, matching real gameplay): .working/simulator-v2-acceptance/results.md.
+// Reference-machine acceptance for this freeze (v2 must rank d3d11on12:uncapped above
+// default:uncapped, matching real gameplay): .working/simulator-v2-acceptance/ — RUN.md is the
+// procedure, results.md the recorded evidence once the run has executed on an idle GPU.
 export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 	atlasTextureSize: 1_024,
 	heightfieldSize: 64,

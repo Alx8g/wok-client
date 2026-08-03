@@ -29,7 +29,6 @@ export function computeCommandLineSwitches(
 			{ name: 'disable-backgrounding-occluded-windows' }
 		);
 	}
-	if (userPrefs.experimentalFlags_increaseLimits) switches.push({ name: 'renderer-process-limit', value: '100' });
 	if (graphicsBackend !== 'default') {
 		switches.push({ name: 'use-angle', value: graphicsBackend });
 		if (graphicsBackend === 'vulkan') switches.push({ name: 'enable-features', value: 'Vulkan' });
@@ -40,15 +39,17 @@ export function computeCommandLineSwitches(
 		// the largest single frame-rate lever the client controls.
 		switches.push({ name: 'force-high-performance-gpu' });
 	}
-	if (userPrefs.experimentalFlags_experimental) {
-		if (platform === 'linux') switches.push({ name: 'enable-native-gpu-memory-buffers' });
-		switches.push(
-			{ name: 'disable-best-effort-tasks' },
-			{ name: 'raise-timer-frequency' }
-		);
+	if (userPrefs.experimentalFlags_experimental && platform === 'linux') {
+		// The only remaining experiment. The former companions were removed as verified placebo
+		// or mislabeled: renderer-process-limit raises a ceiling a one-origin app never reaches,
+		// disable-best-effort-tasks defers Chromium housekeeping until shutdown rather than
+		// reducing hiccups, and raise-timer-frequency only touches the browser process.
+		switches.push({ name: 'enable-native-gpu-memory-buffers' });
 	}
 	if (userPrefs.safeFlags_gpuRasterizing) {
-		// Force the normal hardware path without bypassing Intel/AMD/NVIDIA driver safety workarounds.
+		// Modern Chromium enables GPU rasterization by default everywhere this app runs; the only
+		// remaining effect of the switch is forcing it past the driver blocklist, so it is off by
+		// default and framed as an override, not a performance feature.
 		switches.push({ name: 'enable-gpu-rasterization' });
 	}
 

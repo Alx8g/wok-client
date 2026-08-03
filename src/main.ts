@@ -320,9 +320,9 @@ const settingsSkeleton = {
 	overrideURL: undefined as string | undefined,
 	alwaysWaitForDevTools: false,
 	safeFlags_disableBackgrounding: true,
-	safeFlags_gpuRasterizing: true,
+	// Chromium already GPU-rasterizes by default; true would only force past the driver blocklist.
+	safeFlags_gpuRasterizing: false,
 	safeFlags_highPerformanceGpu: true,
-	experimentalFlags_increaseLimits: false,
 	experimentalFlags_experimental: false,
 	matchmaker: false,
 	competitionAutomation: false,
@@ -1742,7 +1742,11 @@ app.on('ready', async () => {
 			// the compiled preload beside it; running from src/ loads the raw TypeScript preload.
 			preload: pathJoin(import.meta.dirname, import.meta.url.endsWith('.mjs') ? 'preload.mjs' : 'preload.ts'),
 			spellcheck: false,
-			backgroundThrottling: !userPrefs.safeFlags_disableBackgrounding,
+			// Always false for the game window: the always-on-top intro fully occludes it during
+			// Krunker's heaviest load, and Windows occlusion tracking would background-throttle
+			// that load. The safeFlags_disableBackgrounding pref governs only the tab-away
+			// Chromium switches, not launch-time renderer priority.
+			backgroundThrottling: false,
 			nodeIntegration: false,
 			// not ideal, but preload does a lot of interaction w/ the page
 			// turning this on will also likely require transpiling the preload script to js

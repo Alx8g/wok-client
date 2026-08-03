@@ -12,7 +12,6 @@ const PERFORMANCE_PREF_KEYS = [
 	'safeFlags_disableBackgrounding',
 	'safeFlags_gpuRasterizing',
 	'safeFlags_highPerformanceGpu',
-	'experimentalFlags_increaseLimits',
 	'experimentalFlags_experimental'
 ] as const;
 
@@ -22,13 +21,10 @@ const KNOWN_SWITCH_NAMES = new Set([
 	'disable-background-timer-throttling',
 	'disable-renderer-backgrounding',
 	'disable-backgrounding-occluded-windows',
-	'renderer-process-limit',
 	'use-angle',
 	'enable-features',
 	'force-high-performance-gpu',
 	'enable-native-gpu-memory-buffers',
-	'disable-best-effort-tasks',
-	'raise-timer-frequency',
 	'enable-gpu-rasterization',
 	'disable-frame-rate-limit',
 	'disable-gpu-vsync'
@@ -64,15 +60,10 @@ function expectedSwitchSet({ backend, framePolicy, platform, prefs }: MatrixCase
 		expected.set('disable-renderer-backgrounding', undefined);
 		expected.set('disable-backgrounding-occluded-windows', undefined);
 	}
-	if (prefs.experimentalFlags_increaseLimits) expected.set('renderer-process-limit', '100');
 	if (backend !== 'default') expected.set('use-angle', backend);
 	if (backend === 'vulkan') expected.set('enable-features', 'Vulkan');
 	if (prefs.safeFlags_highPerformanceGpu) expected.set('force-high-performance-gpu', undefined);
-	if (prefs.experimentalFlags_experimental) {
-		if (platform === 'linux') expected.set('enable-native-gpu-memory-buffers', undefined);
-		expected.set('disable-best-effort-tasks', undefined);
-		expected.set('raise-timer-frequency', undefined);
-	}
+	if (prefs.experimentalFlags_experimental && platform === 'linux') expected.set('enable-native-gpu-memory-buffers', undefined);
 	if (prefs.safeFlags_gpuRasterizing) expected.set('enable-gpu-rasterization', undefined);
 	const uncapped = framePolicy === undefined ? prefs.fpsUncap === true : framePolicy === 'uncapped';
 	if (uncapped) {
@@ -118,9 +109,8 @@ test('shipped defaults on Windows produce the expected switch list in a stable o
 	const shippedDefaults: UserPrefs = {
 		fpsUncap: true,
 		safeFlags_disableBackgrounding: true,
-		safeFlags_gpuRasterizing: true,
+		safeFlags_gpuRasterizing: false,
 		safeFlags_highPerformanceGpu: true,
-		experimentalFlags_increaseLimits: false,
 		experimentalFlags_experimental: false
 	};
 
@@ -131,7 +121,6 @@ test('shipped defaults on Windows produce the expected switch list in a stable o
 		{ name: 'disable-backgrounding-occluded-windows' },
 		{ name: 'use-angle', value: 'd3d11on12' },
 		{ name: 'force-high-performance-gpu' },
-		{ name: 'enable-gpu-rasterization' },
 		{ name: 'disable-frame-rate-limit' },
 		{ name: 'disable-gpu-vsync' }
 	]);

@@ -27,6 +27,15 @@ import {
 	runBenchmarkTrial
 } from './calibration-benchmark.ts';
 
+/**
+ * 'capped' is not a frame-rate cap: it is simply the uncap switches absent, i.e. compositor
+ * vsync left on. Krunker has no in-browser frame-cap setting, so the honest user-facing label
+ * is display synchronization, not a cap.
+ */
+function framePolicyLabel(framePolicy: CalibrationCandidate['framePolicy']): string {
+	return framePolicy === 'capped' ? 'display-synced' : framePolicy;
+}
+
 function escapeHtml(value: string): string {
 	return value
 		.replaceAll('&', '&amp;')
@@ -205,7 +214,7 @@ export function buildCalibrationTrialPage(
 					<span class="pill">TEST ${step} / ${total}</span>
 					${isRetry ? '<span class="pill retry">RETRY</span>' : ''}
 					<span class="pill">${escapeHtml(candidate.backend.toUpperCase())}</span>
-					<span class="pill">${escapeHtml(candidate.framePolicy.toUpperCase())}</span>
+					<span class="pill">${escapeHtml(framePolicyLabel(candidate.framePolicy).toUpperCase())}</span>
 				</div>
 				<div class="progress-track"><div class="progress-fill" id="progress"></div></div>
 				<div class="status"><span id="phase">Preparing renderer</span><span id="live">Collecting samples</span></div>
@@ -435,7 +444,7 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 		? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>`
 		: '';
 	return `<div class="result${recommended ? ' recommended' : ''}">
-			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(candidate.framePolicy)}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
+			<div class="name">${escapeHtml(candidate.backend)} · ${escapeHtml(framePolicyLabel(candidate.framePolicy))}${recommended ? '<span class="label">Recommended</span>' : ''}${group.trials.length > 1 ? `<span class="label">${group.trials.length} trials, median shown</span>` : ''}</div>
 			<div class="metric"><span class="label">Average</span>${metrics.success ? `${metrics.averageFps.toFixed(1)} FPS` : 'Failed'}</div>
 			<div class="metric"><span class="label">1% low</span>${metrics.success ? `${metrics.onePercentLowFps.toFixed(1)} FPS` : 'N/A'}</div>
 			<div class="metric"><span class="label">p95 frame</span>${metrics.success ? `${metrics.p95FrameTimeMs.toFixed(2)} ms` : 'N/A'}</div>
@@ -463,7 +472,7 @@ export function buildCalibrationResultPage(
 	const summary = recommended
 		? retainedKnownGood
 			? `The new evidence did not meaningfully beat the existing known-good <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it remains recommended.`
-			: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(recommended.candidate.framePolicy)}</strong> frame delivery.`
+			: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(framePolicyLabel(recommended.candidate.framePolicy))}</strong> frame delivery.`
 		: 'Calibration could not collect enough valid frame samples. WOK Client will keep the current safe settings.';
 
 	return `<!doctype html>

@@ -102,32 +102,18 @@ test('stages a short uncapped-first Windows candidate plan', () => {
 	assert.equal(candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 });
 
-test('stages a capped recovery only after clean severe uncapped instability', () => {
+test('never stages a capped (vsync) recovery candidate, even after severe uncapped instability', () => {
 	const candidates = createWindowsCandidates();
 	let healthyState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	healthyState = recordCalibrationResult(healthyState, candidates[0], stableMetrics);
 	assert.equal(healthyState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 
-	let contaminatedState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
-	contaminatedState = recordCalibrationResult(contaminatedState, candidates[0], unstableMetrics({
-		lowConfidenceReasons: ['window-blurred']
-	}));
-	assert.equal(contaminatedState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
-
+	// A competitive preset never auto-applies vsync on synthetic evidence: instability that is
+	// real gets caught by the real-gameplay validation loop, not traded for hidden latency.
 	let unstableState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	unstableState = recordCalibrationResult(unstableState, candidates[0], unstableMetrics());
-	assert.deepEqual(unstableState.candidates.map(candidate => candidate.id), [
-		'd3d11on12:uncapped',
-		'd3d11on12:capped',
-		'default:uncapped'
-	]);
-	// Recovery slots are appended as their own late stage; the screen stage finishes first (design §3.2).
-	assert.deepEqual(unstableState.plan.map(slot => `${slot.candidateId}:${slot.stage}`), [
-		'd3d11on12:uncapped:screen',
-		'default:uncapped:screen',
-		'd3d11on12:capped:recovery',
-		'd3d11on12:capped:recovery'
-	]);
+	assert.equal(unstableState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+	assert.equal(unstableState.plan.some(slot => slot.stage === 'recovery'), false);
 	assert.equal(getPendingCalibrationCandidate(unstableState)?.id, 'default:uncapped');
 });
 
@@ -241,51 +227,36 @@ test('does not accept an explicit candidate whose renderer reports another backe
 	assert.equal(state.recommendedSelection?.candidate.backend, 'default');
 });
 
-test('does not trade a healthy uncapped profile for synchronized frame pacing', () => {
+test('recommends only uncapped profiles from the automatic path, even under instability', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
-	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
-	assert.ok(cappedCandidate);
-
-	state = recordCalibrationResult(state, candidates[0], {
-		...stableMetrics,
-		averageFps: 144,
-		eventLoopP95Ms: 9.4,
-		onePercentLowFps: 77,
-		p95FrameTimeMs: 9.9
-	});
-	state = recordCalibrationResult(state, cappedCandidate, {
-		...stableMetrics,
-		averageFps: 120,
-		eventLoopP95Ms: 2.5,
-		onePercentLowFps: 113,
-		p95FrameTimeMs: 8.5
-	});
+	state = recordCalibrationResult(state, candidates[1], unstableMetrics({
+		averageFps: 130,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	}));
 	state = finalizeCalibration(state);
 
 	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'uncapped');
-	assert.equal(state.recommendedSelection?.candidate.backend, 'd3d11on12');
+	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 });
 
-test('uses a cap only as meaningful recovery evidence for severely unstable uncapped rendering', () => {
+test('legacy persisted capped evidence is only used when no uncapped evidence exists', () => {
+	// A resumed pre-removal plan can still hold capped results; they may win only by default.
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
-	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
-	const cappedCandidate = state.candidates.find(candidate => candidate.framePolicy === 'capped');
-	assert.ok(cappedCandidate);
-
-	state = recordCalibrationResult(state, cappedCandidate, {
+	const legacyCapped = { backend: 'd3d11on12' as const, framePolicy: 'capped' as const, id: 'd3d11on12:capped' };
+	state = { ...state, candidates: [...state.candidates, legacyCapped] };
+	state = recordCalibrationResult(state, legacyCapped, {
 		...stableMetrics,
 		averageFps: 132,
-		longFrameRatio: 0.01,
 		onePercentLowFps: 110,
-		p95FrameTimeMs: 8,
-		worstFrameTimeMs: 11
+		p95FrameTimeMs: 8
 	});
-	state = finalizeCalibration(state);
+	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'capped');
 
-	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'capped');
+	state = recordCalibrationResult(state, candidates[0], stableMetrics);
+	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'uncapped');
 });
 
 test('v3 signatures stamp the current benchmark and workload versions', () => {
@@ -761,11 +732,10 @@ test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped 
 		stallRatio: 0.01,
 		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
 	});
-	// The genuine (non-artifact) instability on default staged a capped recovery for default.
+	// Even genuine instability no longer stages a capped (vsync) candidate.
 	assert.deepEqual(state.candidates.map(candidate => candidate.id), [
 		'd3d11on12:uncapped',
-		'default:uncapped',
-		'default:capped'
+		'default:uncapped'
 	]);
 
 	state = recordCalibrationResult(state, candidates[0], {
@@ -779,27 +749,6 @@ test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped 
 		p95FrameTimeMs: 22.9,
 		stallRatio: 0.75
 	});
-	const cappedCandidate = state.candidates.find(candidate => candidate.id === 'default:capped');
-	assert.ok(cappedCandidate);
-	state = recordCalibrationResult(state, cappedCandidate, {
-		...stableMetrics,
-		averageFps: 106.87,
-		longFrameRatio: 0,
-		onePercentLowFps: 22.86,
-		p95FrameTimeMs: 16.6,
-		stallRatio: 0.05,
-		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
-	});
-	state = recordCalibrationResult(state, cappedCandidate, {
-		...stableMetrics,
-		averageFps: 112.19,
-		longFrameRatio: 0,
-		onePercentLowFps: 26.72,
-		p95FrameTimeMs: 8.7,
-		stallRatio: 0.02,
-		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
-	});
-
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
 });

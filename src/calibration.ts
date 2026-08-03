@@ -625,43 +625,8 @@ function selectPreferredResult(results: CalibrationResult[]): CalibrationResult 
 	return results.reduce<CalibrationResult | undefined>((preferred, result) => choosePreferredResult(preferred, result), undefined);
 }
 
-function uncappedMetricsShowSevereInstability(metrics: CalibrationMetrics): boolean {
-	const lowRatio = metrics.averageFps > 0 ? metrics.onePercentLowFps / metrics.averageFps : 0;
-	return metrics.longFrameRatio > 0.03 || lowRatio < 0.4 || metrics.p95FrameTimeMs > 25;
-}
-
 function maxLaunchGroup(plan: CalibrationTrialSlot[]): number {
 	return plan.reduce((maximum, slot) => Math.max(maximum, slot.launchGroup), 0);
-}
-
-function stageCappedRecoveryCandidate(
-	state: CalibrationState,
-	candidate: CalibrationCandidate,
-	metrics: CalibrationMetrics,
-	backendVerification: EffectiveBackendVerification,
-	failureReason?: string
-): CalibrationCandidate[] {
-	if (
-		candidate.framePolicy !== 'uncapped'
-		|| failureReason
-		|| !metrics.success
-		|| metrics.sampleCount < CALIBRATION_MIN_SAMPLES
-		|| metricsLowConfidenceReasons(metrics).length > 0
-		|| backendVerification.status === 'mismatch'
-		|| !uncappedMetricsShowSevereInstability(metrics)
-		// Fence-pacing artifacts produce synthetic "instability" that capping cannot fix.
-		|| metricsShowFencePacingArtifact(metrics)
-		|| state.candidates.some(existing => existing.framePolicy === 'capped')
-	) return state.candidates;
-
-	const recoveryCandidate = makeCandidate(candidate.backend, 'capped');
-	const candidateIndex = state.candidates.findIndex(existing => existing.id === candidate.id);
-	const insertionIndex = candidateIndex < 0 ? state.candidates.length : candidateIndex + 1;
-	return [
-		...state.candidates.slice(0, insertionIndex),
-		recoveryCandidate,
-		...state.candidates.slice(insertionIndex)
-	];
 }
 
 function isValidCalibrationResult(result: CalibrationResult): boolean {
@@ -751,23 +716,13 @@ export function recordCalibrationResult(
 		slotIndex
 	};
 	const results = [...state.results, result];
-	const candidates = stageCappedRecoveryCandidate(state, candidate, normalizedMetrics, backendVerification, result.failureReason);
-	if (candidates !== state.candidates) {
-		// Recovery slots are appended, never inserted, so persisted slot indices stay stable
-		// (design §3.2: recovery is its own stage, one launch, up to 2 trials).
-		const recoveryCandidate = candidates.find(entry => entry.framePolicy === 'capped');
-		const group = maxLaunchGroup(plan) + 1;
-		plan = [
-			...plan,
-			{ candidateId: recoveryCandidate.id, launchGroup: group, stage: 'recovery' },
-			{ candidateId: recoveryCandidate.id, launchGroup: group, stage: 'recovery' }
-		];
-	}
+	// Capped (vsync) recovery staging was removed: a competitive preset never auto-applies a
+	// display-synchronized profile on synthetic evidence, because the benchmark's score cannot
+	// see the latency cost. Manual vsync remains available by turning fpsUncap off.
 	plan = appendRepeatStageIfNeeded(plan, results);
 
 	return {
 		...state,
-		candidates,
 		plan,
 		results,
 		updatedAt: Date.now()
@@ -1067,24 +1022,10 @@ export function finalizeCalibration(state: CalibrationState): CalibrationState {
 	const bestUncapped = selectBestSummary(state, state.candidates.filter(candidate => candidate.framePolicy === 'uncapped'))?.representative;
 	const bestCapped = selectBestSummary(state, state.candidates.filter(candidate => candidate.framePolicy === 'capped'))?.representative;
 
+	// A capped (vsync) result can only be recommended when no uncapped evidence exists at all —
+	// a legacy resumed plan. The capped "rescue" swap was removed: its latency cost is invisible
+	// to the score, and it twice demoted this project's reference machine on synthetic evidence.
 	let recommendedSelection = bestUncapped ?? bestCapped;
-	// The capped rescue is a numeric comparison too: a fence-pacing artifact on the winning
-	// uncapped profile fakes both the "instability" and the low throughput that would let a
-	// capped profile "rescue" it, so an unmeasurable uncapped winner can never be rescued on
-	// numbers (field evidence: artifact-retained d3d11on12 was rescue-swapped to default:capped).
-	if (bestUncapped && bestCapped && !metricsShowFencePacingArtifact(bestUncapped.metrics)) {
-		const uncappedIsUnstable = uncappedMetricsShowSevereInstability(bestUncapped.metrics);
-		const cappedFixesInstability = bestCapped.metrics.longFrameRatio <= bestUncapped.metrics.longFrameRatio * 0.5
-			&& bestCapped.metrics.onePercentLowFps >= bestUncapped.metrics.onePercentLowFps * 1.25;
-		const cappedPreservesThroughput = bestCapped.metrics.averageFps >= bestUncapped.metrics.averageFps * 0.9;
-
-		if (
-			uncappedIsUnstable
-			&& cappedFixesInstability
-			&& cappedPreservesThroughput
-			&& isMeaningfulCalibrationScoreWin(bestCapped.score, bestUncapped.score)
-		) recommendedSelection = bestCapped;
-	}
 
 	const activeSelection = state.activeSelection;
 	if (

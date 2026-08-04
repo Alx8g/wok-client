@@ -2,151 +2,353 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
 	applyCustomIdentity,
-	CUSTOM_IDENTITY_ELEMENT_ID,
-	CUSTOM_IDENTITY_STYLE_ID,
+	type CustomIdentityEnvironment,
 	getCustomIdentity,
-	getCustomIdentityLabel,
-	mountCustomIdentityNameplate,
-	stopCustomIdentityDisplay
+	getCustomIdentityOverlayLines,
+	getRealIdentityForDisplay,
+	startRealIdentityDiscovery,
+	stopCustomIdentityDisplay,
+	withRealIdentity
 } from '../src/custom-identity-display.ts';
+import type { IdentityMutationRecord, IdentityRewriteNode } from '../src/identity-rewrite.ts';
 
-interface FakeElement {
-	attributes: Map<string, string>;
-	children: FakeElement[];
-	className: string;
-	id: string;
-	parent: FakeElement | undefined;
-	tagName: string;
-	textContent: string;
-	appendChild(child: FakeElement): FakeElement;
-	remove(): void;
-	setAttribute(name: string, value: string): void;
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
+
+interface FakeNode extends IdentityRewriteNode {
+	childNodes: FakeNode[];
 }
 
-function createFakeElement(tagName: string): FakeElement {
-	const element: FakeElement = {
-		attributes: new Map(),
-		children: [],
-		className: '',
-		id: '',
-		parent: undefined,
-		tagName,
-		textContent: '',
-		appendChild(child) {
-			child.parent = element;
-			element.children.push(child);
-			return child;
+function text(value: string): FakeNode {
+	return { childNodes: [], data: value, isConnected: true, nodeType: TEXT_NODE };
+}
+
+function element(tagName: string, children: FakeNode[] = []): FakeNode {
+	return { childNodes: children, hasAttribute: () => false, isConnected: true, nodeType: ELEMENT_NODE, tagName };
+}
+
+function allText(node: FakeNode): string[] {
+	if (node.nodeType === TEXT_NODE) return [node.data ?? ''];
+	return node.childNodes.flatMap(allText);
+}
+
+function createEnvironment(root: FakeNode) {
+	const frames: (() => void)[] = [];
+	const timers = new Map<number, () => void>();
+	let timerSequence = 0;
+	let observerCount = 0;
+	let disconnectCount = 0;
+	let gameActivity: (() => unknown) | undefined;
+
+	const environment: CustomIdentityEnvironment = {
+		clearTimer: handle => { timers.delete(handle); },
+		createObserver: (_callback: (records: readonly IdentityMutationRecord[]) => void) => {
+			observerCount += 1;
+			return {
+				disconnect: () => { disconnectCount += 1; },
+				observe: () => {}
+			};
 		},
-		remove() {
-			const parent = element.parent;
-			if (!parent) return;
-			parent.children = parent.children.filter(child => child !== element);
-			element.parent = undefined;
+		getGameActivity: () => gameActivity,
+		root: () => root,
+		schedule: callback => {
+			frames.push(callback);
+			return frames.length;
 		},
-		setAttribute(name, value) {
-			element.attributes.set(name, value);
-		}
+		setTimer: callback => {
+			timerSequence += 1;
+			timers.set(timerSequence, callback);
+			return timerSequence;
+		},
+		unschedule: () => {}
 	};
-	return element;
-}
 
-function createFakeDocument(options: { body?: boolean } = {}) {
-	const body = options.body === false ? undefined : createFakeElement('body');
-	const head = createFakeElement('head');
 	return {
-		document: { body, createElement: createFakeElement, head } as unknown as Document,
-		body,
-		head
+		get disconnectCount() { return disconnectCount; },
+		environment,
+		get observerCount() { return observerCount; },
+		get pendingTimers() { return timers.size; },
+		runFrames(count = 6) {
+			for (let index = 0; index < count; index += 1) {
+				const frame = frames.shift();
+				if (!frame) return;
+				frame();
+			}
+		},
+		runTimers(count = 1) {
+			for (let index = 0; index < count; index += 1) {
+				const next = [...timers.entries()][0];
+				if (!next) return;
+				timers.delete(next[0]);
+				next[1]();
+			}
+		},
+		setGameActivity(activity: (() => unknown) | undefined) { gameActivity = activity; }
 	};
 }
 
-function findById(root: FakeElement | undefined, id: string): FakeElement | undefined {
-	if (!root) return undefined;
-	for (const child of root.children) {
-		if (child.id === id) return child;
-		const found = findById(child, id);
-		if (found) return found;
+test('discovery reads the name out of Krunker game activity and then stops', () => {
+	const names: string[] = [];
+	const timers: (() => void)[] = [];
+	let activity: unknown;
+	const stop = startRealIdentityDiscovery({
+		clearTimer: () => {},
+		getGameActivity: () => activity,
+		onName: name => { names.push(name); },
+		setTimer: callback => {
+			timers.push(callback);
+			return timers.length;
+		}
+	});
+
+	// Krunker has not defined it yet, then defines it before it knows the player.
+	assert.deepEqual(names, []);
+	activity = () => ({ id: 'FRA:h83cx', map: 'Subzero' });
+	timers.shift()?.();
+	assert.deepEqual(names, []);
+
+	activity = () => ({ id: 'FRA:h83cx', map: 'Subzero', user: 'Rocketeer' });
+	timers.shift()?.();
+	assert.deepEqual(names, ['Rocketeer']);
+	assert.equal(timers.length, 0, 'polling ends the moment the name is known');
+	stop();
+});
+
+test('discovery survives a hostile activity object and gives up eventually', () => {
+	const names: string[] = [];
+	const timers: (() => void)[] = [];
+	startRealIdentityDiscovery({
+		clearTimer: () => {},
+		getGameActivity: () => () => { throw new Error('krunker exploded'); },
+		maxAttempts: 3,
+		onName: name => { names.push(name); },
+		setTimer: callback => {
+			timers.push(callback);
+			return timers.length;
+		}
+	});
+	timers.shift()?.();
+	timers.shift()?.();
+	assert.deepEqual(names, []);
+	assert.equal(timers.length, 0, 'it stops rather than polling a broken game forever');
+
+	// Values that are not a usable account name are refused.
+	for (const user of ['', '   ', 'not a name', 42, null, 'x'.repeat(64)]) {
+		const found: string[] = [];
+		startRealIdentityDiscovery({
+			clearTimer: () => {},
+			getGameActivity: () => () => ({ user }),
+			maxAttempts: 1,
+			onName: name => { found.push(name); },
+			setTimer: () => 0
+		});
+		assert.deepEqual(found, [], `refused ${JSON.stringify(user)}`);
 	}
-	return undefined;
-}
-
-test('mounts a client-owned nameplate and nothing else', () => {
-	const { document, body, head } = createFakeDocument();
-	const nameplate = mountCustomIdentityNameplate({ clan: 'WOK', name: 'Rocketeer' }, { document });
-	assert.ok(nameplate);
-
-	const container = findById(body, CUSTOM_IDENTITY_ELEMENT_ID);
-	assert.ok(container, 'the nameplate is mounted on <body>, beside the splash and the overlay');
-	assert.equal(container.children[0].textContent, '[WOK] Rocketeer');
-	assert.equal(container.attributes.get('data-wok-identity'), 'set');
-	// The badge says out loud that this is local, so nobody reads it as an account rename.
-	assert.equal(container.children[1].textContent, 'Local display only');
-	assert.match(container.attributes.get('aria-label') ?? '', /local display only/u);
-
-	const style = findById(head, CUSTOM_IDENTITY_STYLE_ID);
-	assert.ok(style, 'menu-only visibility is a stylesheet rule, not an observer');
-	assert.match(style.textContent, /#uiBase\.onMenu/u);
-	assert.equal(body?.children.length, 1);
 });
 
-test('updates in place and clears itself when both settings are emptied', () => {
-	const { document, body } = createFakeDocument();
-	const nameplate = mountCustomIdentityNameplate({ clan: '', name: 'Rocketeer' }, { document });
-	assert.ok(nameplate);
-	const container = findById(body, CUSTOM_IDENTITY_ELEMENT_ID);
-	assert.ok(container);
-	assert.equal(container.children[0].textContent, 'Rocketeer');
-
-	nameplate.update({ clan: 'WOK', name: '' });
-	assert.equal(container.children[0].textContent, '[WOK]');
-	assert.equal(container.attributes.get('data-wok-identity'), 'set');
-
-	nameplate.update({ clan: '', name: '' });
-	assert.equal(container.children[0].textContent, '');
-	assert.equal(container.attributes.get('data-wok-identity'), 'unset');
-	// The element stays mounted but hidden by the stylesheet; no relayout churn either way.
-	assert.equal(body?.children.length, 1);
+test('a cancelled discovery stops polling', () => {
+	let cleared = 0;
+	const stop = startRealIdentityDiscovery({
+		clearTimer: () => { cleared += 1; },
+		getGameActivity: () => undefined,
+		onName: () => { assert.fail('should not resolve'); },
+		setTimer: () => 7
+	});
+	stop();
+	assert.equal(cleared, 1);
 });
 
-test('teardown removes every node it added and is repeatable', () => {
-	const { document, body, head } = createFakeDocument();
-	const nameplate = mountCustomIdentityNameplate({ clan: 'WOK', name: 'Rocketeer' }, { document });
-	assert.ok(nameplate);
-
-	nameplate.destroy();
-	assert.equal(findById(body, CUSTOM_IDENTITY_ELEMENT_ID), undefined);
-	assert.equal(findById(head, CUSTOM_IDENTITY_STYLE_ID), undefined);
-	assert.equal(body?.children.length, 0);
-	assert.equal(head.children.length, 0);
-
-	nameplate.destroy();
-	nameplate.update({ clan: 'X', name: 'Y' });
-	assert.equal(body?.children.length, 0);
-});
-
-test('declines to mount before there is a document body', () => {
-	const { document } = createFakeDocument({ body: false });
-	assert.equal(mountCustomIdentityNameplate({ clan: 'WOK', name: 'Rocketeer' }, { document }), undefined);
-});
-
-test('shared state feeds the other client surfaces and resets on teardown', () => {
+test('nothing set means no observer, no timer and no label', () => {
+	const root = element('BODY', [text('Rocketeer: gg')]);
+	const harness = createEnvironment(root);
 	try {
-		assert.equal(getCustomIdentityLabel(), '');
-
-		// No document in this process: the nameplate cannot mount, but the label the performance
-		// overlay reads is still maintained from the preferences.
-		applyCustomIdentity({ customClan: 'WOK', customName: 'Rocketeer' });
-		assert.equal(getCustomIdentityLabel(), '[WOK] Rocketeer');
-		assert.deepEqual(getCustomIdentity(), { clan: 'WOK', name: 'Rocketeer' });
-
-		applyCustomIdentity({ customClan: '  ', customName: 'a'.repeat(64) });
-		assert.equal(getCustomIdentityLabel(), 'a'.repeat(16));
-
-		applyCustomIdentity({});
-		assert.equal(getCustomIdentityLabel(), '');
+		applyCustomIdentity({}, harness.environment);
+		harness.runFrames();
+		assert.equal(harness.observerCount, 0);
+		assert.equal(harness.pendingTimers, 0);
+		assert.equal(getCustomIdentity().name, '');
+		assert.deepEqual(getCustomIdentityOverlayLines(), []);
+		assert.deepEqual(allText(root), ['Rocketeer: gg']);
 	} finally {
 		stopCustomIdentityDisplay();
 	}
-	assert.equal(getCustomIdentityLabel(), '');
+});
+
+test('the discovered name is what gets replaced across the whole UI', () => {
+	const chat = text('Rocketeer: gg');
+	const killFeed = text('Rocketeer killed Bandit');
+	const scoreboard = element('DIV', [text('1.'), text('Rocketeer'), text('42')]);
+	const otherPlayer = text('Rocketeer2 killed Bandit');
+	const root = element('BODY', [element('DIV', [chat, killFeed]), scoreboard, otherPlayer]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+
+		assert.equal(chat.data, 'Nightfall: gg');
+		assert.equal(killFeed.data, 'Nightfall killed Bandit');
+		assert.deepEqual(allText(scoreboard), ['1.', 'Nightfall', '42']);
+		assert.equal(otherPlayer.data, 'Rocketeer2 killed Bandit', 'another player is not the local player');
+		assert.deepEqual(getCustomIdentity(), { clan: '', name: 'Nightfall' });
+		assert.equal(getRealIdentityForDisplay().name, 'Rocketeer');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('a name that only arrives once the game has loaded still starts the swap', () => {
+	const chat = text('Rocketeer: gg');
+	const root = element('BODY', [chat]);
+	const harness = createEnvironment(root);
+	try {
+		// Krunker has not published getGameActivity yet, which is the normal case at DOM-ready.
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+		assert.equal(harness.observerCount, 0, 'nothing to search for yet, so nothing is observed');
+		assert.equal(chat.data, 'Rocketeer: gg');
+
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		harness.runTimers();
+		harness.runFrames();
+		assert.equal(chat.data, 'Nightfall: gg');
+		assert.equal(harness.pendingTimers, 0, 'discovery stops once it succeeds');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('a manually configured real name is used when the game never reports one', () => {
+	const chat = text('Rocketeer: gg');
+	const root = element('BODY', [chat]);
+	const harness = createEnvironment(root);
+	try {
+		// No getGameActivity at all: this is the fallback the setting exists for.
+		applyCustomIdentity({ customName: 'Nightfall', realName: 'Rocketeer' }, harness.environment);
+		harness.runFrames();
+		assert.equal(chat.data, 'Nightfall: gg');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('the clan tag is learned from the game rendering it beside the real name', () => {
+	const card = text('[OLD] Rocketeer');
+	const chat = text('[OLD] Rocketeer: gg');
+	const root = element('BODY', [card, chat]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		applyCustomIdentity({ customClan: 'WOK', customName: 'Nightfall' }, harness.environment);
+		harness.runFrames(10);
+
+		assert.equal(getRealIdentityForDisplay().clan, 'OLD');
+		assert.equal(card.data, '[WOK] Nightfall');
+		assert.equal(chat.data, '[WOK] Nightfall: gg');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('changing the settings live re-applies, and clearing them puts the game back', () => {
+	const chat = text('Rocketeer: gg');
+	const root = element('BODY', [chat]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+		assert.equal(chat.data, 'Nightfall: gg');
+
+		const observersAfterStart = harness.observerCount;
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+		assert.equal(harness.observerCount, observersAfterStart, 'an unchanged setting does not rebuild anything');
+
+		applyCustomIdentity({ customName: 'Daybreak' }, harness.environment);
+		harness.runFrames();
+		assert.equal(chat.data, 'Daybreak: gg');
+
+		applyCustomIdentity({ customName: '' }, harness.environment);
+		harness.runFrames();
+		assert.equal(chat.data, 'Rocketeer: gg', 'clearing the setting restores the real text immediately');
+		assert.equal(harness.disconnectCount, 2);
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('text this client copies back out is read with the real name in place', () => {
+	const scoreboardName = text('Rocketeer');
+	const root = element('BODY', [scoreboardName]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+		assert.equal(scoreboardName.data, 'Nightfall');
+
+		const copied = withRealIdentity(() => scoreboardName.data);
+		assert.equal(copied, 'Rocketeer', 'a pasted match result must not rename anyone');
+
+		// The display swap comes straight back afterwards.
+		harness.runFrames();
+		assert.equal(scoreboardName.data, 'Nightfall');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('withRealIdentity is a plain call when nothing is being rewritten', () => {
+	const root = element('BODY', [text('Bandit: gg')]);
+	const harness = createEnvironment(root);
+	try {
+		applyCustomIdentity({}, harness.environment);
+		assert.equal(withRealIdentity(() => 'read'), 'read');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('the overlay says what is being shown, what is being searched for, and how much landed', () => {
+	const root = element('BODY', [text('[OLD] Rocketeer: gg')]);
+	const harness = createEnvironment(root);
+	try {
+		applyCustomIdentity({ customClan: 'WOK', customName: 'Nightfall' }, harness.environment);
+		assert.deepEqual(getCustomIdentityOverlayLines(), [
+			'local name    [WOK] Nightfall',
+			'local swap    idle - real name not detected yet'
+		]);
+
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		applyCustomIdentity({ customClan: 'WOK', customName: 'Nightfall', realClan: 'OLD', realName: 'Rocketeer' }, harness.environment);
+		harness.runFrames();
+		assert.deepEqual(getCustomIdentityOverlayLines(), [
+			'local name    [WOK] Nightfall',
+			'local swap    1 live - matching [OLD] Rocketeer'
+		]);
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('teardown disconnects, restores, and clears the shared state', () => {
+	const chat = text('Rocketeer: gg');
+	const root = element('BODY', [chat]);
+	const harness = createEnvironment(root);
+	harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+	applyCustomIdentity({ customClan: 'WOK', customName: 'Nightfall', realClan: 'OLD' }, harness.environment);
+	harness.runFrames();
+	assert.equal(chat.data, 'Nightfall: gg');
+
+	stopCustomIdentityDisplay();
+	assert.equal(chat.data, 'Rocketeer: gg');
+	assert.equal(harness.disconnectCount, 1);
+	assert.equal(getCustomIdentity().name, '');
 	assert.deepEqual(getCustomIdentity(), { clan: '', name: '' });
+	assert.deepEqual(getRealIdentityForDisplay(), { clan: '', name: '' });
+
+	// Repeating teardown is harmless.
+	stopCustomIdentityDisplay();
+	assert.equal(harness.disconnectCount, 1);
 });

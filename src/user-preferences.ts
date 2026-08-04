@@ -1,6 +1,5 @@
 import {
-	CUSTOM_CLAN_PREFERENCE_KEY,
-	CUSTOM_NAME_PREFERENCE_KEY,
+	isCustomIdentityPreferenceKey,
 	parseCustomIdentityPreference
 } from './custom-identity.ts';
 
@@ -141,7 +140,7 @@ function parsePreferenceValue(key: string, value: unknown): UserPrefValue | unde
 	}
 
 	// Local-only display identity. Stored and validated like any other preference; never sent.
-	if (key === CUSTOM_NAME_PREFERENCE_KEY || key === CUSTOM_CLAN_PREFERENCE_KEY) {
+	if (isCustomIdentityPreferenceKey(key)) {
 		return parseCustomIdentityPreference(key, value);
 	}
 

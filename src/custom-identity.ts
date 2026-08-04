@@ -1,5 +1,7 @@
 /**
- * Local display identity: an optional name and clan tag that WOK renders on its own surfaces.
+ * Local display identity: an optional name and clan tag that replace the player's own name and
+ * clan wherever this client draws them - chat, the kill feed, the scoreboard, the HUD, the menu
+ * card.
  *
  * These values are display-only and deliberately dead-ended here. Nothing in this module, or in
  * the surfaces that consume it, touches what Krunker sends or receives: the account identity the
@@ -55,6 +57,28 @@ export const CUSTOM_NAME_PREFERENCE_KEY = 'customName';
 export const CUSTOM_CLAN_PREFERENCE_KEY = 'customClan';
 
 /**
+ * The manual half of identity discovery. The client reads the real name from Krunker at runtime
+ * (see src/custom-identity-display.ts); these keys exist so a player whose account the game does
+ * not expose in time - or whose clan tag it never exposes at all - can still say what to look for
+ * instead of getting a feature that silently does nothing.
+ */
+export const REAL_NAME_PREFERENCE_KEY = 'realName';
+export const REAL_CLAN_PREFERENCE_KEY = 'realClan';
+
+const CLAN_PREFERENCE_KEYS = new Set<string>([CUSTOM_CLAN_PREFERENCE_KEY, REAL_CLAN_PREFERENCE_KEY]);
+const IDENTITY_PREFERENCE_KEYS = new Set<string>([
+	CUSTOM_CLAN_PREFERENCE_KEY,
+	CUSTOM_NAME_PREFERENCE_KEY,
+	REAL_CLAN_PREFERENCE_KEY,
+	REAL_NAME_PREFERENCE_KEY
+]);
+
+/** True for every preference key this module validates. */
+export function isCustomIdentityPreferenceKey(key: string): boolean {
+	return IDENTITY_PREFERENCE_KEYS.has(key);
+}
+
+/**
  * Preference-loader entry point. A stored value is accepted only when it is already exactly what
  * sanitising would produce, so a hand-edited settings.json cannot smuggle in an over-long or
  * markup-bearing value; anything else is dropped and the empty default applies. '' is valid and
@@ -62,7 +86,7 @@ export const CUSTOM_CLAN_PREFERENCE_KEY = 'customClan';
  */
 export function parseCustomIdentityPreference(key: string, value: unknown): string | undefined {
 	if (typeof value !== 'string') return undefined;
-	const sanitized = key === CUSTOM_CLAN_PREFERENCE_KEY ? sanitizeCustomClan(value) : sanitizeCustomName(value);
+	const sanitized = CLAN_PREFERENCE_KEYS.has(key) ? sanitizeCustomClan(value) : sanitizeCustomName(value);
 	return sanitized === value ? value : undefined;
 }
 
@@ -72,6 +96,15 @@ export function resolveCustomIdentity(prefs: Readonly<Partial<UserPrefs>> | unde
 	return {
 		clan: sanitizeCustomClan(prefs[CUSTOM_CLAN_PREFERENCE_KEY]),
 		name: sanitizeCustomName(prefs[CUSTOM_NAME_PREFERENCE_KEY])
+	};
+}
+
+/** Read the manually configured real identity - what to search the game's UI for. */
+export function resolveConfiguredRealIdentity(prefs: Readonly<Partial<UserPrefs>> | undefined): CustomIdentity {
+	if (!prefs) return EMPTY_CUSTOM_IDENTITY;
+	return {
+		clan: sanitizeCustomClan(prefs[REAL_CLAN_PREFERENCE_KEY]),
+		name: sanitizeCustomName(prefs[REAL_NAME_PREFERENCE_KEY])
 	};
 }
 
@@ -87,4 +120,80 @@ export function customIdentitiesAreEqual(first: Readonly<CustomIdentity>, second
 export function formatCustomIdentityLabel(identity: Readonly<CustomIdentity>): string {
 	const clan = identity.clan === '' ? '' : `[${identity.clan}]`;
 	return [clan, identity.name].filter(part => part !== '').join(' ');
+}
+
+/*
+ * Discovering the real identity.
+ *
+ * A discovered name is only ever used as a search string: it is compared against text the game
+ * already rendered and is never written into markup, so it does not have to survive the settings
+ * charset. It does have to be a single visible token, which rules out the placeholder strings and
+ * sentences an unauthenticated or half-loaded game returns.
+ */
+const PLAUSIBLE_REAL_NAME = /^[^\s<>"'&]{1,32}$/u;
+
+/** True for something that could be an account name Krunker prints in its UI. */
+export function isPlausibleRealName(value: unknown): value is string {
+	return typeof value === 'string' && PLAUSIBLE_REAL_NAME.test(value);
+}
+
+/**
+ * Pull the signed-in player's name out of Krunker's own game-activity object.
+ *
+ * `window.getGameActivity()` is the API this client already reads for Discord presence, and its
+ * `user` field is the account name (see GameInfo in src/global.d.ts). Reading it means the feature
+ * does not have to guess at a DOM element that happens to hold the name today. The whole call is
+ * defensive because it is Krunker's object, not ours: anything unexpected yields ''.
+ */
+export function readGameActivityName(getGameActivity: unknown): string {
+	if (typeof getGameActivity !== 'function') return '';
+	let activity: unknown;
+	try {
+		activity = (getGameActivity as () => unknown)();
+	} catch (_error) {
+		return '';
+	}
+	if (!activity || typeof activity !== 'object') return '';
+	const user = (activity as { user?: unknown }).user;
+	return isPlausibleRealName(user) ? user : '';
+}
+
+/**
+ * Recover a clan tag from text the game already rendered, given the real name.
+ *
+ * Krunker does not expose the clan through getGameActivity, but it does print '[TAG] Name'. Only
+ * the bracketed form counts: an unbracketed word before a name is just as likely to be someone
+ * saying "gg Rocketeer" in chat. Returns '' when the text reveals nothing.
+ */
+export function extractClanTag(text: unknown, name: string): string {
+	if (typeof text !== 'string' || name === '' || !text.includes(name)) return '';
+	const pattern = new RegExp(
+		`\\[([A-Za-z0-9_-]{1,${CUSTOM_CLAN_MAX_LENGTH}})\\]\\s*${name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}(?![A-Za-z0-9_-])`,
+		'u'
+	);
+	const match = pattern.exec(text);
+	return match ? match[1] : '';
+}
+
+export interface RealIdentityCandidates {
+	clans: string[];
+	names: string[];
+}
+
+/**
+ * Everything worth searching the UI for. The configured values come first so a player who typed
+ * their name explicitly is matched even when the game reports something else, and duplicates and
+ * blanks are dropped so the matcher never builds a pattern with an empty alternative.
+ */
+export function mergeRealIdentityCandidates(
+	configured: Readonly<CustomIdentity>,
+	discovered: Readonly<Partial<CustomIdentity>>
+): RealIdentityCandidates {
+	const collect = (...values: (string | undefined)[]) => [
+		...new Set(values.filter((value): value is string => typeof value === 'string' && value !== ''))
+	];
+	return {
+		clans: collect(configured.clan, discovered.clan),
+		names: collect(configured.name, discovered.name)
+	};
 }

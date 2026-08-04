@@ -9,7 +9,7 @@ import { installDrawCallCensus } from './draw-call-stats.ts';
 import { startGameplayFpsLog } from './gameplay-fps-log.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader } from './weapon-particle-loader.ts';
-import { applyCustomIdentity, stopCustomIdentityDisplay } from './custom-identity-display.ts';
+import { applyCustomIdentity, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
 // Measures what a real Krunker frame issues so the calibration workload can be anchored to the
@@ -353,15 +353,13 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 	let lastCopied = 0;
 	const copyCooldownMS = 2000;
 
-	function copyScoreboardToClipboard() {
-		if (Date.now() - lastCopied < copyCooldownMS) return;
-		lastCopied = Date.now();
+	function readScoreboard() {
 		const lbRows = document.querySelector('#endTable')?.children[0]?.children;
-		if (!lbRows) return setButtonText(failedToCopy);
+		if (!lbRows) return undefined;
 
 		const isHardpoint = lbRows[0]?.children[5]?.textContent === 'Obj';
 
-		const output = [...lbRows].slice(2).map(leaderboardRow => {
+		return [...lbRows].slice(2).map(leaderboardRow => {
 			const rowChildren = [...leaderboardRow.children] as HTMLElement[];
 			const returnObj = {
 				position: rowChildren[0].innerText.replace('.', ''),
@@ -378,6 +376,19 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 			}
 			return returnObj;
 		});
+	}
+
+	function copyScoreboardToClipboard() {
+		if (Date.now() - lastCopied < copyCooldownMS) return;
+		lastCopied = Date.now();
+		/*
+		 * Read the leaderboard with the real names back in place. The local display identity is a
+		 * cosmetic for this screen only: a pasted match result that quietly renamed one player
+		 * would mislead everyone it is shared with, so the swap is undone for the duration of the
+		 * read and reapplied straight after. Synchronous, so nothing is painted in between.
+		 */
+		const output = withRealIdentity(readScoreboard);
+		if (!output) return setButtonText(failedToCopy);
 
 		strippedConsole.log(output);
 		navigator.clipboard.writeText(JSON.stringify(output, null, 2));
@@ -399,20 +410,33 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 ipcRenderer.once('initDiscordRPC', () => {
 	function updateRPC() {
 		strippedConsole.log('> updated RPC');
-		const classElem = document.getElementById('menuClassName');
-		const skinElem = document.querySelector('#menuClassSubtext > span');
-		const mapElem = document.getElementById('mapInfo');
+		/*
+		 * Discord presence leaves this machine, so the text is read with the local display
+		 * identity undone. In practice these elements hold a class, a skin and a map name, but
+		 * "anything this client republishes is read through withRealIdentity" is the rule that
+		 * keeps the feature cosmetic instead of misleading. Free unless something is currently
+		 * rewritten, and the strings are captured inside the callback, not the elements.
+		 */
+		const presence = withRealIdentity(() => {
+			const skinElem = document.querySelector('#menuClassSubtext > span');
+			return {
+				className: document.getElementById('menuClassName')?.textContent ?? '',
+				hasSkinElement: skinElem !== null,
+				mapText: document.getElementById('mapInfo')?.textContent ?? null,
+				skinText: skinElem?.textContent ?? ''
+			};
+		});
 
 		const gameActivity = Object.hasOwn(window, 'getGameActivity') ? window.getGameActivity() as Partial<GameInfo> : {};
 		let overWriteDetails: string | false = false;
-		if (!Object.hasOwn(gameActivity, 'class')) gameActivity.class = { name: classElem?.textContent ?? '' };
-		if (!Object.hasOwn(gameActivity, 'map') || !Object.hasOwn(gameActivity, 'mode')) overWriteDetails = mapElem?.textContent ?? 'Loading game...';
+		if (!Object.hasOwn(gameActivity, 'class')) gameActivity.class = { name: presence.className };
+		if (!Object.hasOwn(gameActivity, 'map') || !Object.hasOwn(gameActivity, 'mode')) overWriteDetails = presence.mapText ?? 'Loading game...';
 
 		const data: RPCargs = {
 			details: overWriteDetails || `${gameActivity.mode} on ${gameActivity.map}`,
-			state: `${gameActivity.class.name} • ${skinElem === null ? '' : skinElem.textContent}`
+			state: `${gameActivity.class.name} • ${presence.skinText}`
 		};
-		if (!skinElem) { // as long as we have skinElem, we can fill in the other blanks
+		if (!presence.hasSkinElement) { // as long as we have skinElem, we can fill in the other blanks
 			ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: new URL(WEBSITE_URL).hostname });
 		} else {
 			ipcRenderer.send('preload_updates_DiscordRPC', data);
@@ -666,10 +690,11 @@ async function applyCustomCSSSwap(cssSwapper: string, cssPath: string): Promise<
 let customIdentityTeardownRegistered = false;
 
 /**
- * Mount (or refresh) the local display identity nameplate. Idempotent per document: the settings
- * UI live-applies through the same module, and the unload hook removes the nodes it owns.
+ * Start (or refresh) the local display identity. Idempotent per document: the settings UI
+ * live-applies through the same module, an unset identity starts nothing at all, and the unload
+ * hook disconnects the observer and hands the game's own text back.
  */
-function mountCustomIdentity(_userPrefs: UserPrefs) {
+function startCustomIdentity(_userPrefs: UserPrefs) {
 	applyCustomIdentity(_userPrefs);
 	if (customIdentityTeardownRegistered) return;
 	customIdentityTeardownRegistered = true;
@@ -732,7 +757,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 		document.getElementById('hiddenClasses')?.classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
 		void applyCustomCSSSwap(`${cssSwapper}`, cssPath);
 		injectKeyframeFix();
-		mountCustomIdentity(_userPrefs);
+		startCustomIdentity(_userPrefs);
 	});
 }
 

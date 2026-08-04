@@ -15,7 +15,8 @@ import {
 import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
 import {
 	CUSTOM_CLAN_PREFERENCE_KEY,
-	CUSTOM_NAME_PREFERENCE_KEY,
+	isCustomIdentityPreferenceKey,
+	REAL_CLAN_PREFERENCE_KEY,
 	sanitizeCustomClan,
 	sanitizeCustomName
 } from './custom-identity.ts';
@@ -140,8 +141,10 @@ const settingsDesc: SettingsDesc = {
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
-	customName: { title: 'Custom Name', type: 'text', desc: 'A local name only you see; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
-	customClan: { title: 'Custom Clan', type: 'text', desc: 'A local clan tag only you see; Krunker still gets your real one.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
+	customName: { title: 'Custom Name', type: 'text', desc: 'Shows this name instead of yours in chat, the scoreboard, the kill feed and the menu. Only on your screen; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
+	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
+	realName: { title: 'Your Real Name', type: 'text', desc: 'Only needed if the custom name is not being applied: the exact Krunker name to replace. The client normally detects this by itself.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
+	realClan: { title: 'Your Real Clan', type: 'text', desc: 'Only needed if the custom clan tag is not being applied: your real tag, without brackets.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
 	saveMatchResultJSONButton: { title: 'Copy Match Results', type: 'bool', desc: 'Adds a button that copies the scoreboard at match end.', safety: 0, cat: 1, refreshOnly: true },
 	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
@@ -462,10 +465,9 @@ class SettingElem {
 
 		// Local display identity: coerce while typing so the stored value is always one the
 		// preference loader accepts, and reflect dropped characters straight back into the input.
-		if (this.props.key === CUSTOM_NAME_PREFERENCE_KEY || this.props.key === CUSTOM_CLAN_PREFERENCE_KEY) {
-			const sanitized = this.props.key === CUSTOM_CLAN_PREFERENCE_KEY
-				? sanitizeCustomClan(dirtyValue)
-				: sanitizeCustomName(dirtyValue);
+		if (isCustomIdentityPreferenceKey(this.props.key)) {
+			const isClanKey = this.props.key === CUSTOM_CLAN_PREFERENCE_KEY || this.props.key === REAL_CLAN_PREFERENCE_KEY;
+			const sanitized = isClanKey ? sanitizeCustomClan(dirtyValue) : sanitizeCustomName(dirtyValue);
 			if (sanitized !== target.value) target.value = sanitized;
 			dirtyValue = sanitized;
 		}
@@ -492,8 +494,9 @@ class SettingElem {
 
 			if (this.props.key === 'cssSwapper') void applyCustomCssSelection(String(value));
 
-			// Live-applies: the nameplate is in this renderer, so there is nothing to reload.
-			if (this.props.key === CUSTOM_NAME_PREFERENCE_KEY || this.props.key === CUSTOM_CLAN_PREFERENCE_KEY) applyCustomIdentity(userPrefs);
+			// Live-applies: the replacement engine runs in this renderer, so there is nothing to
+			// reload. Clearing the values puts the game's own text straight back.
+			if (isCustomIdentityPreferenceKey(this.props.key)) applyCustomIdentity(userPrefs);
 
 			// you can add custom instant refresh callbacks for settings here
 			if (typeof value === 'boolean') {

@@ -955,6 +955,28 @@ let customIdentityTeardownRegistered = false;
  * live-applies through the same module, an unset identity starts nothing at all, and the unload
  * hook disconnects the observer and hands the game's own text back.
  */
+/**
+ * Read a client stylesheet without letting it hold up everything behind it.
+ *
+ * The startup trace showed execution stopping at the first stylesheet read and never resuming -
+ * not rejecting, hanging. Because the steps that mount the theme and the custom identity are
+ * queued after these awaits, one unresolved read silently disabled them with nothing logged. CSS
+ * is cosmetic; the features behind it are not, so a read that does not finish promptly is
+ * abandoned and startup continues.
+ */
+async function readClientStylesheet(file: string, timeoutMs = 5_000): Promise<string | undefined> {
+	try {
+		return await Promise.race([
+			readFile(pathJoin($assets, file), { encoding: 'utf-8' }),
+			new Promise<undefined>(resolve => { window.setTimeout(() => { resolve(undefined); }, timeoutMs); })
+		]);
+	} catch (error) {
+		traceStartup(`stylesheet '${file}' failed: ${String(error)}`);
+		strippedConsole.error(`WOK Client could not read ${file}`, error);
+		return undefined;
+	}
+}
+
 function traceStartup(message: string) {
 	if (!process.env.WOK_FIND_IDENTITY) return;
 	ipcRenderer.send('wok_identity_probe', `[wok-identity] startup: ${message}`);
@@ -1001,13 +1023,17 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 	traceStartup('before settings.css read');
 	if (!clientCSSInjected) {
 		clientCSSInjected = true;
-		webFrame.insertCSS(await readFile(pathJoin($assets, 'settings.css'), { encoding: 'utf-8' }));
+		const settingsCSS = await readClientStylesheet('settings.css');
+		if (settingsCSS !== undefined) webFrame.insertCSS(settingsCSS);
+		else traceStartup('settings.css read timed out; continuing');
 		sendPerfMark('css-injected');
 	}
 	traceStartup('settings.css done; before matchmaker.css');
 	if (matchmaker && !matchmakerCSSInjected) {
 		matchmakerCSSInjected = true;
-		webFrame.insertCSS(await readFile(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' }));
+		const matchmakerCSS = await readClientStylesheet('matchmaker.css');
+		if (matchmakerCSS !== undefined) webFrame.insertCSS(matchmakerCSS);
+		else traceStartup('matchmaker.css read timed out; continuing');
 	}
 
 	traceStartup('matchmaker.css done; before splash');

@@ -143,7 +143,7 @@ export const THEME_VARIABLES: readonly ThemeVariable[] = [
 	{ name: '--wok-text', description: 'Primary text colour.' },
 	{ name: '--wok-text-muted', description: 'Secondary text: setting titles, tabs, table rows, toasts.' },
 	{ name: '--wok-text-faint', description: 'Tertiary text: setting descriptions and captions.' },
-	{ name: '--wok-text-on-art', description: 'Labels drawn over artwork (class cards, map tiles). Krunker outlines them in near-black, so keep this light even on a light theme.' },
+	{ name: '--wok-text-on-art', description: 'Text drawn over artwork: class cards, map tiles, the click-to-play prompt. Keep it light even on a light theme, because what is behind it is a screenshot.' },
 	{ name: '--wok-danger', description: 'Destructive and cancel affordances.' },
 	{ name: '--wok-success', description: 'Confirm and accept affordances.' },
 	{ name: '--wok-radius', description: 'Corner radius for controls, rows and small cards. 0 for a squared-off look.' },

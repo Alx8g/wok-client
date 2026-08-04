@@ -1068,19 +1068,18 @@ tr {
 
 /* --- loading and pre-game screens ----------------------------------------------------------- */
 
+/* Shown once per launch, behind WOK's own splash. */
 #initLoader {
 	background-color: var(--wok-bg, #1c1c1c);
 }
 
 /*
- * Only the flat colour. This element also carries a map screenshot as a background image, which
- * the theme leaves alone: it is the game telling the player where they are about to spawn.
+ * The click-to-play curtain keeps Krunker's dark backdrop. It is the last thing on screen before a
+ * round starts and it carries a map screenshot, so a light theme painting it would be a white
+ * flash into gameplay over an image the player is reading. The prompt on top takes the on-art
+ * colour for the same reason the class-card labels do.
  */
-#instructionsFadeBG {
-	background-color: var(--wok-bg, #222222);
-}
-
 #instructions,
 #instructionsSubtitle {
-	color: var(--wok-text, rgba(255, 255, 255, 0.8));
+	color: var(--wok-text-on-art, rgba(255, 255, 255, 0.8));
 }

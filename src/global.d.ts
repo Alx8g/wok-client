@@ -142,8 +142,14 @@ interface SettingItemGeneric {
 	refreshOnly?: boolean;
 }
 
-// sel has to have an opts with a string array
-interface SelectSettingDescItem extends SettingItemGeneric { type: 'sel', opts?: string[] }
+/**
+ * sel has to have an opts with a string array.
+ *
+ * `optLabels` is optional and, when present, must be the same length as `opts`: it lets the stored
+ * value differ from the text the player reads. Needed wherever the persisted value is an opaque
+ * key rather than a word - the display picker stores a monitor key but shows a resolution.
+ */
+interface SelectSettingDescItem extends SettingItemGeneric { type: 'sel', opts?: string[], optLabels?: string[] }
 
 interface KeybindSettingDescItem extends SettingItemGeneric { type: 'keybind' }
 
@@ -177,6 +183,8 @@ interface RenderReadySetting extends SettingItemGeneric {
 
 	// for sel
 	opts?: string[];
+	/** Display text per opt; when omitted the opt itself is shown. Must match opts.length. */
+	optLabels?: string[];
 	cols?: number;
 
 	// for multisel

@@ -24,6 +24,9 @@ export interface DiagnosticsReportInput {
 
 const REPORTED_PREFERENCE_KEYS = [
 	'competitiveMode',
+	// Which monitor the launch targeted: "it opened on the wrong screen" reports are unactionable
+	// without it, since the key also says whether the choice was made at all.
+	'display',
 	'fpsUncap',
 	'fullscreen',
 	'graphicsBackend',

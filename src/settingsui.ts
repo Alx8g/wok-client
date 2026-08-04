@@ -13,6 +13,7 @@ import {
 	MATCHMAKER_REGIONS
 } from './matchmaker-data.ts';
 import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
+import { DISPLAY_PREFERENCE_AUTO, type DisplayOption } from './display-selection.ts';
 
 const RefreshEnum = {
 	notNeeded: 0,
@@ -36,6 +37,21 @@ const requestUserPrefs = () => { ipcRenderer.send('settingsUI_requests_userPrefs
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', requestUserPrefs, { once: true });
 else requestUserPrefs();
 
+/**
+ * The monitor list is whatever is attached right now, so main enumerates it and sends it with the
+ * preferences; this declaration exists up front only so TS knows the type being mutated. Values are
+ * opaque display keys (src/display-selection.ts), which is why this select needs optLabels.
+ */
+const displayOption: SelectSettingDescItem = {
+	title: 'Display',
+	type: 'sel',
+	desc: 'Which monitor the game opens on. Falls back to primary if unplugged.',
+	safety: 0,
+	cat: 0,
+	opts: [DISPLAY_PREFERENCE_AUTO],
+	optLabels: ['Automatic (primary display)']
+};
+
 // Swapper options are declared here so that TS knows they are the correct type for modifications under the m_userPrefs_for_settingUI message
 const cssSwapperOption: SelectSettingDescItem = {
 	title: 'CSS Swapper',
@@ -52,7 +68,7 @@ const cssSwapperOption: SelectSettingDescItem = {
 	}
 }
 
-ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, received_userPrefs: UserPrefs) => {
+ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, received_userPrefs: UserPrefs, received_displays: DisplayOption[]) => {
 	// main sends us the path to settings and also settings themselves on initial load.
 	userPrefsPath = received_paths.settingsPath;
 	paths = received_paths;
@@ -70,6 +86,17 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 
 	cssSwapperOption.opts = ['None', ...readdirSync(paths.cssPath).filter(path => path.endsWith('.css'))];
 	if (!cssSwapperOption.opts.includes(`${userPrefs.cssSwapper}`)) userPrefs.cssSwapper = 'None';
+
+	// A missing list (older main, or an enumeration failure) leaves the picker on Automatic only.
+	// The stored key is never rewritten from here: main already appends an entry for a remembered
+	// monitor that is not attached, so unplugging one shows the truth without discarding the choice.
+	const displayOptions = Array.isArray(received_displays) && received_displays.length > 0
+		? received_displays
+		: [{ value: DISPLAY_PREFERENCE_AUTO, label: 'Automatic (primary display)' }];
+	displayOption.opts = displayOptions.map(option => option.value);
+	displayOption.optLabels = displayOptions.map(option => option.label);
+	if (!displayOption.opts.includes(`${userPrefs.display}`)) userPrefs.display = DISPLAY_PREFERENCE_AUTO;
+
 	resolveSettingsReady();
 });
 
@@ -130,6 +157,7 @@ const settingsDesc: SettingsDesc = {
 	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto. Competitive Mode picks whichever measured fastest here.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
 	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
+	display: displayOption,
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
@@ -368,14 +396,21 @@ class SettingElem {
 			case 'heading':
 				this.HTML = `<h1 class="setting-title">${sanitize(props.title)}</h1>`;
 				break;
-			case 'sel':
+			case 'sel': {
+				if (props.optLabels && props.optLabels.length !== props.opts.length) {
+					throw new Error(`Setting '${props.key}' declared 'optLabels', but a different amount than 'opts'!`);
+				}
+				// Option values and text are escaped unconditionally, not via sanitize(): both can
+				// carry text this client did not author - CSS filenames from disk, monitor names
+				// from the OS - regardless of whether the setting itself is trusted.
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
           			<select class="s-update inputGrey2">
-						${props.opts.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+						${props.opts.map((opt, i) => `<option value="${sanitizeString(opt)}">${sanitizeString(props.optLabels?.[i] ?? opt)}</option>`).join('')}
 					</select>`;
 				this.updateKey = 'value';
 				this.updateMethod = 'onchange';
 				break;
+			}
 			case 'multisel': {
 				const hasValidDescriptions = Object.hasOwn(this.props, 'optDescriptions') && this.props.opts.length === this.props.optDescriptions.length;
 				if (Object.hasOwn(this.props, 'optDescriptions') && !hasValidDescriptions) throw new Error(`Setting '${this.props.key}' declared 'optDescriptions', but a different amount than 'opts'!`);

@@ -4,6 +4,18 @@ export const MATCHMAKER_LATENCY_CACHE_TTL_MS = 60_000;
 export const MATCHMAKER_LATENCY_FETCH_TIMEOUT_MS = 3_000;
 export const MATCHMAKER_LATENCY_PROBE_TIMEOUT_MS = 1_500;
 export const MATCHMAKER_LATENCY_MAX_CONCURRENCY = 4;
+/**
+ * Krunker's ping list advertises the game port (3000), which does not accept connections from
+ * ordinary networks - every probe against it times out, so no latency was ever recorded and the
+ * popup showed a dash. Measured on the reference machine: port 3000 times out for every region
+ * while 443 connects, and a 443 connect agrees with ICMP to the same host within ~5 ms.
+ */
+export const MATCHMAKER_LATENCY_FALLBACK_PORT = 443;
+/**
+ * The first connect to a host also pays DNS resolution (measured: 153 ms first, ~55 ms after).
+ * Probing twice and keeping the best sample removes that one-off cost.
+ */
+export const MATCHMAKER_LATENCY_PROBE_ATTEMPTS = 2;
 export const MATCHMAKER_LATENCY_TARGET_STALE_TTL_MS = 5 * 60_000;
 export const MATCHMAKER_PING_LIST_MAX_RESPONSE_BYTES = 64 * 1024;
 export const MATCHMAKER_PING_LIST_MAX_TARGETS = 32;
@@ -225,16 +237,29 @@ export class MatchmakerRegionLatencyService {
 				const item = pending[nextIndex++];
 				let latencyMs: number | undefined;
 				if (item.target) {
-					try {
-						const measured = await runWithTimeout(
-							this.probeTimeoutMs,
-							signal => this.dependencies.probeTarget(item.target, signal)
-						);
-						if (typeof measured === 'number' && Number.isFinite(measured) && measured >= 0 && measured <= 60_000) {
-							latencyMs = Math.round(measured);
+					// Try the advertised port first so a future Krunker change is picked up
+					// automatically, then the fallback. Each is sampled more than once because the
+					// first connect to a host also pays for DNS.
+					const candidatePorts = item.target.port === MATCHMAKER_LATENCY_FALLBACK_PORT
+						? [item.target.port]
+						: [item.target.port, MATCHMAKER_LATENCY_FALLBACK_PORT];
+					for (const port of candidatePorts) {
+						const target = { host: item.target.host, port };
+						for (let attempt = 0; attempt < MATCHMAKER_LATENCY_PROBE_ATTEMPTS; attempt++) {
+							try {
+								const measured = await runWithTimeout(
+									this.probeTimeoutMs,
+									signal => this.dependencies.probeTarget(target, signal)
+								);
+								if (typeof measured === 'number' && Number.isFinite(measured) && measured >= 0 && measured <= 60_000) {
+									const rounded = Math.round(measured);
+									if (latencyMs === undefined || rounded < latencyMs) latencyMs = rounded;
+								} else break; // This port is not answering; move on rather than retrying it.
+							} catch (_error) {
+								break; // An unavailable port or region is omitted while other probes continue.
+							}
 						}
-					} catch (_error) {
-						// An unavailable region is omitted while other probes continue.
+						if (latencyMs !== undefined) break;
 					}
 				}
 				this.latencyCache.set(item.region, {

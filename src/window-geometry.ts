@@ -13,6 +13,10 @@ export type GameplayDisplay = Pick<Display, 'bounds' | 'size'>;
  * the preference was silently rewritten to windowed there (audit A4). A frameless screen-bounds
  * window needs no kiosk state, works on every platform, and is also the window shape DWM can
  * promote out of desktop composition on Windows.
+ *
+ * `roundedCorners: false` is load-bearing on Linux: Electron 43 made frameless windows default to
+ * rounded corners wherever the desktop supports client-side decorations, which on a window sized to
+ * the whole display means the compositor rounds off the four screen corners of the game.
  */
 export function resolveGameplayWindowGeometry(
 	mode: string,
@@ -26,7 +30,10 @@ export function resolveGameplayWindowGeometry(
 			fullscreenable: false,
 			height: display.bounds.height,
 			resizable: false,
+			roundedCorners: false,
 			width: display.bounds.width,
+			// Wayland does not let clients place their own windows, so x/y are honoured on Windows,
+			// macOS and X11 and ignored by the compositor on Wayland.
 			x: display.bounds.x,
 			y: display.bounds.y
 		};

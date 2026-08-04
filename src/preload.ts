@@ -520,9 +520,40 @@ function parseWokBootPayload(): WokBootPayload | undefined {
 }
 
 /** Run a callback immediately when the DOM is already parsed, otherwise at DOMContentLoaded. */
+/**
+ * Run once the document can be written to.
+ *
+ * DOMContentLoaded alone is not enough: on Krunker it was observed never firing for the document
+ * the preload sees, which silently killed every startup step queued behind it - the theme and the
+ * custom identity both never started, with no error anywhere because nothing threw. What the
+ * callers actually need is a body to append to, so this waits for that directly, by whichever
+ * signal arrives first, and gives up only if the document never produces one.
+ */
 function whenDOMReady(callback: () => void) {
-	if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => { callback(); }, { once: true });
-	else callback();
+	let ran = false;
+	const run = () => {
+		if (ran) return;
+		ran = true;
+		observer?.disconnect();
+		window.clearInterval(poll);
+		document.removeEventListener('DOMContentLoaded', run);
+		callback();
+	};
+
+	if (document.body) {
+		run();
+		return;
+	}
+
+	document.addEventListener('DOMContentLoaded', run, { once: true });
+	// A parser that never emits the event still builds the body, so watch for the element itself.
+	const observer = typeof MutationObserver === 'function'
+		? new MutationObserver(() => { if (document.body) run(); })
+		: undefined;
+	observer?.observe(document.documentElement, { childList: true, subtree: true });
+	// Last resort for a document that produces neither: the steps are all body-dependent, so a
+	// cheap poll is preferable to features that silently never start.
+	const poll = window.setInterval(() => { if (document.body) run(); }, 250);
 }
 
 /** Resolve an element by id as soon as the parser creates it, giving up at DOMContentLoaded. */

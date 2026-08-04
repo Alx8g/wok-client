@@ -996,10 +996,11 @@ function beginCustomIdentityWatch() {
 	traceStartup(`watch called; started=${identityStarterHandle !== undefined} prefs=${latestUserPrefs ? 'yes' : 'no'} body=${document.body ? 'yes' : 'no'}`);
 	if (identityStarterHandle !== undefined) return;
 	const tryStart = () => {
-		// documentElement always exists; body may never appear in the document this preload
-		// instance is attached to, which is precisely where the watch was stalling. The rewrite
-		// engine only needs a root to observe, and the element is a valid one.
-		if (!latestUserPrefs || !(document.body ?? document.documentElement)) return;
+		// Only preferences are required. Discovery reads Krunker's activity object and needs no
+		// DOM at all; it is the rewrite that needs a root, and that reconciles itself once one
+		// exists. Waiting for an element here stalled the whole feature in a document that was
+		// replaced before it ever grew a body.
+		if (!latestUserPrefs) return;
 		window.clearInterval(identityStarterHandle);
 		identityStarterHandle = undefined;
 		traceStartup('independent identity start');

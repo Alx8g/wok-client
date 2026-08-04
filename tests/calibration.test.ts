@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG } from '../src/calibration-benchmark.ts';
+import { BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG, runBenchmarkTrial } from '../src/calibration-benchmark.ts';
 import { buildCalibrationResultPage, buildCalibrationTrialPage } from '../src/calibration-window.ts';
 import {
 	CALIBRATION_NO_COMPARISON_REASON,
@@ -907,4 +907,23 @@ test('the unmeasured completion reason survives the persistence round trip', () 
 	assert.equal(parsed.completionReason, CALIBRATION_NO_COMPARISON_REASON);
 	// A later same-signature prepare leaves the completed state untouched.
 	assert.equal(prepareCalibrationState(parsed, signature, createLinuxCandidates(), false, 'linux'), parsed);
+});
+
+test('every constant the serialized trial function references is embedded in the page', () => {
+	// runBenchmarkTrial is injected into the calibration page by function serialization, so a
+	// constant it closes over is NOT carried with it: it must be written into the same scope by
+	// the page generator. Missing one throws a ReferenceError on the first frame and the trial
+	// silently never starts. Field regression: BENCHMARK_PROGRESS_WARMUP_SHARE shipped unembedded
+	// and calibration hung on "Preparing renderer".
+	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
+	const source = runBenchmarkTrial.toString();
+	const referenced = new Set(source.match(/\bBENCHMARK_[A-Z0-9_]+\b/gu) ?? []);
+	assert.ok(referenced.size > 0, 'expected the trial function to reference benchmark constants');
+
+	for (const name of referenced) {
+		assert.ok(
+			new RegExp(`const ${name} = `, 'u').test(page),
+			`${name} is referenced by runBenchmarkTrial but never declared in the trial page`
+		);
+	}
 });

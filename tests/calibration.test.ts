@@ -644,9 +644,9 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	assert.match(page, /Trial 1:/);
 	assert.match(page, /Trial 2:/);
 	// The page must still promise provisional application and automatic revert, in plain language.
-	assert.match(page, /confirm this profile/iu);
-	assert.match(page, /switches back on its own/iu);
-	assert.match(page, /switches back on its own/iu);
+	assert.match(page, /check this profile/iu);
+	assert.match(page, /runs badly.*switches back on its own/iu);
+	assert.match(page, /runs badly.*switches back on its own/iu);
 });
 
 test('a fence-pacing artifact invalidates the comparison and keeps the current backend', () => {

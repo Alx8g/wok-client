@@ -536,7 +536,7 @@ export function buildCalibrationResultPage(
 					<button class="primary" id="apply" ${hasRecommendation ? '' : 'disabled'}>${applyLabel}</button>
 					<button id="keep">${keepLabel}</button>
 				</div>
-				<div class="result-note">Your next few matches confirm this profile. If it plays worse, WOK switches back on its own.</div>
+				<div class="result-note">Your next few matches check this profile. If it runs badly, WOK switches back on its own.</div>
 			</section>
 		</main>
 		<script>

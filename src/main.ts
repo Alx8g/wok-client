@@ -1150,6 +1150,18 @@ async function handleProvisionalConfirmation(validation: AdaptiveValidationState
 		const beforeRollback = calibrationState;
 		const previousLabel = beforeRollback.previousSelection?.candidate.id ?? 'the automatic profile';
 		persistCalibrationState(rollbackCalibration(beforeRollback));
+		// The applied backend is also persisted as an explicit preference so it survives
+		// Competitive mode being switched off, so a rollback has to restore that preference too -
+		// otherwise the rejected backend would quietly come back the moment the mode was disabled.
+		const restoredBackend = beforeRollback.previousSelection?.candidate.backend;
+		if (restoredBackend && userPrefs.graphicsBackend !== restoredBackend) {
+			userPrefs.graphicsBackend = restoredBackend;
+			try {
+				writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
+			} catch (error) {
+				console.error('Failed to restore the previous graphics preference after rollback', error);
+			}
+		}
 		console.log(`Calibrated profile underperformed in real play; reverting to ${previousLabel} on the next launch.`);
 		if (mainWindow && !mainWindow.isDestroyed()) {
 			void dialog.showMessageBox(mainWindow, {
@@ -1741,7 +1753,12 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 			graphicsProfileState = clearKeptGraphicsBackend(graphicsProfileState);
 			persistGraphicsProfile();
 			userPrefs.competitiveMode = true;
-			userPrefs.graphicsBackend = 'auto';
+			// Persist the measured winner as an explicit preference rather than 'auto'. Competitive
+			// mode governs the in-game settings preset; it must not be the only thing keeping the
+			// graphics backend this machine was measured to be fastest on. With 'auto' the client
+			// would discover the best backend and then silently stop using it the moment the mode
+			// was switched off, falling back to a generic recommendation.
+			userPrefs.graphicsBackend = calibrationState.activeSelection.candidate.backend;
 			userPrefs.fpsUncap = calibrationState.activeSelection.candidate.framePolicy === 'uncapped';
 			writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
 		} else {

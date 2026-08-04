@@ -1,12 +1,3 @@
-## Unreleased
-
-### First-run setup
-- New installations now open a short setup on first launch: what WOK is, an offer to measure the PC and apply the graphics setup that runs fastest on it, importing settings from another Krunker client, and the three settings worth choosing on day one. Every step is skippable.
-- Setup opens over the loading game rather than in front of it, so it costs the launch nothing and closing it drops straight into the game.
-- The performance step queues the measurement for the next launch instead of restarting into it. A fresh installation always reaches its first match first.
-- Settings can be brought across from Krunker Civilian Client and Gatoclient Lite where they have a WOK equivalent. Crankshaft profiles keep migrating automatically and setup now says so. Features WOK ships switched off are never switched on by an import.
-- Added "Run setup again" under Settings, About.
-
 ## WOK Client 1.1.0-rc.4 (2026-08-04)
 
 ### Loading and startup

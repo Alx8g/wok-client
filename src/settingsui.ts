@@ -901,15 +901,7 @@ export function renderSettings() {
 	const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
 	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
 	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
-
-	const setupHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Setup:</span>' });
-	setupHolder.appendChild(skeleton.settingButton(
-		'replay',
-		'Run setup again',
-		() => ipcRenderer.send('onboarding_request_rerun'),
-		'Reopens the first-run setup: performance, importing from another client, and the basics.'
-	));
-	aboutCategory.append(supportHolder, buttonsHolder, setupHolder);
+	aboutCategory.append(supportHolder, buttonsHolder);
 
 	showCategory(categorySections.has(activeSettingsCategory) ? activeSettingsCategory : [...categorySections.keys()][0] ?? 0);
 

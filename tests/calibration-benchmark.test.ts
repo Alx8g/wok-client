@@ -6,6 +6,7 @@ import {
 	BENCHMARK_FENCE_STALL_ARTIFACT_RATIO,
 	BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
 	BENCHMARK_GPU_QUERY_POOL_SIZE,
+	BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL,
 	BENCHMARK_RUN_RETRY_BUDGET,
 	markBenchmarkTrialRejected,
 	resolveBenchmarkAttempts,
@@ -240,7 +241,9 @@ test('an unsignaled fence stalls submission and elongates the recorded interval'
 
 test('the query pool never grows beyond its fixed size', async () => {
 	// Results become available one tick later, so at most two queries are ever in flight here;
-	// drive a fake that never reports availability to exhaust the pool instead.
+	// drive a fake that never reports availability to exhaust the pool instead. The trial must run
+	// long enough to sample more than a poolful of frames, since GPU timing is sampled on one
+	// measured frame in BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL rather than instrumented on all of them.
 	const fake = createFakeGl();
 	const baseGetQueryParameter = fake.gl.getQueryParameter.bind(fake.gl);
 	fake.gl.getQueryParameter = (query: unknown, parameter: number) => (parameter === 0x8867 ? false : baseGetQueryParameter(query, parameter));
@@ -250,9 +253,35 @@ test('the query pool never grows beyond its fixed size', async () => {
 		created++;
 		return baseCreateQuery();
 	};
-	await driveTrial({ fake });
+	await driveTrial({ config: { benchmarkMs: 2_000 }, fake });
 
 	assert.equal(created, BENCHMARK_GPU_QUERY_POOL_SIZE);
+});
+
+test('GPU timing is sampled, not instrumented on every frame', async () => {
+	// The instrumentation is not backend-neutral: on the reference machine, a per-frame
+	// TIME_ELAPSED query costs D3D11on12 ~28% of its frame rate and native D3D11 ~2%
+	// (.working/simulator-v2-acceptance/instrumentation-ab.mjs). A benchmark that taxes one
+	// candidate and not the other cannot compare their frame rates, so the evidence is sampled.
+	const fake = createFakeGl();
+	let queriesBegun = 0;
+	const baseBeginQuery = fake.gl.beginQuery.bind(fake.gl);
+	fake.gl.beginQuery = (target: number, query: object) => {
+		queriesBegun++;
+		baseBeginQuery(target, query);
+	};
+	const { result } = await driveTrial({ config: { benchmarkMs: 2_000 }, fake });
+
+	assert.ok(result.sampleCount > BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL * 4, `expected a long enough trial, got ${result.sampleCount} frames`);
+	// One query per sampling interval, within one frame of rounding at each end.
+	const expected = result.sampleCount / BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL;
+	assert.ok(
+		queriesBegun >= expected - 2 && queriesBegun <= expected + 2,
+		`expected ~${expected.toFixed(1)} sampled frames out of ${result.sampleCount}, got ${queriesBegun}`
+	);
+	// Sampling still yields enough evidence for the percentiles it feeds.
+	assert.equal(result.gpuTimingStatus, 'measured');
+	assert.ok(result.gpuSampleCount > 0);
 });
 
 test('context loss rejects the trial and abandons fence objects without deleting them', async () => {

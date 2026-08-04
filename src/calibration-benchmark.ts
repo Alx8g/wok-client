@@ -11,6 +11,27 @@
 
 export const BENCHMARK_GPU_QUERY_POOL_SIZE = 8;
 /**
+ * TIME_ELAPSED evidence is sampled on one measured frame in eight rather than instrumented on
+ * every frame, because the instrumentation is not backend-neutral.
+ *
+ * Measured on the reference machine (Iris Xe 0x46A6, workload v3, variants interleaved inside
+ * every run so drift cannot be attributed to a variant —
+ * `.working/simulator-v2-acceptance/instrumentation-ab.mjs`): removing the per-frame timer query
+ * raised d3d11on12's average frame rate by 25.1% / 22.3% / 35.7% across three runs while moving
+ * `default` by -0.7% / -5.9% / +13.6%. That asymmetry has a documented mechanism: on ANGLE/D3D11
+ * a query poll is a driver call, but under D3D11on12 it enters the translation layer's batched
+ * context, where `Query11::testQuery` polls with flush permitted and a poll can force the
+ * expensive drain-and-ExecuteCommandLists path (findings.md §2.4, §2.7, which flagged exactly this
+ * as "possible timer-query measurement inflation under the translation layer, unverified").
+ *
+ * A benchmark may not tax one candidate ~28% and another ~2% and then compare their frame rates.
+ * Sampling keeps the evidence — a 2.8 s trial at 250 fps still yields ~85 GPU samples, far more
+ * than the percentiles need — while cutting the tax by the sampling interval. The disjoint
+ * demotion ratio below is therefore measured against GPU sampling attempts rather than against
+ * frame count, so its meaning does not change with this interval.
+ */
+export const BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL = 8;
+/**
  * Fence queue depth 6 (v4 pacing semantics); ring holds depth + 1 fences.
  *
  * Depth 2 approximated Chromium's own frame buffering (design §2.3) but made the gate the pacing
@@ -116,6 +137,12 @@ export interface BenchmarkTrialHooks {
 	onProgress?(progress: { phase: 'warmup' | 'measure'; ratio: number }): void;
 	renderFrame(frameIndex: number): void;
 	requestFrame(callback: (timestamp: number) => void): void;
+	/**
+	 * The frame's main-thread lane, run before submission the way a game runs its simulation
+	 * before submitting the frame it produced (workload v3: entity update + residual spin). It is
+	 * deliberately inside the measured frame and outside the cpuSubmit bracket, so it contends for
+	 * the thread with submission without being counted as submission cost.
+	 */
 	spin(): number;
 	/** Starts the event-loop lateness sampler; returns a stop function. */
 	startSampler(callback: () => void, intervalMs: number): () => void;
@@ -179,7 +206,11 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		if (gl && frameTimes.length < config.minSamples) rejectionReasons.add('insufficient-samples');
 		let gpuTimingStatus: BenchmarkGpuTimingStatus = ext ? 'measured' : 'unsupported';
 		if (ext) {
-			const disjointExcessive = gpuDisjointDiscardCount > frameTimes.length * BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO;
+			// Relative to sampling attempts, not to frame count: GPU timing is sampled on one
+			// frame in BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL, so a frame-relative threshold would
+			// silently loosen by that factor.
+			const disjointAttemptCount = gpuSamplesMs.length + gpuImplausibleCount + gpuDisjointDiscardCount;
+			const disjointExcessive = gpuDisjointDiscardCount > disjointAttemptCount * BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO;
 			const gpuAttemptCount = gpuSamplesMs.length + gpuImplausibleCount;
 			const implausibleExcessive = gpuAttemptCount > 0 && gpuImplausibleCount > gpuAttemptCount * BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO;
 			if (disjointExcessive || implausibleExcessive || gpuSamplesMs.length === 0) gpuTimingStatus = 'unreliable';
@@ -403,7 +434,11 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 
 			hooks.spin();
 			const submitStart = hooks.now();
-			const query = measuring && extension ? acquireQuery() : undefined;
+			// Sampled, not per-frame: see BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL. Instrumenting every
+			// frame costs D3D11on12 ~28% of its frame rate and native D3D11 ~2%, which would make
+			// the instrument decide the comparison it exists to report.
+			const sampleThisFrame = submittedFrames % BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL === 0;
+			const query = measuring && extension && sampleThisFrame ? acquireQuery() : undefined;
 			if (query !== undefined) gl.beginQuery(extension.TIME_ELAPSED_EXT, query);
 			hooks.renderFrame(submittedFrames);
 			if (query !== undefined) {

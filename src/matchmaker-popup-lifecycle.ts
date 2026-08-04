@@ -1,4 +1,4 @@
-export type MatchmakerPopupState = 'closed' | 'error' | 'game' | 'no-games' | 'searching';
+export type MatchmakerPopupState = 'cancelled' | 'closed' | 'error' | 'game' | 'no-games' | 'searching';
 
 type ActiveMatchmakerPopupState = Exclude<MatchmakerPopupState, 'closed'>;
 

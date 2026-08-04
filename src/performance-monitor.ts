@@ -5,6 +5,8 @@ import {
 	RollingReportedPingStats
 } from './network-diagnostics.ts';
 import { MAX_VALID_FRAME_MS, RollingPerformanceStats } from './performance-stats.ts';
+import { getCustomIdentityOverlayLines } from './custom-identity-display.ts';
+import { NO_REWRITE_ATTRIBUTE } from './identity-rewrite.ts';
 
 const OVERLAY_REFRESH_MS = 1_000;
 const REPORTED_PING_STALE_MS = 15_000;
@@ -182,9 +184,14 @@ function renderOverlay(now = performance.now()) {
 		? `${networkSnapshot.reportedPingVariationMs.toFixed(1)} ms`
 		: 'collecting';
 	const reportedTps = networkSnapshot.reportedTps > 0 ? networkSnapshot.reportedTps.toFixed(0) : 'unknown';
+	// Local display identity, read from the client's own state. Absent unless the user set one,
+	// and unrelated to the account name Krunker knows. Reports what it is searching for and how
+	// many nodes it is currently rewriting, which is the only way to check the feature in-game.
+	const customIdentityLines = getCustomIdentityOverlayLines();
 
 	overlay.textContent = [
 		'WOK RENDERER rAF DIAGNOSTICS',
+		...customIdentityLines,
 		`rAF FPS now   ${snapshot.currentFps.toFixed(1)}`,
 		`rAF FPS 10s   ${snapshot.averageFps.toFixed(1)}`,
 		`rAF 1% low    ${onePercentLow}`,
@@ -227,6 +234,10 @@ function createOverlay(): HTMLPreElement {
 	const element = document.createElement('pre');
 	element.id = 'crankshaftPerformanceOverlay';
 	element.setAttribute('aria-label', 'WOK Client performance and network diagnostics');
+	// This overlay prints the real name it is searching for, so the identity engine must leave it
+	// alone; rewriting it would make the one diagnostic that proves the feature works agree with
+	// itself no matter what.
+	element.setAttribute(NO_REWRITE_ATTRIBUTE, '');
 	Object.assign(element.style, {
 		background: 'rgba(8, 10, 14, 0.82)',
 		border: '1px solid rgba(251, 192, 45, 0.72)',

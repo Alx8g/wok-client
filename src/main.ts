@@ -325,6 +325,12 @@ const settingsSkeleton = {
 	performanceOverlay: false,
 	menuTimer: false,
 	quickClassPicker: false,
+	// Local display only: swapped into this renderer's own UI, never sent to Krunker. Empty = real
+	// one. realName/realClan are the manual fallback for what to search for; normally detected.
+	customName: '',
+	customClan: '',
+	realName: '',
+	realClan: '',
 	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless
 	resourceSwapper: false,
 	cssSwapper: 'None',

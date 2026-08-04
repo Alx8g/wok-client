@@ -156,7 +156,9 @@ export function buildInstallerScript(options: InstallerScriptOptions): string {
     `VIAddVersionKey "FileVersion" "${nsisText(version)}"`,
     `VIAddVersionKey "ProductVersion" "${nsisText(version)}"`,
     `VIAddVersionKey "LegalCopyright" "${nsisText(copyright)}"`,
-    `VIAddVersionKey "OriginalFilename" "${nsisText(path.basename(outFile))}"`,
+    // NSIS output paths are always Windows paths, so split them as such: path.basename on a
+    // POSIX host does not treat a backslash as a separator and would emit the whole path.
+    `VIAddVersionKey "OriginalFilename" "${nsisText(path.win32.basename(outFile))}"`,
     '',
     '; Per-user install: no elevation prompt, no shared state, nothing outside HKCU.',
     'RequestExecutionLevel user',

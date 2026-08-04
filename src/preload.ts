@@ -655,9 +655,13 @@ async function readThemeAsset(name: string): Promise<string> {
 }
 
 /**
- * Mount the two theme style elements, base layer first so a palette can override it. They go up
- * even for 'None': without them already in the document, switching to a theme later would have
+ * Mount the two theme style elements, shared layers first so a palette can override them. They go
+ * up even for 'None': without them already in the document, switching to a theme later would have
  * nothing to write into, and live switching is the point.
+ *
+ * They are appended to <body> on purpose. Krunker's own stylesheets are in <head>, so at equal
+ * specificity these win on document order, which is what lets the game layer restyle the game
+ * without reaching for !important on every rule.
  */
 function ensureThemeElements(): boolean {
 	if (themeBaseElement && themeElement) return true;
@@ -673,9 +677,9 @@ function ensureThemeElements(): boolean {
  * Apply a theme selection to the live document. Exported so the settings UI, which runs in this
  * same renderer, switches themes through exactly the path the boot and reload flows use.
  *
- * A bundled theme is the shared base layer plus its palette; a user file is injected verbatim,
- * with no base layer, because those files were written against the stock look and are not ours
- * to reinterpret. Anything unrecognised resolves to no theme rather than failing.
+ * A bundled theme is the shared layers plus its palette; a user file is injected verbatim, with no
+ * layers, because those files were written against the stock look and are not ours to reinterpret.
+ * Anything unrecognised resolves to no theme rather than failing.
  */
 export async function applyTheme(selection: string, cssPath: string): Promise<void> {
 	if (!ensureThemeElements()) return;
@@ -688,7 +692,11 @@ export async function applyTheme(selection: string, cssPath: string): Promise<vo
 	let themeCSS = '';
 	try {
 		if (source.kind === 'bundled') {
-			[baseCSS, themeCSS] = await Promise.all(source.assets.map(asset => readThemeAsset(asset)));
+			// resolveTheme orders the assets so the palette is last; everything before it is a
+			// shared layer and goes into the element the palette can override.
+			const files = await Promise.all(source.assets.map(asset => readThemeAsset(asset)));
+			themeCSS = files.pop() ?? '';
+			baseCSS = files.join('\n');
 		} else if (source.kind === 'user') {
 			themeCSS = await readFile(pathJoin(cssPath, source.file), { encoding: 'utf-8' });
 		}

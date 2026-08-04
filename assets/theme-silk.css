@@ -1,0 +1,128 @@
+/*
+ * Silk: the quiet one.
+ *
+ * A light, neutral, generously spaced client. Floating surfaces are translucent and blurred, edges
+ * are soft, shadows are wide and faint, motion settles instead of stopping, and the palette is a
+ * near-greyscale with a single blue doing all of the pointing. Nothing here shouts, which is the
+ * whole idea: the game is the loud part.
+ *
+ * Two decisions worth knowing about:
+ *
+ * 1. The HUD does not go light. Menus can be paper; a killfeed, a scoreboard and a chat log sit a
+ *    few pixels from a moving enemy, so the --wok-hud-* values stay dark, translucent and high
+ *    contrast. That split is why this theme can be light at all.
+ *
+ * 2. --wok-blur is the only backdrop-filter in the client, and the layers apply it exclusively to
+ *    surfaces that exist in menus and popups. No blurred element is on screen while the player is
+ *    shooting. It still costs a compositor pass whenever the menu is open over the rendering menu
+ *    scene, so it is deliberately a modest radius, and any theme can opt out by setting
+ *    --wok-blur: none.
+ */
+
+:root {
+	--wok-bg: #ECEEF2;
+	--wok-surface: rgba(250, 250, 252, .84);
+	--wok-surface-raised: rgba(118, 124, 140, .11);
+	--wok-border: rgba(60, 60, 67, .13);
+	--wok-border-strong: rgba(60, 60, 67, .26);
+
+	--wok-accent: #0071E3;
+	--wok-accent-contrast: #FFFFFF;
+	--wok-accent-soft: rgba(0, 113, 227, .12);
+
+	--wok-text: #1C1C1E;
+	--wok-text-muted: rgba(28, 28, 30, .66);
+	--wok-text-faint: rgba(28, 28, 30, .44);
+	--wok-text-on-art: #FFFFFF;
+
+	--wok-danger: #FF3B30;
+	--wok-success: #34C759;
+
+	--wok-radius: 10px;
+	--wok-radius-lg: 20px;
+	--wok-shadow: 0 24px 64px rgba(15, 20, 40, .20), 0 2px 8px rgba(15, 20, 40, .08);
+	--wok-shadow-soft: 0 1px 3px rgba(15, 20, 40, .10);
+	--wok-ease: cubic-bezier(.32, .72, 0, 1);
+	--wok-blur: saturate(170%) blur(14px);
+
+	--wok-font: -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text', 'Segoe UI', Inter, system-ui, sans-serif;
+	--wok-font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace;
+	--wok-heading-transform: none;
+	--wok-heading-spacing: -.01em;
+
+	--wok-hud-bg: rgba(24, 24, 27, .56);
+	--wok-hud-bg-inner: rgba(78, 78, 86, .38);
+	--wok-hud-border: rgba(255, 255, 255, .14);
+	--wok-hud-text: rgba(255, 255, 255, .94);
+
+	--wok-scrollbar-track: rgba(60, 60, 67, .05);
+	--wok-scrollbar-thumb: rgba(60, 60, 67, .26);
+
+	--wok-overlay-bg: rgba(24, 24, 27, .62);
+	--wok-overlay-border: rgba(255, 255, 255, .16);
+	--wok-overlay-text: #FFFFFF;
+}
+
+/*
+ * Air. Krunker's settings rows are packed tight against each other; the extra few pixels are what
+ * make a long list readable. Only block-flow padding and margins are touched, never a width, an
+ * absolute offset or the menu window's own padding, which sticky headers measure themselves
+ * against with negative margins.
+ */
+.setBodH {
+	padding-bottom: 12px;
+	padding-top: 12px;
+}
+
+.settName,
+.settNameSmall {
+	margin-top: 14px;
+	padding-bottom: 14px;
+}
+
+.bigMenTab {
+	padding-bottom: 14px;
+	padding-top: 18px;
+}
+
+.io-button {
+	padding: 10px 20px;
+}
+
+/*
+ * Hairlines instead of the 3-4px rules Krunker draws between rows and around section headers. At
+ * this weight a border separates without dividing.
+ */
+.settName,
+.settNameSmall {
+	border-bottom-width: 1px;
+}
+
+th,
+tr {
+	border-bottom-width: 1px;
+}
+
+.setHed,
+.setHedS,
+.contactsHeader {
+	border-width: 1px;
+}
+
+/*
+ * Settle, do not stop. The menu's own transitions inherit --wok-ease through the layers; these two
+ * have no transition of their own to inherit into, and they are the surfaces the eye follows.
+ */
+#menuWindow {
+	transition: box-shadow 240ms var(--wok-ease);
+}
+
+.skinCard,
+.mapListItem {
+	transition: background-color 180ms var(--wok-ease);
+}
+
+/* A slimmer scrollbar, since the thumb no longer needs a groove to be visible against. */
+::-webkit-scrollbar {
+	width: 10px;
+}

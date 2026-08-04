@@ -1,16 +1,19 @@
 /*
  * WOK theme base layer.
  *
- * Injected ahead of a bundled theme's palette (assets/theme-<id>.css) and carried inside the
- * generated css/theme-template.css. It maps WOK's own surfaces onto the custom properties
- * documented in src/themes.ts (THEME_VARIABLES), so a theme is a palette rather than a pile of
- * selectors.
+ * The first of the two layers a bundled theme loads (the second is assets/theme-game.css, which
+ * covers Krunker's own UI). Both are injected ahead of the palette (assets/theme-<id>.css) and
+ * both are carried inside the generated css/theme-template.css. This one maps WOK's own surfaces
+ * onto the custom properties documented in src/themes.ts (THEME_VARIABLES), so a theme is a
+ * palette rather than a pile of selectors.
  *
  * Two rules this file lives by, both enforced by tests/themes.test.ts:
  *
- * 1. Every selector belongs to a surface WOK adds to the page. Krunker's own game UI is not
- *    styled here. Where a Krunker class appears (.settingsBtn, .inputGrey2, .hostOpt) it is
- *    scoped under .Crankshaft-settings, i.e. inside the panel WOK builds.
+ * 1. Every selector belongs to a surface WOK adds to the page. Krunker's UI is themed by the game
+ *    layer, which is checked against a committed inventory of the real stylesheets; here, where a
+ *    Krunker class appears (.settingsBtn, .inputGrey2, .hostOpt) it is scoped under
+ *    .Crankshaft-settings, i.e. inside the panel WOK builds, and that scoping is what makes it win
+ *    over the game layer's rule for the same class.
  * 2. Every value is var(--wok-*, <the stock value>). A palette that omits a variable still
  *    renders, and the fallback is what the client looks like with no theme selected.
  *
@@ -36,6 +39,7 @@
 .Crankshaft-settings-navitem {
 	border-radius: var(--wok-radius, 0);
 	color: var(--wok-text-muted, rgba(255, 255, 255, .62));
+	transition-timing-function: var(--wok-ease, ease);
 }
 
 .Crankshaft-settings-navitem:hover {
@@ -57,6 +61,7 @@
 	background: var(--wok-surface, transparent);
 	border: 1px solid var(--wok-border, transparent);
 	border-radius: var(--wok-radius, 0);
+	box-shadow: var(--wok-shadow-soft, none);
 }
 
 /* --- settings rows -------------------------------------------------------------------------- */
@@ -147,6 +152,16 @@
 	color: var(--wok-text-muted, inherit);
 }
 
+/*
+ * Multi-select option labels. Krunker paints them white with a near-black outline because in its
+ * own UI they sit on artwork; inside WOK's panel they sit on a flat surface, so on a light theme
+ * white-on-white is all the user gets. Scoped to the panel, so the game's own lists keep the
+ * outlined treatment the game layer gives them.
+ */
+.Crankshaft-settings .crankshaft-multisel-parent .optName {
+	color: var(--wok-text, #fff);
+}
+
 .Crankshaft-settings span.optDescription {
 	color: var(--wok-text-faint, #fff);
 }
@@ -167,7 +182,7 @@
 .crankshaft-holder-update {
 	background-color: var(--wok-surface, black);
 	border: 1px solid var(--wok-border, transparent);
-	border-radius: var(--wok-radius, .5rem);
+	border-radius: var(--wok-radius-lg, .5rem);
 	box-shadow: var(--wok-shadow, none);
 }
 
@@ -197,7 +212,7 @@
 .customKeybindSettingDialogCard {
 	background: var(--wok-surface, #363636);
 	border-color: var(--wok-border-strong, rgba(255, 255, 255, .2));
-	border-radius: var(--wok-radius, .8em);
+	border-radius: var(--wok-radius-lg, .8em);
 	box-shadow: var(--wok-shadow, 1.1em 1.1em 0px black);
 	font-family: var(--wok-font, inherit);
 }
@@ -257,9 +272,10 @@
 /* --- matchmaker popup ----------------------------------------------------------------------- */
 
 #matchmakerPopupContainer {
+	backdrop-filter: var(--wok-blur, none);
 	background-color: var(--wok-surface, #212121);
 	border: 1px solid var(--wok-border, transparent);
-	border-radius: var(--wok-radius, 1.2em);
+	border-radius: var(--wok-radius-lg, 1.2em);
 	box-shadow: var(--wok-shadow, none);
 	font-family: var(--wok-font, inherit);
 }

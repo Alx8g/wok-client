@@ -2,7 +2,7 @@
  * Frost: cool, quiet and legible.
  *
  * Desaturated blue-greys with a bright cyan accent and generous corner radii. The softest of the
- * five: rounded, low contrast between surfaces, nothing shouting.
+ * dark six: rounded, low contrast between surfaces, nothing shouting.
  */
 
 :root {
@@ -19,17 +19,30 @@
 	--wok-text: #EAF2F8;
 	--wok-text-muted: #9DB2C4;
 	--wok-text-faint: #6E8298;
+	--wok-text-on-art: #F4FAFF;
 
 	--wok-danger: #FF6B81;
 	--wok-success: #4ADE80;
 
 	--wok-radius: 8px;
+	--wok-radius-lg: 14px;
 	--wok-shadow: 0 22px 50px rgba(2, 8, 16, .66);
+	--wok-shadow-soft: 0 2px 12px rgba(2, 8, 16, .40);
+	--wok-ease: cubic-bezier(.25, .8, .25, 1);
+	--wok-blur: none;
 
 	--wok-font: Inter, ui-sans-serif, system-ui, sans-serif;
 	--wok-font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
 	--wok-heading-transform: uppercase;
 	--wok-heading-spacing: .07em;
+
+	--wok-hud-bg: rgba(8, 12, 17, .74);
+	--wok-hud-bg-inner: rgba(53, 72, 94, .44);
+	--wok-hud-border: rgba(76, 201, 240, .24);
+	--wok-hud-text: rgba(234, 242, 248, .92);
+
+	--wok-scrollbar-track: #0B1119;
+	--wok-scrollbar-thumb: #2C3D50;
 
 	--wok-overlay-bg: rgba(8, 12, 17, .84);
 	--wok-overlay-border: rgba(76, 201, 240, .66);

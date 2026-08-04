@@ -101,7 +101,7 @@ import { parseSettingsBaselineMarker, planSettingsBaseline, type SettingsBaselin
 import {
 	buildUserThemeTemplate,
 	migrateThemePreference,
-	THEME_BASE_ASSET,
+	THEME_LAYER_ASSETS,
 	THEME_NONE,
 	THEME_TEMPLATE_FILE,
 	THEME_TEMPLATE_STARTER_ID,
@@ -682,7 +682,7 @@ function ensureFilterStorage() {
 
 /**
  * The user's theme folder. Any .css dropped here shows up in the Theme picker; the template is a
- * working copy of a bundled theme (its palette plus the shared layer) so that writing one is
+ * working copy of a bundled theme (its palette plus the shared layers) so that writing one is
  * editing values rather than reverse-engineering selectors. It is only written when missing, so
  * deleting it is how a user asks for a fresh one after an update.
  */
@@ -690,8 +690,11 @@ function ensureCssStorage() {
 	if (!existsSync(cssPath)) mkdirSync(cssPath, { recursive: true });
 	if (existsSync(themeTemplatePath)) return;
 	try {
+		const layers = THEME_LAYER_ASSETS
+			.map(asset => readFileSync(pathJoin($assets, asset), { encoding: 'utf-8' }))
+			.join('\n');
 		writeFileSync(themeTemplatePath, buildUserThemeTemplate(
-			readFileSync(pathJoin($assets, THEME_BASE_ASSET), { encoding: 'utf-8' }),
+			layers,
 			readFileSync(pathJoin($assets, themeAssetName(THEME_TEMPLATE_STARTER_ID)), { encoding: 'utf-8' })
 		), { encoding: 'utf-8' });
 	} catch (error) {

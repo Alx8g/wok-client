@@ -39,7 +39,7 @@ else requestUserPrefs();
 const themeOption: SelectSettingDescItem = {
 	title: 'Theme',
 	type: 'sel',
-	desc: 'Restyles WOK menus. Your own .css files appear here too.',
+	desc: 'Restyles the whole client: menus, HUD, scoreboard, chat and shop. Your own .css files appear here too.',
 	safety: 0,
 	cat: 2,
 	instant: true,

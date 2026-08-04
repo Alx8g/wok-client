@@ -977,6 +977,36 @@ async function readClientStylesheet(file: string, timeoutMs = 5_000): Promise<st
 	}
 }
 
+let latestUserPrefs: UserPrefs | undefined;
+let identityStarterHandle: number | undefined;
+
+/**
+ * Start the local display identity independently of the visuals pipeline.
+ *
+ * That pipeline reads stylesheets and waits on DOM events inside a document Krunker replaces
+ * during start-up, so work queued behind it can be abandoned without ever throwing - which is
+ * exactly how this feature came to be silently dead. Identity needs only preferences and a body,
+ * so it watches for both itself, on the same top-level scheduling the diagnostics use, and stops
+ * the moment it has started.
+ */
+function beginCustomIdentityWatch() {
+	if (identityStarterHandle !== undefined) return;
+	const tryStart = () => {
+		if (!latestUserPrefs || !document.body) return;
+		window.clearInterval(identityStarterHandle);
+		identityStarterHandle = undefined;
+		traceStartup('independent identity start');
+		try {
+			startCustomIdentity(latestUserPrefs);
+		} catch (error) {
+			traceStartup(`independent identity start FAILED: ${String(error)}`);
+			strippedConsole.error('WOK Client could not start the custom identity', error);
+		}
+	};
+	identityStarterHandle = window.setInterval(tryStart, 500);
+	tryStart();
+}
+
 function traceStartup(message: string) {
 	if (!process.env.WOK_FIND_IDENTITY) return;
 	ipcRenderer.send('wok_identity_probe', `[wok-identity] startup: ${message}`);
@@ -1014,6 +1044,8 @@ function injectKeyframeFix() {
  * idempotent per document and later calls reconcile preference changes (reload flow).
  */
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
+	latestUserPrefs = _userPrefs;
+	beginCustomIdentityWatch();
 	traceStartup(`applyClientVisuals entered; readyState=${document.readyState} body=${document.body ? 'present' : 'null'}`);
 	applyClientHotkeys(_userPrefs);
 	observeGameUsable();

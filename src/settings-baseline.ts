@@ -27,6 +27,13 @@ const SAFE_FEATURE_DEFAULTS: ReadonlyArray<readonly [string, UserPrefValue]> = [
 	['resourceSwapper', false]
 ];
 
+/**
+ * The keys baseline 1 resets. Exported so importers (first-run setup) can refuse to carry these
+ * across from another client: a feature this project deliberately ships off must not arrive
+ * switched on through the side door.
+ */
+export const TERMS_SENSITIVE_PREFERENCE_KEYS: readonly string[] = SAFE_FEATURE_DEFAULTS.map(([key]) => key);
+
 export interface SettingsBaselinePlan {
 	/** Marker to persist after applying the patch; undefined when the install is already current. */
 	marker?: SettingsBaselineMarker;

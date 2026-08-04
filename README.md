@@ -133,6 +133,9 @@ Detecting `WAYLAND_DISPLAY` is what WOK adds over Electron's own detection, whic
 `XDG_SESSION_TYPE`. Sessions started from a TTY, from some display managers, or inside some
 containers leave that variable unset and would otherwise silently fall back to X11.
 
+The full evidence behind this default, including what to re-check on the next Electron bump, is in
+[docs/linux-wayland.md](docs/linux-wayland.md).
+
 To override, set `WOK_OZONE_PLATFORM` before launching:
 
 | Value | Effect |

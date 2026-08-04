@@ -139,7 +139,8 @@ export interface BenchmarkTrialHooks {
 	requestFrame(callback: (timestamp: number) => void): void;
 	/**
 	 * The frame's main-thread lane, run before submission the way a game runs its simulation
-	 * before submitting the frame it produced (workload v3: entity update + residual spin). It is
+	 * before submitting the frame it produced (since workload v3: entity update + residual spin,
+	 * carried unchanged into v4). It is
 	 * deliberately inside the measured frame and outside the cpuSubmit bracket, so it contends for
 	 * the thread with submission without being counted as submission cost.
 	 */

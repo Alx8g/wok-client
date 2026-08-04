@@ -111,6 +111,8 @@ if (process.env.WOK_FIND_IDENTITY) {
 			ipcRenderer.send('wok_identity_probe', formatIdentityContext({
 				'getGameActivity()': activity,
 				'getGameActivity typeof': typeof window.getGameActivity,
+				'Object.hasOwn(window, getGameActivity)': Object.hasOwn(window, 'getGameActivity'),
+				'in window': 'getGameActivity' in window,
 				'localStorage keys': storageKeys,
 				'document.body text (first 400)': bodyText.slice(0, 400),
 				'window.me': (window as unknown as Record<string, unknown>).me,

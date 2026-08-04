@@ -134,7 +134,11 @@ function ambientEnvironment(): CustomIdentityEnvironment | undefined {
 		createObserver: callback => new MutationObserver(records => { callback(records as unknown as IdentityMutationRecord[]); }),
 		// Handed back as a callable rather than the raw property so it is still invoked as a method
 		// on window, the way Krunker's own code calls it.
-		getGameActivity: () => (Object.hasOwn(window, 'getGameActivity') && typeof window.getGameActivity === 'function'
+		// A typeof check is the whole test. Requiring an own property as well was the bug that kept
+		// detection from ever firing: the diagnostic probe read the name through typeof alone,
+		// while this guard rejected the same function, so the feature silently fell back to the
+		// name the user typed in by hand.
+		getGameActivity: () => (typeof window.getGameActivity === 'function'
 			? () => window.getGameActivity()
 			: undefined),
 		root: () => document.body as unknown as IdentityRewriteNode,

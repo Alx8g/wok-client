@@ -47,6 +47,26 @@ import { createGraphicsStabilityConfirmation } from './graphics-stability.ts';
 import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
 import { migrateLegacyConfigsPhaseOne, migrateLegacyConfigsPhaseTwo, type LegacyConfigSource } from './config-migration.ts';
 import {
+	advanceOnboardingFlow,
+	createOnboardingFlow,
+	createOnboardingMarker,
+	currentOnboardingStep,
+	describeOnboardingFollowUp,
+	ONBOARDING_WINDOW_MODES,
+	parseOnboardingAction,
+	parseOnboardingMarker,
+	planOnboardingOutcome,
+	shouldRunOnboarding,
+	type OnboardingMarker
+} from './onboarding.ts';
+import {
+	detectImportCandidates,
+	diffImportedPreferences,
+	mapImportedSettings,
+	type ImportCandidate,
+	type ImportClientId
+} from './onboarding-import.ts';
+import {
 	CALIBRATION_BENCHMARK_MS,
 	CALIBRATION_INTRA_LAUNCH_COOLDOWN_MS,
 	CALIBRATION_LOW_CONFIDENCE_REASONS,
@@ -293,12 +313,15 @@ if (!gotTheLock) {
 // module reads or seeds before command-line switches and window creation. All unknown
 // regular files and directory trees migrate in phase 2 once a window exists.
 let deferredMigrationSources: LegacyConfigSource[] = [];
+/** Whether a Crankshaft profile has ever been brought across, so first-run setup can say so. */
+let crankshaftProfileMigrated = false;
 try {
 	const migration = migrateLegacyConfigsPhaseOne(configPath, [
 		{ label: 'Crankshaft AppData', path: legacyRoamingConfigPath },
 		{ label: 'Crankshaft Documents', path: legacyDocumentsConfigPath }
 	]);
 	deferredMigrationSources = migration.deferredSources;
+	crankshaftProfileMigrated = migration.completed || migration.foundSources.length > 0;
 	if (migration.foundSources.length > 0) {
 		console.log(`Migrated ${migration.copiedFiles} startup-critical legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files. Remaining files migrate in the background after the game window opens.`);
 	}
@@ -313,6 +336,7 @@ const calibrationPath = pathJoin(configPath, 'calibration.json');
 const adaptiveValidationPath = pathJoin(configPath, 'adaptive-validation.json');
 const competitiveModeBackupPath = pathJoin(configPath, 'competitive-mode-backup.json');
 const safetyBaselinePath = pathJoin(configPath, 'safety-baseline-v1.json');
+const onboardingMarkerPath = pathJoin(configPath, 'onboarding.json');
 const filtersPath = pathJoin(configPath, 'filters.txt');
 const cssPath = pathJoin(configPath, 'css');
 const exampleCssPath = pathJoin(cssPath, 'example.css');
@@ -734,6 +758,26 @@ if (settingsBaselinePlan.marker) {
 	// already been applied and persisted, so the marker is safe to advance.
 	writeFileSync(safetyBaselinePath, JSON.stringify(settingsBaselinePlan.marker, null, 2), { encoding: 'utf-8' });
 }
+
+// First-run setup, shown once per marker version (src/onboarding.ts). Read here beside the other
+// one-time markers; an unreadable marker leaves setup alone, exactly like the baseline above, and
+// Settings can always run it again on purpose.
+let onboardingMarker: OnboardingMarker | undefined;
+let onboardingMarkerUnreadable = false;
+if (existsSync(onboardingMarkerPath)) {
+	try {
+		onboardingMarker = parseOnboardingMarker(JSON.parse(readFileSync(onboardingMarkerPath, 'utf-8')));
+		onboardingMarkerUnreadable = onboardingMarker === undefined;
+	} catch (error) {
+		console.error('Failed to read the first-run setup marker; setup will not be offered automatically', error);
+		onboardingMarkerUnreadable = true;
+	}
+}
+let onboardingPending = shouldRunOnboarding(onboardingMarker, onboardingMarkerUnreadable);
+
+/** Other Krunker clients whose settings this build can read; see src/onboarding-import.ts. */
+const kccConfigPath = pathJoin(app.getPath('appData'), 'krunker-civilian-client', 'krunker-civilian-config.json');
+const gatoclientLiteSettingsPath = pathJoin(app.getPath('documents'), 'GatoclientLite', 'settings.json');
 
 let mainWindow: BrowserWindow;
 let gpuFeatureStatus: Record<string, string> = {};
@@ -1288,6 +1332,10 @@ ipcMain.on('calibration_request_rerun', event => {
 	if (!isTrustedGameIpcSender(event)) return;
 	void requestCalibrationRunAndRelaunch();
 });
+ipcMain.on('onboarding_request_rerun', event => {
+	if (!isTrustedGameIpcSender(event)) return;
+	void runOnboarding();
+});
 
 // initial request of settings to populate the settingsUI
 ipcMain.on('settingsUI_requests_userPrefs', event => {
@@ -1344,6 +1392,182 @@ function calibrationDataUrl(html: string): string {
 /** Keeps calibration and gameplay on the same primary-display surface and window mode. */
 function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
 	return resolveGameplayWindowGeometry(userPrefs.fullscreen, screen.getPrimaryDisplay(), windowScale);
+}
+
+let onboardingRunning = false;
+
+function writeOnboardingMarker(): void {
+	try {
+		writeFileSync(onboardingMarkerPath, JSON.stringify(createOnboardingMarker(), null, 2), { encoding: 'utf-8' });
+	} catch (error) {
+		console.error('Failed to persist the first-run setup marker', error);
+	}
+}
+
+/**
+ * Queue calibration for the next launch. Deliberately does not relaunch the way the Settings and
+ * Competitive-enable entry points do: first-run setup must never stand between a fresh install and
+ * its first match (design §4.1), so the measurement waits until the user comes back on their own.
+ */
+async function scheduleCalibrationForNextLaunch(): Promise<void> {
+	if (!calibrationState) {
+		const gpuInfo = await refreshCompleteGraphicsInfo();
+		prepareCalibrationForGpuInfo(gpuInfo);
+	}
+	if (calibrationState) persistCalibrationState(requestCalibrationRerun(calibrationState));
+}
+
+function applyOnboardingPreferences(patch: Partial<UserPrefs>): boolean {
+	if (Object.keys(patch).length === 0) return false;
+	Object.assign(userPrefs, patch);
+	settingsRevision++;
+	scheduleSettingsWrite();
+	return true;
+}
+
+/** Current values for the controls on the settings step, so the page opens on the truth. */
+function onboardingSettingsDefaults(): Record<string, unknown> {
+	const windowMode = String(userPrefs.fullscreen);
+	return {
+		discordRPC: userPrefs.discordRPC === true,
+		fullscreen: (ONBOARDING_WINDOW_MODES as readonly string[]).includes(windowMode) ? windowMode : 'windowed',
+		performanceOverlay: userPrefs.performanceOverlay === true
+	};
+}
+
+function importOnboardingSource(candidates: readonly ImportCandidate[], id: ImportClientId): boolean {
+	const candidate = candidates.find(entry => entry.id === id && entry.kind === 'importable');
+	if (!candidate) return false;
+	try {
+		const mapping = mapImportedSettings(candidate.id, JSON.parse(readFileSync(candidate.path, 'utf-8')));
+		const applied = applyOnboardingPreferences(diffImportedPreferences(mapping.preferences, userPrefs));
+		console.log(
+			`Imported ${Object.keys(mapping.preferences).length} setting(s) from ${candidate.label}.`
+			+ (mapping.skippedTermsSensitive.length > 0
+				? ` Left ${mapping.skippedTermsSensitive.join(', ')} switched off.`
+				: '')
+		);
+		return applied;
+	} catch (error) {
+		console.error(`Failed to import settings from ${candidate.label}`, error);
+		return false;
+	}
+}
+
+function createOnboardingWindow(): BrowserWindow {
+	const setupWindow = new BrowserWindow({
+		alwaysOnTop: true,
+		backgroundColor: '#0A0A0A',
+		center: true,
+		fullscreenable: false,
+		height: 640,
+		maximizable: false,
+		minimizable: false,
+		resizable: false,
+		show: false,
+		title: 'WOK Client setup',
+		width: 660,
+		webPreferences: {
+			contextIsolation: true,
+			// Nothing here is meant to be inspected at runtime; keep the surface minimal.
+			devTools: false,
+			nodeIntegration: false,
+			sandbox: true,
+			spellcheck: false
+		}
+	});
+	setupWindow.setAutoHideMenuBar(true);
+	setupWindow.setMenuBarVisibility(false);
+	setupWindow.once('ready-to-show', () => {
+		if (setupWindow.isDestroyed()) return;
+		setupWindow.show();
+		setupWindow.focus();
+	});
+	return setupWindow;
+}
+
+/**
+ * Drive first-run setup. The window is sandboxed with no preload and no IPC surface, so the page is
+ * rendered one step at a time from here and each step resolves with what the user clicked; every
+ * decision is made by the pure module. Closing the window, a dead renderer, or any failure ends the
+ * run keeping whatever was answered so far, marks setup as shown, and leaves the game alone.
+ */
+async function runOnboarding(): Promise<void> {
+	if (onboardingRunning) return;
+	onboardingRunning = true;
+	let setupWindow: BrowserWindow | undefined;
+	let importedPreferences = false;
+	try {
+		const candidates = detectImportCandidates({
+			crankshaftMigrated: crankshaftProfileMigrated,
+			gatoclientLiteSettingsPath,
+			kccConfigPath
+		}, existsSync);
+		const [{ buildOnboardingPage, onboardingPageUrl, onboardingRenderCall }, logoSvg] = await Promise.all([
+			import('./onboarding-window.ts'),
+			readFile(pathJoin($assets, 'full_logo.svg'), 'utf-8')
+		]);
+
+		setupWindow = createOnboardingWindow();
+		const activeWindow = setupWindow;
+		let rejectClosed: (reason?: unknown) => void = () => {};
+		const closed = new Promise<never>((_resolve, reject) => { rejectClosed = reject; });
+		closed.catch(() => {});
+		activeWindow.once('closed', () => rejectClosed(new Error('First-run setup window was closed.')));
+		await activeWindow.loadURL(onboardingPageUrl(buildOnboardingPage({ candidates, logoSvg })));
+
+		let flow = createOnboardingFlow({ includeImport: candidates.length > 0 });
+		while (!flow.finished) {
+			const step = currentOnboardingStep(flow);
+			if (!step) break;
+			const view = {
+				...(step === 'settings' ? { defaults: onboardingSettingsDefaults() } : {}),
+				index: flow.index,
+				...(step === 'done'
+					? { note: describeOnboardingFollowUp(planOnboardingOutcome(flow.choices, userPrefs), importedPreferences) }
+					: {}),
+				stepId: step,
+				total: flow.steps.length
+			};
+
+			let response: unknown;
+			try {
+				response = await Promise.race([
+					activeWindow.webContents.executeJavaScript(onboardingRenderCall(view)),
+					closed
+				]);
+			} catch (_error) {
+				// Closed early. Everything answered up to this point still counts.
+				break;
+			}
+
+			const action = parseOnboardingAction(response);
+			if (action.kind === 'next' && step === 'import' && action.choices.importFrom) {
+				importedPreferences = importOnboardingSource(candidates, action.choices.importFrom) || importedPreferences;
+			}
+			flow = advanceOnboardingFlow(flow, action);
+		}
+
+		// Close before applying: staging calibration can wait on the complete GPU identity for a few
+		// seconds, and nobody should watch a finished wizard while that happens.
+		if (!activeWindow.isDestroyed()) activeWindow.destroy();
+		setupWindow = undefined;
+		if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+
+		const outcome = planOnboardingOutcome(flow.choices, userPrefs);
+		applyOnboardingPreferences(outcome.preferences);
+		if (outcome.scheduleCalibration) await scheduleCalibrationForNextLaunch();
+	} catch (error) {
+		console.error('First-run setup did not finish; continuing into the game', error);
+	} finally {
+		// The marker is written even on the failure path. A setup that cannot open is worse when it
+		// tries again every launch, and Settings can always run it on purpose.
+		onboardingPending = false;
+		onboardingRunning = false;
+		writeOnboardingMarker();
+		if (setupWindow && !setupWindow.isDestroyed()) setupWindow.destroy();
+		if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+	}
 }
 
 const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
@@ -2257,6 +2481,16 @@ app.on('ready', async () => {
 	// never delay the first byte of Krunker's load. Calibration launches skip it: that flow has
 	// already put windows in front of the user and should reach the game as directly as possible.
 	let cancelActiveIntro: (() => void) | undefined;
+
+	// First-run setup opens over the loading game rather than in front of it: Krunker is already
+	// downloading behind this window, so the wizard costs the launch nothing and closing it at any
+	// point drops the user straight into the game. Calibration launches never show it.
+	let onboardingFollowsIntro = false;
+	const beginOnboardingIfPending = () => {
+		if (!onboardingPending || calibrationBlocksStartup) return;
+		void runOnboarding();
+	};
+
 	if (userPrefs.introAnimation && introVariant !== 'none' && !calibrationBlocksStartup) {
 		introHandoff.beginIntro();
 		let introSequence: IntroSequence | undefined;
@@ -2298,8 +2532,10 @@ app.on('ready', async () => {
 					introHandoff.endIntro();
 					cleanupIntroListeners();
 					logPerfMark('intro-finished');
+					beginOnboardingIfPending();
 				}
 			});
+			onboardingFollowsIntro = true;
 			if (introFinished) introSequence = undefined;
 		} catch (error) {
 			console.error('Launch intro setup failed; continuing directly to the game.', error);
@@ -2307,6 +2543,9 @@ app.on('ready', async () => {
 			introHandoff.revealForUse();
 		}
 	}
+
+	// No intro to wait behind: the wizard opens as soon as navigation is under way.
+	if (!onboardingFollowsIntro) beginOnboardingIfPending();
 
 	try {
 		await gameNavigation;

@@ -125,7 +125,7 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
           cat > release-notes.txt <<EOF
-          WOK Client ${version} contains the unified WOK client, including the adaptive startup-video system, hardware calibration and graphics selection, hardened IPC and packaging, and the verified offline runtime laboratory.
+          WOK Client ${version} contains the unified WOK client, including the adaptive startup-video system, hardware calibration and graphics selection, and hardened IPC and packaging.
 
           Included platforms:
           - Windows x64 installer

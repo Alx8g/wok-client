@@ -195,6 +195,8 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 	let frameTimeSum = 0;
 	let longFrameCount = 0;
 	let eventLoopWorstMs = 0;
+	let lastFrameCallbackTs: number | undefined;
+	let worstFrameCallbackIntervalMs = 0;
 	let stalledTicks = 0;
 	let totalTicks = 0;
 	let gpuDisjointDiscardCount = 0;
@@ -205,6 +207,16 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		const ext = extension;
 		// A missing GL context is a plain failure (round-1 semantics), not a retryable rejection.
 		if (gl && frameTimes.length < config.minSamples) rejectionReasons.add('insufficient-samples');
+		const sortedFrames = [...frameTimes].sort((left, right) => left - right);
+		const worstFrameTimeMs = sortedFrames.at(-1) || 0;
+		// Chromium can defer an interval callback while continuing to deliver animation callbacks.
+		// Keep that timer lateness as diagnostic evidence, but only classify it as contamination when
+		// independent callback cadence confirms a severe main-thread gap. Submitted-frame intervals
+		// cannot corroborate this because an unsignaled GPU fence intentionally stretches them.
+		if (
+			eventLoopWorstMs >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS
+			&& worstFrameCallbackIntervalMs >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS
+		) rejectionReasons.add('severe-event-loop-disturbance');
 		let gpuTimingStatus: BenchmarkGpuTimingStatus = ext ? 'measured' : 'unsupported';
 		if (ext) {
 			// Relative to sampling attempts, not to frame count: GPU timing is sampled on one
@@ -220,7 +232,6 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			if (disjointExcessive && rejectionReasons.size > 0) rejectionReasons.add('gpu-disjoint-excessive');
 		}
 
-		const sortedFrames = [...frameTimes].sort((left, right) => left - right);
 		const sortedDelays = [...eventLoopDelays].sort((left, right) => left - right);
 		const sortedSubmits = [...cpuSubmitTimes].sort((left, right) => left - right);
 		const sortedGpu = [...gpuSamplesMs].sort((left, right) => left - right);
@@ -280,7 +291,7 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			success: frameTimes.length > 0,
 			totalTicks,
 			webglRenderer: hooks.webglRenderer,
-			worstFrameTimeMs: round(sortedFrames.at(-1) || 0)
+			worstFrameTimeMs: round(worstFrameTimeMs)
 		};
 	};
 
@@ -354,7 +365,6 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			const delay = Math.max(0, now - samplerExpected);
 			eventLoopDelays.push(delay);
 			eventLoopWorstMs = Math.max(eventLoopWorstMs, delay);
-			if (delay >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS) rejectionReasons.add('severe-event-loop-disturbance');
 		}
 		samplerExpected = now + BENCHMARK_EVENT_LOOP_SAMPLE_MS;
 	}, BENCHMARK_EVENT_LOOP_SAMPLE_MS);
@@ -392,9 +402,22 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			if (!measuring && timestamp >= warmupMinEnd && (warmupSettled() || timestamp >= warmupHardEnd)) {
 				measuring = true;
 				measureEnd = timestamp + config.benchmarkMs;
-				// Establish a fresh timer baseline inside the measured interval so lateness
-				// accumulated during warmup cannot reject an otherwise clean trial.
+				// Establish fresh timer and callback baselines inside the measured interval so
+				// lateness accumulated during warmup cannot reject an otherwise clean trial.
 				samplerExpected = undefined;
+				lastFrameCallbackTs = undefined;
+			}
+			if (measuring) {
+				if (lastFrameCallbackTs !== undefined) {
+					const callbackInterval = timestamp - lastFrameCallbackTs;
+					if (callbackInterval > 0) {
+						worstFrameCallbackIntervalMs = Math.max(
+							worstFrameCallbackIntervalMs,
+							callbackInterval
+						);
+					}
+				}
+				lastFrameCallbackTs = timestamp;
 			}
 			if (hooks.onProgress) {
 				hooks.onProgress(measuring

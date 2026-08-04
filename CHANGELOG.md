@@ -20,8 +20,6 @@
 - Consolidated the useful historical client work into the unified WOK implementation.
 - Added the full adaptive startup-video system and one-shot gameplay-readiness handoff.
 - Added hardened calibration, graphics selection, settings, matchmaking, diagnostics, and recovery behavior.
-- Added verified native ETL capture, offline PresentMon replay, creation-qualified process binding, and content-addressed runtime evidence.
-- Added mandatory verified tournament dry runs, exact attested execution ordering, and at least seven paired blocks.
 - Tightened Electron IPC boundaries, package inventory checks, notice provenance, and cross-platform validation.
 
 ## WOK Client 1.0.0 (2026-08-02)
@@ -38,7 +36,6 @@ Modification notice: WOK Client is a modified distribution based on Crankshaft 2
 - Retained the upstream Crankshaft 2.0.1 removal of the `in-process-gpu` switch that broke Windows startup.
 - Assigned a fork-specific version and added patched-Electron source, patch, license, and SHA-256 provenance records.
 - Added source validation across Windows, Linux, and macOS plus a pinned tag-only workflow for unsigned, checksum-published GitHub prereleases.
-- Added an attested offline runtime laboratory with dedicated ETL capture, offline PresentMon replay, exact tournament plans, and content-addressed evidence.
 - Added an adaptive launch intro and one-shot gameplay-readiness handoff.
 
 ## [2.0.1](https://github.com/KraXen72/crankshaft/compare/2.0.0...2.0.1) (2026-07-29)

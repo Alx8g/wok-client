@@ -47,6 +47,18 @@ function escapeHtml(value: string): string {
 		.replaceAll("'", '&#39;');
 }
 
+const lowConfidenceLabels: Record<CalibrationLowConfidenceReason, string> = {
+	'document-visibility-changed': 'document visibility changed',
+	'gpu-disjoint-excessive': 'excessive GPU timer disruption',
+	'gpu-queue-exceeds-frame-budget': 'queued GPU work exceeded the frame budget',
+	'insufficient-samples': 'too few frame samples',
+	'power-state-changed': 'AC/battery power changed',
+	'severe-event-loop-disturbance': 'severe event-loop disturbance',
+	'webgl-context-lost': 'WebGL context loss',
+	'window-blurred': 'window lost focus',
+	'window-resized': 'window was resized'
+};
+
 function embedJson(value: unknown): string {
 	return JSON.stringify(value).replaceAll('<', '\\u003c');
 }
@@ -172,6 +184,9 @@ export interface CalibrationTrialPageExtras {
 	/** 1-based attempt number; 2 renders the retry messaging (design §2.4). */
 	attempt?: number;
 	onBattery?: boolean;
+	/** Diagnostics from the rejected attempt that caused this retry. */
+	previousEventLoopWorstMs?: number;
+	previousRejectionReasons?: CalibrationLowConfidenceReason[];
 	refreshRateHz?: number;
 }
 
@@ -184,6 +199,20 @@ export function buildCalibrationTrialPage(
 ): string {
 	const attempt = extras.attempt ?? 1;
 	const isRetry = attempt > 1;
+	const previousRejectionReasons = extras.previousRejectionReasons ?? [];
+	const previousReasonText = previousRejectionReasons
+		.map(reason => {
+			const label = lowConfidenceLabels[reason];
+			return reason === 'severe-event-loop-disturbance'
+				&& typeof extras.previousEventLoopWorstMs === 'number'
+				&& Number.isFinite(extras.previousEventLoopWorstMs)
+				? `${label} (${extras.previousEventLoopWorstMs.toFixed(1)} ms timer delay)`
+				: label;
+		})
+		.join(', ');
+	const retryWarning = previousReasonText
+		? `The previous attempt detected ${previousReasonText}, so this trial is running again.`
+		: 'Interference was detected, so this trial is running again.';
 	const trialDefaults = {
 		benchmarkMs: CALIBRATION_BENCHMARK_MS,
 		minSamples: CALIBRATION_MIN_SAMPLES,
@@ -223,7 +252,7 @@ export function buildCalibrationTrialPage(
 				<div class="progress-track"><div class="progress-fill" id="progress"></div></div>
 				<div class="status"><span id="phase">Preparing renderer</span><span id="live">Collecting samples</span></div>
 				<div class="warning${isRetry ? ' visible' : ''}" id="warning">${isRetry
-					? 'Interference was detected, so this trial is running again. If it is interfered with once more, the better attempt is kept as lower-confidence evidence.'
+					? `${escapeHtml(retryWarning)} If it is interfered with once more, the better attempt is kept as lower-confidence evidence.`
 					: 'This trial has lower-confidence evidence. Measurement will continue and the reason will be shown with the result.'}</div>
 				<div class="privacy">This calibration is local. The private test build does not transmit benchmark results.</div>
 			</section>
@@ -378,18 +407,6 @@ export function buildCalibrationTrialPage(
 	</body>
 	</html>`;
 }
-
-const lowConfidenceLabels: Record<CalibrationLowConfidenceReason, string> = {
-	'document-visibility-changed': 'document visibility changed',
-	'gpu-disjoint-excessive': 'excessive GPU timer disruption',
-	'gpu-queue-exceeds-frame-budget': 'queued GPU work exceeded the frame budget',
-	'insufficient-samples': 'too few frame samples',
-	'power-state-changed': 'AC/battery power changed',
-	'severe-event-loop-disturbance': 'severe event-loop disturbance',
-	'webgl-context-lost': 'WebGL context loss',
-	'window-blurred': 'window lost focus',
-	'window-resized': 'window was resized'
-};
 
 function backendVerificationText(verification: EffectiveBackendVerification): string {
 	if (verification.status === 'verified') return `Effective renderer verified as ${verification.candidateBackend}.`;

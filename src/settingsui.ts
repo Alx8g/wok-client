@@ -6,7 +6,12 @@ import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
 import { styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
-import { MATCHMAKER_GAMEMODES, MATCHMAKER_REGIONS } from './matchmaker-data.ts';
+import {
+	MATCHMAKER_GAMEMODES,
+	MATCHMAKER_MAP_SCOPES,
+	MATCHMAKER_OFFICIAL_MAPS,
+	MATCHMAKER_REGIONS
+} from './matchmaker-data.ts';
 import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
 
 const RefreshEnum = {
@@ -148,6 +153,8 @@ const settingsDesc: SettingsDesc = {
 	matchmaker_openServerWindow: { title: 'Open Server Window On Cancel', type: 'bool', safety: 0, cat: 2, instant: true },
 	matchmaker_regions: { title: 'Whitelisted regions', type: 'multisel', desc: '', safety: 0, cat: 2, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
 	matchmaker_gamemodes: { title: 'Whitelisted gamemodes', type: 'multisel', desc: '', safety: 0, cat: 2, opts: MATCHMAKER_GAMEMODES, cols: 4, instant: true },
+	matchmaker_mapScope: { title: 'Map scope', type: 'sel', desc: 'Official uses WOK\'s reviewed rotation list. Selected uses the map choices below. All includes community maps.', safety: 0, cat: 2, opts: MATCHMAKER_MAP_SCOPES, instant: true },
+	matchmaker_maps: { title: 'Selected maps', type: 'multisel', desc: 'Used only when Map scope is selected.', safety: 0, cat: 2, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
 	matchmaker_minRemainingTime: { title: 'Minimum remaining seconds', type: 'num', min: 0, max: 480, safety: 0, cat: 2, instant: true },
 	matchmaker_minPlayers: { title: 'Minimum players in Lobby', type: 'num', min: 0, max: 7, safety: 0, cat: 2, instant: true },
 	matchmaker_maxPlayers: { title: 'Maximum players in Lobby', type: 'num', min: 0, max: 7, safety: 0, cat: 2, instant: true, desc: 'if you set the criteria too strictly, matchmaker won\'t find anything' },

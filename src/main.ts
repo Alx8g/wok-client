@@ -2,6 +2,7 @@
 import { isAbsolute as pathIsAbsolute, join as pathJoin, resolve as pathResolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
+import { Socket } from 'net';
 import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
 import { buildDiagnosticsReport } from './diagnostics-report.ts';
@@ -89,8 +90,19 @@ import {
 } from './calibration.ts';
 import { WORKLOAD_CONSTANTS, WORKLOAD_VERSION } from './calibration-workload.ts';
 import type { CompetitiveGameSettings } from './competitive-mode.ts';
+import {
+	MATCHMAKER_PING_LIST_MAX_RESPONSE_BYTES,
+	MATCHMAKER_PING_LIST_URL,
+	MatchmakerRegionLatencyService,
+	type MatchmakerPingTarget
+} from './matchmaker-latency.ts';
+import { readBoundedMatchmakerJson } from './matchmaker-response.ts';
 import { parseSettingsBaselineMarker, planSettingsBaseline, type SettingsBaselineMarker } from './settings-baseline.ts';
-import { containsObsoletePreferences, parseUserPreferencePatch } from './user-preferences.ts';
+import {
+	containsObsoletePreferences,
+	parseUserPreferencePatch,
+	shouldMigrateMatchmakerMapScope
+} from './user-preferences.ts';
 import { resolveGameplayWindowGeometry } from './window-geometry.ts';
 import {
 	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
@@ -352,6 +364,8 @@ const settingsSkeleton = {
 	matchmaker_openServerWindow: true,
 	matchmaker_regions: [] as string[],
 	matchmaker_gamemodes: [] as string[],
+	matchmaker_mapScope: 'official',
+	matchmaker_maps: [] as string[],
 	matchmaker_minPlayers: 1,
 	matchmaker_maxPlayers: 6,
 	matchmaker_minRemainingTime: 120,
@@ -368,8 +382,10 @@ if (!existsSync(configPath)) mkdirSync(configPath, { recursive: true });
 if (!existsSync(settingsPath)) writeFileSync(settingsPath, JSON.stringify(settingsSkeleton, null, 2), { encoding: 'utf-8', flag: 'wx' });
 try {
 	const rawSettings: unknown = JSON.parse(readFileSync(settingsPath, { encoding: 'utf-8' }));
-	settingsNeedCanonicalRewrite = containsObsoletePreferences(rawSettings);
+	const migrateMatchmakerMapScope = shouldMigrateMatchmakerMapScope(rawSettings);
+	settingsNeedCanonicalRewrite = containsObsoletePreferences(rawSettings) || migrateMatchmakerMapScope;
 	Object.assign(userPrefs, parseUserPreferencePatch(rawSettings));
+	if (migrateMatchmakerMapScope) userPrefs.matchmaker_mapScope = 'all';
 } catch (error) {
 	console.error('Failed to read WOK Client settings; using safe defaults', error);
 }
@@ -721,6 +737,51 @@ if (settingsBaselinePlan.marker) {
 
 let mainWindow: BrowserWindow;
 let gpuFeatureStatus: Record<string, string> = {};
+
+async function loadMatchmakerPingTargets(signal: AbortSignal): Promise<unknown> {
+	const response = await fetch(MATCHMAKER_PING_LIST_URL, { signal });
+	if (!response.ok) throw new Error(`Matchmaker ping-list request failed with HTTP ${response.status}`);
+	return readBoundedMatchmakerJson(response, MATCHMAKER_PING_LIST_MAX_RESPONSE_BYTES);
+}
+
+function probeMatchmakerPingTarget(
+	target: MatchmakerPingTarget,
+	signal: AbortSignal
+): Promise<number | undefined> {
+	return new Promise(resolve => {
+		const socket = new Socket();
+		const startedAt = process.hrtime.bigint();
+		let settled = false;
+		const finish = (latencyMs?: number) => {
+			if (settled) return;
+			settled = true;
+			signal.removeEventListener('abort', onAbort);
+			socket.destroy();
+			resolve(latencyMs);
+		};
+		const onAbort = () => finish();
+		if (signal.aborted) {
+			finish();
+			return;
+		}
+		signal.addEventListener('abort', onAbort, { once: true });
+		socket.once('connect', () => {
+			const elapsedNs = process.hrtime.bigint() - startedAt;
+			finish(Number(elapsedNs) / 1_000_000);
+		});
+		socket.once('error', () => finish());
+		try {
+			socket.connect(target.port, target.host);
+		} catch (_error) {
+			finish();
+		}
+	});
+}
+
+const matchmakerLatencyService = new MatchmakerRegionLatencyService({
+	loadTargets: loadMatchmakerPingTargets,
+	probeTarget: probeMatchmakerPingTarget
+});
 
 function isTrustedGameIpcSender(event: IpcMainEvent | IpcMainInvokeEvent): boolean {
 	if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return false;
@@ -1220,6 +1281,15 @@ ipcMain.on('matchmaker_requests_userPrefs', event => {
 	if (!isTrustedGameIpcSender(event)) return;
 	mainWindow.webContents.send('matchmakerRedirect', userPrefs);
 });
+ipcMain.handle('matchmaker_measure_region_latency', async (event, regions: unknown) => {
+	if (!isTrustedGameIpcSender(event) || !Array.isArray(regions) || regions.length > 64) return {};
+	try {
+		return await matchmakerLatencyService.measure(regions);
+	} catch (error) {
+		console.warn('Failed to measure matchmaker region latency', error);
+		return {};
+	}
+});
 
 // Coalesce validated renderer updates and persist them without blocking the UI or main process.
 ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
@@ -1310,7 +1380,13 @@ async function createCalibrationWindow(deadlineAt: number): Promise<BrowserWindo
 	}
 }
 
-async function runCalibrationTrial(candidate: CalibrationCandidate, step: number, total: number, attempt = 1): Promise<CalibrationMetrics> {
+async function runCalibrationTrial(
+	candidate: CalibrationCandidate,
+	step: number,
+	total: number,
+	attempt = 1,
+	previousAttempt?: CalibrationMetrics
+): Promise<CalibrationMetrics> {
 	const deadlineAt = clampCalibrationTrialDeadline(
 		calibrationState,
 		Date.now() + CALIBRATION_TRIAL_DEADLINE_MS
@@ -1336,6 +1412,12 @@ async function runCalibrationTrial(candidate: CalibrationCandidate, step: number
 		const trialUrl = calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg, {
 			attempt,
 			onBattery: powerMonitor.isOnBatteryPower(),
+			...(previousAttempt
+				? {
+					previousEventLoopWorstMs: previousAttempt.eventLoopWorstMs,
+					previousRejectionReasons: previousAttempt.rejectionReasons
+				}
+				: {}),
 			...(typeof display.displayFrequency === 'number' && display.displayFrequency > 0 ? { refreshRateHz: display.displayFrequency } : {})
 		}));
 		await runBeforeDeadline(
@@ -1461,6 +1543,7 @@ async function runCalibrationTrialWithRetry(
 	step: number,
 	total: number
 ): Promise<CalibrationTrialAttemptOutcome> {
+	let previousAttempt: CalibrationMetrics | undefined;
 	return orchestrateCalibrationTrialRetry({
 		candidate,
 		getState: () => calibrationState,
@@ -1481,7 +1564,8 @@ async function runCalibrationTrialWithRetry(
 					candidate,
 					step,
 					total,
-					attempt
+					attempt,
+					previousAttempt
 				);
 				failureReason = activeCalibrationFailureReason;
 				if (failureReason) metrics = failedCalibrationMetrics();
@@ -1504,6 +1588,12 @@ async function runCalibrationTrialWithRetry(
 				metrics = markMetricsRejected(
 					metrics,
 					'power-state-changed'
+				);
+			}
+			previousAttempt = metrics;
+			if ((metrics.rejectionReasons?.length ?? 0) > 0) {
+				console.warn(
+					`Calibration ${candidate.id} attempt ${attempt} rejected: ${metrics.rejectionReasons?.join(', ')}; event-loop worst ${metrics.eventLoopWorstMs ?? 0} ms; frame worst ${metrics.worstFrameTimeMs} ms.`
 				);
 			}
 			return {

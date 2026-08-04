@@ -1,6 +1,0 @@
-{
-	"name": "wok-runtime-lab-electron-host",
-	"private": true,
-	"version": "1.0.0",
-	"main": "main.cjs"
-}

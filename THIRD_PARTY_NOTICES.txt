@@ -20,9 +20,8 @@ hardware-adaptive graphics selection and recovery, calibration and diagnostics,
 startup and gameplay-readiness instrumentation, the launch-intro handoff,
 Competitive mode, safer configuration migration and IPC/request validation,
 terms-sensitive defaults, cross-platform source and tag-release CI, packaging
-changes, removal of the userscript subsystem, and an attested offline runtime
-laboratory. The runtime laboratory source is excluded from the packaged
-Electron application. See the top WOK Client entry in CHANGELOG.md.
+changes, and removal of the userscript subsystem. See the top WOK Client entry
+in CHANGELOG.md.
 
 FIRST-PARTY LAUNCH MEDIA
 
@@ -97,23 +96,6 @@ pnpm 11.15.1: MIT
 NSIS is an external Windows installer build tool and is not stored in this
 source tree. NSIS is distributed under the zlib/libpng license:
   https://nsis.sourceforge.io/License
-
-EXTERNAL OFFLINE-RUNTIME TOOLS
-
-PresentMon is not bundled with WOK Client. Runtime-tournament operators supply
-an external PresentMon executable, and the mandatory content-addressed dry-run
-report attests its exact binary identity before offline ETL replay.
-
-PresentMon: MIT
-  https://github.com/GameTechDev/PresentMon
-
-The dedicated WOK ETL recorder is also not part of the packaged Electron
-application. The dry-run report attests its exact binary identity before use.
-The controller source inventory separately attests the recorder source, project
-bytes, and the exact PresentMon 2.5.1 source patch required by the recorder.
-That source inventory is not represented as source-to-binary build provenance.
-The obsolete live-PresentMon capture/preflight path is not part of the current
-ETL-recording and offline-PresentMon-replay architecture.
 
 SOURCE-VALIDATION CI ACTIONS
 

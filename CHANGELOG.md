@@ -38,7 +38,6 @@ Modification notice: WOK Client is a modified distribution based on Crankshaft 2
 - Retained the upstream Crankshaft 2.0.1 removal of the `in-process-gpu` switch that broke Windows startup.
 - Assigned a fork-specific version and added patched-Electron source, patch, license, and SHA-256 provenance records.
 - Added source validation across Windows, Linux, and macOS plus a pinned tag-only workflow for unsigned, checksum-published GitHub prereleases.
-- Added an attested offline runtime laboratory with dedicated ETL capture, offline PresentMon replay, exact tournament plans, and content-addressed evidence.
 - Added an adaptive launch intro and one-shot gameplay-readiness handoff.
 
 ## [2.0.1](https://github.com/KraXen72/crankshaft/compare/2.0.0...2.0.1) (2026-07-29)

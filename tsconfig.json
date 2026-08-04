@@ -16,8 +16,6 @@
 	"include": [
 		"src/**/*",
 		"tests/**/*",
-		"lab/offline-runtime/src/**/*",
-		"lab/offline-runtime/tests/**/*",
 		"forge.config.ts",
 		"MakerNSIS.ts"
 	]

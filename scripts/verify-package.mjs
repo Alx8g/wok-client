@@ -33,7 +33,6 @@ const FORBIDDEN_PREFIXES = [
 	'.git/',
 	'.working/',
 	'dist/',
-	'lab/',
 	'scripts/',
 	'src/',
 	'tests/'

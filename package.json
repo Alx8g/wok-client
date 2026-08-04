@@ -8,7 +8,7 @@
 	"type": "module",
 	"scripts": {
 		"postinstall": "node scripts/install-electron.mjs",
-		"start": "node scripts/bundle.mjs && electron-forge start -- --ozone-platform=x11",
+		"start": "node scripts/bundle.mjs && node scripts/start-electron.mjs",
 		"make": "node scripts/bundle.mjs && node scripts/verify-bundle.mjs && electron-forge make",
 		"bundle": "node scripts/bundle.mjs",
 		"bundle:verify": "node scripts/bundle.mjs && node scripts/verify-bundle.mjs",

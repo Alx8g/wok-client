@@ -4,6 +4,7 @@ import { MakerDMG } from "@electron-forge/maker-dmg";
 import { MakerNSIS } from "./MakerNSIS.ts";
 import { copyFileSync, existsSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { renderLinuxLauncherScript } from './src/linux-session.ts';
 import { verifyPackagedApplication } from './scripts/verify-package.mjs';
 
 export const PATCHED_ELECTRON_VERSION = "44.0.0-nightly.20260522";
@@ -127,16 +128,16 @@ export default {
                 if (platform === "linux" || platform === "win32") pruneChromiumLocales(buildPath);
                 if (platform === "linux") {
                     const exeName = config.packagerConfig.executableName;
+                    if (!exeName) throw new Error("packagerConfig.executableName is required to build the Linux launcher.");
                     const realBin = join(buildPath, `${exeName}.bin`);
                     const wrapper = join(buildPath, exeName);
 
                     renameSync(wrapper, realBin);
 
-                    writeFileSync(
-                        wrapper,
-                        `#!/bin/sh\nDIR="$(dirname "$(readlink -f "$0")")"\nexec "$DIR/${exeName}.bin" --ozone-platform=x11 "$@"\n`,
-                        { mode: 0o755 }
-                    );
+                    // Chromium picks its ozone platform before any application code runs, so the
+                    // session detection has to happen in this launcher. Generated from
+                    // src/linux-session.ts so the shipped shell and the tested resolver agree.
+                    writeFileSync(wrapper, renderLinuxLauncherScript(exeName), { mode: 0o755 });
                 }
 
                 const verification = verifyPackagedApplication({

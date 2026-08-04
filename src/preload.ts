@@ -940,9 +940,14 @@ function startCustomIdentity(_userPrefs: UserPrefs) {
  */
 function injectKeyframeFix() {
 	if (document.getElementById('crankshaftKeyframeFix')) return;
+	// document.body can still be null here: whenDOMReady runs immediately whenever readyState is
+	// past 'loading', which on a fast boot is before the body element exists. An unguarded
+	// appendChild threw and killed every step queued after it in the same callback.
+	const parent = document.body ?? document.head ?? document.documentElement;
+	if (!parent) return;
 	const keyframeStyle = createElement('style', { id: 'crankshaftKeyframeFix' });
 	keyframeStyle.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
-	document.body.appendChild(keyframeStyle);
+	parent.appendChild(keyframeStyle);
 }
 
 /**
@@ -987,10 +992,22 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 	}
 
 	whenDOMReady(() => {
-		document.getElementById('hiddenClasses')?.classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
-		void applyTheme(`${theme}`, cssPath);
-		injectKeyframeFix();
-		startCustomIdentity(_userPrefs);
+		// Each step is isolated: these are independent features, and one throwing must not silently
+		// cancel the ones queued behind it. That is exactly how the custom identity stopped
+		// starting - a null document.body in injectKeyframeFix took the rest of the callback with it.
+		const step = (name: string, run: () => void) => {
+			try {
+				run();
+			} catch (error) {
+				strippedConsole.error(`WOK Client step '${name}' failed`, error);
+			}
+		};
+		step('hide-ads-offset', () => {
+			document.getElementById('hiddenClasses')?.classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
+		});
+		step('theme', () => { void applyTheme(`${theme}`, cssPath); });
+		step('keyframe-fix', injectKeyframeFix);
+		step('custom-identity', () => { startCustomIdentity(_userPrefs); });
 	});
 }
 

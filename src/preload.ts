@@ -139,7 +139,7 @@ if (process.env.WOK_FPS_LOG) {
 }
 
 // The custom identity starts itself: see beginCustomIdentityWatch.
-window.setTimeout(() => { beginCustomIdentityWatch(); }, 1_000);
+window.setTimeout(() => { traceStartup('top-level identity kick'); beginCustomIdentityWatch(); }, 1_000);
 
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
@@ -993,6 +993,7 @@ let identityStarterHandle: number | undefined;
  * the moment it has started.
  */
 function beginCustomIdentityWatch() {
+	traceStartup(`watch called; started=${identityStarterHandle !== undefined} prefs=${latestUserPrefs ? 'yes' : 'no'} body=${document.body ? 'yes' : 'no'}`);
 	if (identityStarterHandle !== undefined) return;
 	const tryStart = () => {
 		// documentElement always exists; body may never appear in the document this preload

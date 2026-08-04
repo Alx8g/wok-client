@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { containsObsoletePreferences, parseUserPreferencePatch } from '../src/user-preferences.ts';
+import {
+	containsObsoletePreferences,
+	parseUserPreferencePatch,
+	shouldMigrateMatchmakerMapScope
+} from '../src/user-preferences.ts';
 
 test('accepts bounded WOK preference values', () => {
 	assert.deepEqual(parseUserPreferencePatch({
@@ -9,6 +13,8 @@ test('accepts bounded WOK preference values', () => {
 		graphicsBackend: 'd3d11on12',
 		hideAds: 'off',
 		matchmakerKey: { alt: false, ctrl: true, key: 'F1', shift: false },
+		matchmaker_mapScope: 'selected',
+		matchmaker_maps: ['Krunk Plaza', 'Krunk Plaza', 'AIM_Room'],
 		matchmaker_minPlayers: 2,
 		matchmaker_regions: ['us-ca-s', 'de-fra'],
 		overrideURL: 'https://comp.krunker.io/?game=ABC:123'
@@ -18,6 +24,8 @@ test('accepts bounded WOK preference values', () => {
 		graphicsBackend: 'd3d11on12',
 		hideAds: 'off',
 		matchmakerKey: { alt: false, ctrl: true, key: 'F1', shift: false },
+		matchmaker_mapScope: 'selected',
+		matchmaker_maps: ['Krunk Plaza', 'AIM_Room'],
 		matchmaker_minPlayers: 2,
 		matchmaker_regions: ['us-ca-s', 'de-fra'],
 		overrideURL: 'https://comp.krunker.io/?game=ABC:123'
@@ -47,6 +55,8 @@ test('rejects unsafe URLs, paths, ranges, and malformed keybinds', () => {
 		fullscreen: 'invalid',
 		graphicsBackend: 'swiftshader',
 		matchmakerKey: { alt: false, ctrl: false, key: 'F1;rm', shift: false },
+		matchmaker_mapScope: 'curated',
+		matchmaker_maps: new Array(65).fill('Burg'),
 		matchmaker_maxPlayers: 100,
 		matchmaker_regions: new Array(100).fill('region'),
 		overrideURL: 'https://evilkrunker.io/?game=owned',
@@ -62,4 +72,23 @@ test('normalizes duplicates and accepts clearing the Krunker override', () => {
 		matchmaker_gamemodes: ['ffa', 'tdm'],
 		overrideURL: ''
 	});
+});
+
+test('accepts only explicit matchmaker map scopes', () => {
+	for (const scope of ['official', 'selected', 'all']) {
+		assert.deepEqual(parseUserPreferencePatch({
+			matchmaker_mapScope: scope
+		}), {
+			matchmaker_mapScope: scope
+		});
+	}
+	assert.deepEqual(parseUserPreferencePatch({
+		matchmaker_mapScope: 'curated'
+	}), {});
+});
+
+test('detects settings that need legacy matchmaker map-scope migration', () => {
+	assert.equal(shouldMigrateMatchmakerMapScope({ matchmaker: true }), true);
+	assert.equal(shouldMigrateMatchmakerMapScope({ matchmaker_mapScope: 'all' }), false);
+	assert.equal(shouldMigrateMatchmakerMapScope(null), false);
 });

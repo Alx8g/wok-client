@@ -3,6 +3,8 @@ type UserPrefs = {
 	[preference: string]: UserPrefValue;
 };
 
+type MatchmakerMapScope = 'official' | 'selected' | 'all';
+
 type KeybindUserPref = {
 	shift: boolean,
 	alt: boolean,
@@ -251,6 +253,9 @@ interface IMatchmakerCriteria {
 
 	/** e.g. 'Free for All' */
 	gameModes: string[],
+
+	mapScope: MatchmakerMapScope,
+	maps: string[],
 
 	/** remaining time in seconds */
 	minRemainingTime: number,

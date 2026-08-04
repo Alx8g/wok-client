@@ -1,8 +1,9 @@
-export type MatchmakerPopupState = 'closed' | 'error' | 'game' | 'no-games';
+export type MatchmakerPopupState = 'closed' | 'error' | 'game' | 'no-games' | 'searching';
 
 type ActiveMatchmakerPopupState = Exclude<MatchmakerPopupState, 'closed'>;
 
 export interface MatchmakerPopupDismissal {
+	abortSearch: boolean;
 	dismissed: boolean;
 	joinGame: boolean;
 	openServerWindow: boolean;
@@ -10,6 +11,7 @@ export interface MatchmakerPopupDismissal {
 }
 
 const NO_DISMISSAL: MatchmakerPopupDismissal = {
+	abortSearch: false,
 	dismissed: false,
 	joinGame: false,
 	openServerWindow: false,
@@ -24,13 +26,16 @@ export class MatchmakerPopupLifecycle {
 	}
 
 	public decide(accept: boolean, openServerWindow: boolean): MatchmakerPopupDismissal {
+		if (accept && this.state === 'searching') return NO_DISMISSAL;
+
 		const state = this.takeState();
 		if (state === 'closed') return NO_DISMISSAL;
 
 		return {
+			abortSearch: state === 'searching',
 			dismissed: true,
 			joinGame: accept && state === 'game',
-			openServerWindow: state !== 'game' && openServerWindow,
+			openServerWindow: (state === 'error' || state === 'no-games') && openServerWindow,
 			playSelect: true
 		};
 	}
@@ -40,6 +45,7 @@ export class MatchmakerPopupLifecycle {
 		if (state === 'closed') return NO_DISMISSAL;
 
 		return {
+			abortSearch: false,
 			dismissed: true,
 			joinGame: false,
 			openServerWindow: false,

@@ -45,13 +45,15 @@ const KEYBIND_PREFERENCE_KEYS = new Set([
 
 const STRING_ARRAY_PREFERENCE_KEYS = new Set([
 	'matchmaker_gamemodes',
+	'matchmaker_maps',
 	'matchmaker_regions'
 ]);
 
 const ENUM_PREFERENCES: Readonly<Record<string, readonly string[]>> = {
 	fullscreen: ['windowed', 'maximized', 'fullscreen', 'borderless'],
 	graphicsBackend: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'],
-	hideAds: ['off', 'hide', 'block']
+	hideAds: ['off', 'hide', 'block'],
+	matchmaker_mapScope: ['official', 'selected', 'all']
 };
 
 const NUMBER_PREFERENCES: Readonly<Record<string, readonly [number, number]>> = {
@@ -62,6 +64,10 @@ const NUMBER_PREFERENCES: Readonly<Record<string, readonly [number, number]>> = 
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+export function shouldMigrateMatchmakerMapScope(value: unknown): boolean {
+	return isRecord(value) && !Object.hasOwn(value, 'matchmaker_mapScope');
 }
 
 function parseKeybind(value: unknown): KeybindUserPref | undefined {

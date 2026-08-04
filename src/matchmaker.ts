@@ -1,11 +1,20 @@
+import { ipcRenderer } from 'electron';
 import {
 	MATCHMAKER_GAMEMODES,
 	MATCHMAKER_MAP_ICON_INDICES,
 	MATCHMAKER_REGION_NAMES
 } from './matchmaker-data.ts';
+import {
+	matchmakerCandidateRegions,
+	waitForMatchmakerOperation
+} from './matchmaker-flow.ts';
 import { MatchmakerPopupLifecycle, type MatchmakerPopupDismissal } from './matchmaker-popup-lifecycle.ts';
 import { MatchmakerResponseTooLargeError, readBoundedMatchmakerJson } from './matchmaker-response.ts';
-import { selectMatchmakerGame } from './matchmaker-selection.ts';
+import {
+	collectMatchmakerCandidates,
+	rankMatchmakerCandidates,
+	selectRevalidatedMatchmakerGame
+} from './matchmaker-selection.ts';
 import { createElement, keyboardEventMatchesCustomSetting, secondsToTimestring } from './utils.ts';
 
 export {
@@ -16,6 +25,24 @@ export {
 } from './matchmaker-data.ts';
 
 const MATCHMAKER_REQUEST_TIMEOUT_MS = 10_000;
+const MATCHMAKER_GAME_LIST_URL = 'https://matchmaker.krunker.io/game-list';
+
+class MatchmakerHttpError extends Error {
+	public readonly retryAfter: string | null;
+
+	public constructor(status: number, retryAfter: string | null) {
+		super(`Matchmaker request failed with HTTP ${status}`);
+		this.name = 'MatchmakerHttpError';
+		this.retryAfter = retryAfter;
+	}
+}
+
+class MatchmakerRequestSupersededError extends Error {
+	public constructor() {
+		super('Matchmaker request was superseded.');
+		this.name = 'MatchmakerRequestSupersededError';
+	}
+}
 
 // Hacky, but needed (?) until there's a better system to store state
 let openServerWindow: boolean;
@@ -25,9 +52,16 @@ const popupLifecycle = new MatchmakerPopupLifecycle();
 
 // https://greasyfork.org/en/scripts/468482-kraxen-s-krunker-utils
 
+function abortActiveMatchmakerSearch() {
+	const request = matchmakerRequest;
+	matchmakerRequest = undefined;
+	request?.abort();
+}
+
 function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
 	if (!dismissal.dismissed) return;
 
+	if (dismissal.abortSearch) abortActiveMatchmakerSearch();
 	matchmakerBindListener?.abort();
 	matchmakerBindListener = undefined;
 	if (dismissal.playSelect) window.playSelect();
@@ -135,7 +169,7 @@ function createFetchedGamePopup(game: IMatchmakerGame) {
 	showMatchmakerPopup(state);
 }
 
-function showMatchmakerPopup(state: 'error' | 'game' | 'no-games'): boolean {
+function showMatchmakerPopup(state: 'error' | 'game' | 'no-games' | 'searching'): boolean {
 	const uiBase = document.getElementById("uiBase");
 	if (!uiBase) {
 		currentMatch = '';
@@ -149,6 +183,14 @@ function showMatchmakerPopup(state: 'error' | 'game' | 'no-games'): boolean {
 	matchmakerBindListener = new AbortController();
 	document.addEventListener('keydown', handleMatchmakerBind, { capture: true, signal: matchmakerBindListener.signal });
 	return true;
+}
+
+function createMatchmakerSearchingPopup(): boolean {
+	popupElement.style.backgroundImage = '';
+	popupTitle.innerText = 'Finding a Game...';
+	popupDescription.innerText = 'Checking lobby availability and region latency.';
+	popupConfirmOption.style.display = 'none';
+	return showMatchmakerPopup('searching');
 }
 
 function createMatchmakerErrorPopup(message: string) {
@@ -166,6 +208,44 @@ function createMatchmakerErrorPopup(message: string) {
  */
 let currentMatch = '';
 
+function assertCurrentMatchmakerRequest(request: AbortController): void {
+	if (matchmakerRequest !== request) throw new MatchmakerRequestSupersededError();
+	if (request.signal.aborted) throw new DOMException('Matchmaker request was aborted.', 'AbortError');
+}
+
+async function loadMatchmakerGameList(request: AbortController): Promise<unknown> {
+	const response = await fetch(`${MATCHMAKER_GAME_LIST_URL}?hostname=${window.location.hostname}`, {
+		signal: request.signal
+	});
+	assertCurrentMatchmakerRequest(request);
+	if (!response.ok) {
+		throw new MatchmakerHttpError(
+			response.status,
+			response.status === 429 ? response.headers.get('Retry-After') : null
+		);
+	}
+
+	const result = await readBoundedMatchmakerJson(response);
+	assertCurrentMatchmakerRequest(request);
+	return result;
+}
+
+function matchmakerRegionLatencies(value: unknown): Readonly<Record<string, unknown>> {
+	return value && typeof value === 'object' && !Array.isArray(value)
+		? value as Readonly<Record<string, unknown>>
+		: {};
+}
+
+const NO_MATCHMAKER_GAME: IMatchmakerGame = {
+	gameID: 'none',
+	region: 'none',
+	playerCount: 0,
+	playerLimit: 0,
+	map: '',
+	gamemode: MATCHMAKER_GAMEMODES[0],
+	remainingTime: 0
+};
+
 /**
  * Retrieves a lobby using the custom matchmaker, presents the user with a popup
  * @param _userPrefs User Preferences Object
@@ -180,58 +260,87 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 	const criteria = {
 		regions: _userPrefs.matchmaker_regions,
 		gameModes: _userPrefs.matchmaker_gamemodes,
+		mapScope: _userPrefs.matchmaker_mapScope,
+		maps: _userPrefs.matchmaker_maps,
 		minPlayers: _userPrefs.matchmaker_minPlayers,
 		maxPlayers: _userPrefs.matchmaker_maxPlayers,
 		minRemainingTime: _userPrefs.matchmaker_minRemainingTime
 	} as IMatchmakerCriteria;
+	const selectionContext = {
+		currentMatch,
+		currentUrl: window.location.href
+	};
 
 	matchmakerRequest?.abort();
 	const request = new AbortController();
 	matchmakerRequest = request;
+	if (!createMatchmakerSearchingPopup()) {
+		abortActiveMatchmakerSearch();
+		return;
+	}
 
 	let timedOut = false;
-	let retryAfter: string | null = null;
 	const timeoutHandle = window.setTimeout(() => {
 		timedOut = true;
 		request.abort();
 	}, MATCHMAKER_REQUEST_TIMEOUT_MS);
 
 	try {
-		const response = await fetch(`https://matchmaker.krunker.io/game-list?hostname=${window.location.hostname}`, {
-			signal: request.signal
-		});
-		if (!response.ok) {
-			retryAfter = response.status === 429 ? response.headers.get('Retry-After') : null;
-			throw new Error(`Matchmaker request failed with HTTP ${response.status}`);
+		const initialResult = await loadMatchmakerGameList(request);
+		const candidates = collectMatchmakerCandidates(
+			initialResult,
+			criteria,
+			selectionContext,
+			MATCHMAKER_GAMEMODES
+		);
+		if (candidates.length === 0) {
+			createFetchedGamePopup(NO_MATCHMAKER_GAME);
+			return;
 		}
-		const result = await readBoundedMatchmakerJson(response);
-		if (matchmakerRequest !== request) return;
 
-		const selectedGame = selectMatchmakerGame(result, criteria, {
-			currentMatch,
-			currentUrl: window.location.href
-		}, MATCHMAKER_GAMEMODES);
-		createFetchedGamePopup(selectedGame ?? {
-			gameID: "none",
-			region: "none",
-			playerCount: 0,
-			playerLimit: 0,
-			map: '',
-			gamemode: MATCHMAKER_GAMEMODES[0],
-			remainingTime: 0
-		});
+		let latencyResult: unknown = {};
+		try {
+			latencyResult = await waitForMatchmakerOperation(
+				request.signal,
+				() => ipcRenderer.invoke(
+					'matchmaker_measure_region_latency',
+					matchmakerCandidateRegions(candidates)
+				)
+			);
+			assertCurrentMatchmakerRequest(request);
+		} catch (error) {
+			assertCurrentMatchmakerRequest(request);
+			console.warn('Failed to measure matchmaker region latency', error);
+		}
+		const rankedCandidates = rankMatchmakerCandidates(
+			candidates,
+			matchmakerRegionLatencies(latencyResult)
+		);
+
+		const freshResult = await loadMatchmakerGameList(request);
+		const freshCandidates = collectMatchmakerCandidates(
+			freshResult,
+			criteria,
+			selectionContext,
+			MATCHMAKER_GAMEMODES
+		);
+		const selectedGame = selectRevalidatedMatchmakerGame(
+			rankedCandidates,
+			freshCandidates
+		);
+		createFetchedGamePopup(selectedGame ?? NO_MATCHMAKER_GAME);
 	} catch (error) {
-		if (matchmakerRequest !== request) return;
+		if (matchmakerRequest !== request || error instanceof MatchmakerRequestSupersededError) return;
 		if (timedOut) {
-			createMatchmakerErrorPopup('The server list took too long to respond. Try again or open the server browser.');
+			createMatchmakerErrorPopup('The matchmaker took too long to respond. Try again or open the server browser.');
 			return;
 		}
 		if ((error as Error).name === 'AbortError') return;
 		console.error('Failed to fetch a matchmaker game', error);
 		createMatchmakerErrorPopup(error instanceof MatchmakerResponseTooLargeError
 			? 'The server list response was unexpectedly large. Try again or open the server browser.'
-			: retryAfter
-				? `The matchmaker is rate-limited. Try again after ${retryAfter}.`
+			: error instanceof MatchmakerHttpError && error.retryAfter
+				? `The matchmaker is rate-limited. Try again after ${error.retryAfter}.`
 				: 'The server list could not be loaded. Try again or open the server browser.');
 	} finally {
 		window.clearTimeout(timeoutHandle);

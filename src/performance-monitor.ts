@@ -5,6 +5,7 @@ import {
 	RollingReportedPingStats
 } from './network-diagnostics.ts';
 import { MAX_VALID_FRAME_MS, RollingPerformanceStats } from './performance-stats.ts';
+import { getCustomIdentityLabel } from './custom-identity-display.ts';
 
 const OVERLAY_REFRESH_MS = 1_000;
 const REPORTED_PING_STALE_MS = 15_000;
@@ -182,9 +183,13 @@ function renderOverlay(now = performance.now()) {
 		? `${networkSnapshot.reportedPingVariationMs.toFixed(1)} ms`
 		: 'collecting';
 	const reportedTps = networkSnapshot.reportedTps > 0 ? networkSnapshot.reportedTps.toFixed(0) : 'unknown';
+	// Local display identity, read from the client's own state. Absent unless the user set one,
+	// and unrelated to the account name Krunker knows.
+	const customIdentityLabel = getCustomIdentityLabel();
 
 	overlay.textContent = [
 		'WOK RENDERER rAF DIAGNOSTICS',
+		...(customIdentityLabel === '' ? [] : [`local name    ${customIdentityLabel}`]),
 		`rAF FPS now   ${snapshot.currentFps.toFixed(1)}`,
 		`rAF FPS 10s   ${snapshot.averageFps.toFixed(1)}`,
 		`rAF 1% low    ${onePercentLow}`,

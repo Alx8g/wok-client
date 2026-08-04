@@ -1,3 +1,9 @@
+import {
+	CUSTOM_CLAN_PREFERENCE_KEY,
+	CUSTOM_NAME_PREFERENCE_KEY,
+	parseCustomIdentityPreference
+} from './custom-identity.ts';
+
 const OBSOLETE_PREFERENCE_KEYS = new Set([
 	// Placebo-with-downside: raised a renderer-process ceiling a one-origin app never reaches.
 	'experimentalFlags_increaseLimits',
@@ -132,6 +138,11 @@ function parsePreferenceValue(key: string, value: unknown): UserPrefValue | unde
 			&& (value === 'None' || (/^[^/\\]+\.css$/u.test(value)))
 			? value
 			: undefined;
+	}
+
+	// Local-only display identity. Stored and validated like any other preference; never sent.
+	if (key === CUSTOM_NAME_PREFERENCE_KEY || key === CUSTOM_CLAN_PREFERENCE_KEY) {
+		return parseCustomIdentityPreference(key, value);
 	}
 
 	if (key === 'immersiveSplashBackgroundColor') {

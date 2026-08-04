@@ -324,6 +324,9 @@ const settingsSkeleton = {
 	performanceOverlay: false,
 	menuTimer: false,
 	quickClassPicker: false,
+	// Local display only: rendered by WOK's own surfaces, never sent to Krunker. Empty = real one.
+	customName: '',
+	customClan: '',
 	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless
 	resourceSwapper: false,
 	cssSwapper: 'None',

@@ -13,6 +13,13 @@ import {
 	MATCHMAKER_REGIONS
 } from './matchmaker-data.ts';
 import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
+import {
+	CUSTOM_CLAN_PREFERENCE_KEY,
+	CUSTOM_NAME_PREFERENCE_KEY,
+	sanitizeCustomClan,
+	sanitizeCustomName
+} from './custom-identity.ts';
+import { applyCustomIdentity } from './custom-identity-display.ts';
 
 const RefreshEnum = {
 	notNeeded: 0,
@@ -133,6 +140,8 @@ const settingsDesc: SettingsDesc = {
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
+	customName: { title: 'Custom Name', type: 'text', desc: 'A local name only you see; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
+	customClan: { title: 'Custom Clan', type: 'text', desc: 'A local clan tag only you see; Krunker still gets your real one.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
 	saveMatchResultJSONButton: { title: 'Copy Match Results', type: 'bool', desc: 'Adds a button that copies the scoreboard at match end.', safety: 0, cat: 1, refreshOnly: true },
 	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
@@ -451,6 +460,16 @@ class SettingElem {
 			updateUI(); // synchronize slider and number inputs visually
 		}
 
+		// Local display identity: coerce while typing so the stored value is always one the
+		// preference loader accepts, and reflect dropped characters straight back into the input.
+		if (this.props.key === CUSTOM_NAME_PREFERENCE_KEY || this.props.key === CUSTOM_CLAN_PREFERENCE_KEY) {
+			const sanitized = this.props.key === CUSTOM_CLAN_PREFERENCE_KEY
+				? sanitizeCustomClan(dirtyValue)
+				: sanitizeCustomName(dirtyValue);
+			if (sanitized !== target.value) target.value = sanitized;
+			dirtyValue = sanitized;
+		}
+
 		const value = (this.props.type === "keybind") ? JSON.parse(`${dirtyValue}`) : dirtyValue; // so we don't accidentally mutate it later
 
 		if (this.props.type === "keybind") {
@@ -472,6 +491,9 @@ class SettingElem {
 			}
 
 			if (this.props.key === 'cssSwapper') void applyCustomCssSelection(String(value));
+
+			// Live-applies: the nameplate is in this renderer, so there is nothing to reload.
+			if (this.props.key === CUSTOM_NAME_PREFERENCE_KEY || this.props.key === CUSTOM_CLAN_PREFERENCE_KEY) applyCustomIdentity(userPrefs);
 
 			// you can add custom instant refresh callbacks for settings here
 			if (typeof value === 'boolean') {

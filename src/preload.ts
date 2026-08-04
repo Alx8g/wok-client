@@ -9,6 +9,7 @@ import { installDrawCallCensus } from './draw-call-stats.ts';
 import { startGameplayFpsLog } from './gameplay-fps-log.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader } from './weapon-particle-loader.ts';
+import { applyCustomIdentity, stopCustomIdentityDisplay } from './custom-identity-display.ts';
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
 // Measures what a real Krunker frame issues so the calibration workload can be anchored to the
@@ -662,6 +663,19 @@ async function applyCustomCSSSwap(cssSwapper: string, cssPath: string): Promise<
 	}
 }
 
+let customIdentityTeardownRegistered = false;
+
+/**
+ * Mount (or refresh) the local display identity nameplate. Idempotent per document: the settings
+ * UI live-applies through the same module, and the unload hook removes the nodes it owns.
+ */
+function mountCustomIdentity(_userPrefs: UserPrefs) {
+	applyCustomIdentity(_userPrefs);
+	if (customIdentityTeardownRegistered) return;
+	customIdentityTeardownRegistered = true;
+	window.addEventListener('beforeunload', () => { stopCustomIdentityDisplay(); }, { once: true });
+}
+
 /*
  * Animate transforms instead of position properties
  * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
@@ -718,6 +732,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 		document.getElementById('hiddenClasses')?.classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
 		void applyCustomCSSSwap(`${cssSwapper}`, cssPath);
 		injectKeyframeFix();
+		mountCustomIdentity(_userPrefs);
 	});
 }
 

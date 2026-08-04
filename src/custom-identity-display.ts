@@ -44,8 +44,26 @@ import {
 /** Discovery retries at this cadence until Krunker's activity object exists and carries a name. */
 const DISCOVERY_INTERVAL_MS = 1_000;
 
-/** Roughly a minute of retries. A player who is not signed in never gets a name, so this stops. */
-const DISCOVERY_MAX_ATTEMPTS = 60;
+/**
+ * Discovery must outlive the menu.
+ *
+ * Krunker's activity object only carries `user` once the player is in a match - it is game
+ * activity, not account data. The previous minute-long ceiling therefore expired while the player
+ * was still loading, signing in or picking a lobby, and by the time the name existed nothing was
+ * watching for it: the feature silently required the name to be typed in by hand, which is the
+ * thing it exists to avoid.
+ *
+ * Polling costs one function call at this cadence and stops permanently on the first name found,
+ * so an open-ended watch is cheaper than the class of bug a ceiling creates. The cadence eases off
+ * after the first minute so a client left on the menu all evening is not paying a per-second poll.
+ */
+const DISCOVERY_MAX_ATTEMPTS = Number.POSITIVE_INFINITY;
+
+/** Attempts at the fast cadence before easing off; the first minute covers a normal launch. */
+export const DISCOVERY_FAST_ATTEMPTS = 60;
+
+/** Cadence once a name has not appeared quickly - the player is probably still in the menu. */
+export const DISCOVERY_SLOW_INTERVAL_MS = 5_000;
 
 export interface RealIdentityDiscoveryOptions {
 	clearTimer(handle: number): void;
@@ -81,7 +99,9 @@ export function startRealIdentityDiscovery(options: RealIdentityDiscoveryOptions
 			return;
 		}
 		if (attempts >= maxAttempts) return;
-		timer = options.setTimer(attempt, intervalMs);
+		// Ease off once a launch-time appearance is clearly not happening.
+		const nextInterval = attempts >= DISCOVERY_FAST_ATTEMPTS ? Math.max(intervalMs, DISCOVERY_SLOW_INTERVAL_MS) : intervalMs;
+		timer = options.setTimer(attempt, nextInterval);
 	};
 
 	attempt();

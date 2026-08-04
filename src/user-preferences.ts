@@ -6,6 +6,9 @@ import { parseThemePreference } from './themes.ts';
 import { isDisplayPreference } from './display-selection.ts';
 
 const OBSOLETE_PREFERENCE_KEYS = new Set([
+	// The scoreboard it read no longer exists in Krunker's markup, so the button only ever
+	// reported failure. Removed rather than left to look broken.
+	'saveMatchResultJSONButton',
 	// Superseded by 'theme', which also selects the bundled themes. See migrateThemePreference.
 	'cssSwapper',
 	// Placebo-with-downside: raised a renderer-process ceiling a one-origin app never reaches.
@@ -43,7 +46,6 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'safeFlags_disableBackgrounding',
 	'safeFlags_gpuRasterizing',
 	'safeFlags_highPerformanceGpu',
-	'saveMatchResultJSONButton'
 ]);
 
 const KEYBIND_PREFERENCE_KEYS = new Set([

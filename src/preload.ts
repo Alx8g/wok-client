@@ -439,66 +439,6 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 		event.preventDefault();
 	}, { capture: true, passive: false });
 
-	if (!_userPrefs.saveMatchResultJSONButton) return;
-	const copyStr = 'Copy';
-	const copiedStr = 'Copied to Clipboard!';
-	const failedToCopy = 'Failed to get data. Make sure you are on the Leaderboard tab.';
-	const buttonElement = createElement('div', { text: copyStr, class: ['matchResultButton'] });
-	let lastCopied = 0;
-	const copyCooldownMS = 2000;
-
-	function readScoreboard() {
-		const lbRows = document.querySelector('#endTable')?.children[0]?.children;
-		if (!lbRows) return undefined;
-
-		const isHardpoint = lbRows[0]?.children[5]?.textContent === 'Obj';
-
-		return [...lbRows].slice(2).map(leaderboardRow => {
-			const rowChildren = [...leaderboardRow.children] as HTMLElement[];
-			const returnObj = {
-				position: rowChildren[0].innerText.replace('.', ''),
-				name: rowChildren[1].innerText,
-				score: rowChildren[2].innerText,
-				kills: rowChildren[3].innerText,
-				deaths: rowChildren[4].innerText
-			};
-			if (isHardpoint) {
-				Object.assign(returnObj, {
-					objective: rowChildren[5].innerText,
-					damage: rowChildren[6].innerText
-				});
-			}
-			return returnObj;
-		});
-	}
-
-	function copyScoreboardToClipboard() {
-		if (Date.now() - lastCopied < copyCooldownMS) return;
-		lastCopied = Date.now();
-		/*
-		 * Read the leaderboard with the real names back in place. The local display identity is a
-		 * cosmetic for this screen only: a pasted match result that quietly renamed one player
-		 * would mislead everyone it is shared with, so the swap is undone for the duration of the
-		 * read and reapplied straight after. Synchronous, so nothing is painted in between.
-		 */
-		const output = withRealIdentity(readScoreboard);
-		if (!output) return setButtonText(failedToCopy);
-
-		strippedConsole.log(output);
-		navigator.clipboard.writeText(JSON.stringify(output, null, 2));
-		setButtonText(copiedStr);
-	}
-
-	buttonElement.onclick = copyScoreboardToClipboard;
-
-	function setButtonText(text: string) {
-		buttonElement.textContent = text;
-		setTimeout(() => {
-			buttonElement.textContent = copyStr;
-		}, copyCooldownMS);
-	}
-
-	document.getElementById('endMidHolder')?.appendChild(buttonElement);
 });
 
 ipcRenderer.once('initDiscordRPC', () => {

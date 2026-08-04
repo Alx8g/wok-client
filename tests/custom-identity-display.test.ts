@@ -352,3 +352,38 @@ test('teardown disconnects, restores, and clears the shared state', () => {
 	stopCustomIdentityDisplay();
 	assert.equal(harness.disconnectCount, 1);
 });
+
+test('discovery keeps watching past the first minute, because the name only exists in a match', () => {
+	// Field evidence: getGameActivity() carries `user` only once the player is in a game. A
+	// ceiling of sixty attempts expired while the player was still in the menu, so by the time the
+	// name existed nothing was watching and the feature silently required manual entry.
+	const timers: (() => void)[] = [];
+	let activity: unknown;
+	let discovered = '';
+
+	startRealIdentityDiscovery({
+		clearTimer: () => {},
+		getGameActivity: () => activity,
+		intervalMs: 1_000,
+		onName: name => { discovered = name; },
+		setTimer: callback => { timers.push(callback); return timers.length; }
+	});
+
+	// Two hundred attempts of menu time - well past the old ceiling.
+	for (let attempt = 0; attempt < 200; attempt++) {
+		const next = timers.shift();
+		assert.ok(next, `discovery stopped watching after ${attempt} attempts`);
+		next();
+	}
+	assert.equal(discovered, '', 'nothing to find while still in the menu');
+
+	// The player finally joins a match.
+	// getGameActivity resolves to Krunker's function, which returns the activity.
+	activity = () => ({ id: 'SYD:t2d9f', user: 'lamboiigoni', map: 'Sandstorm' });
+	const next = timers.shift();
+	assert.ok(next, 'discovery must still be watching when the match starts');
+	next();
+	assert.equal(discovered, 'lamboiigoni');
+
+	assert.equal(timers.length, 0, 'discovery stops for good once the name is known');
+});

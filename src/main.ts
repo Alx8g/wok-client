@@ -362,7 +362,6 @@ const settingsSkeleton = {
 	introAudio: true,
 	discordRPC: false,
 	extendedRPC: true,
-	saveMatchResultJSONButton: false,
 	overrideURL: undefined as string | undefined,
 	alwaysWaitForDevTools: false,
 	safeFlags_disableBackgrounding: true,

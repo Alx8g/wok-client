@@ -164,7 +164,6 @@ const settingsDesc: SettingsDesc = {
 	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
 	realName: { title: 'Your Real Name', type: 'text', desc: 'Only needed if the custom name is not being applied: the exact Krunker name to replace. The client normally detects this by itself.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
 	realClan: { title: 'Your Real Clan', type: 'text', desc: 'Only needed if the custom clan tag is not being applied: your real tag, without brackets.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
-	saveMatchResultJSONButton: { title: 'Copy Match Results', type: 'bool', desc: 'Adds a button that copies the scoreboard at match end.', safety: 0, cat: 1, refreshOnly: true },
 	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },

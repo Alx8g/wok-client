@@ -1,3 +1,28 @@
+## WOK Client 1.1.0-rc.5 (2026-08-04)
+
+### Fixed
+- The loading screen could cover the game forever. Six separate paths could leave it up - including one where a failure while building the loading animation left nothing at all listening for the game to become ready. WOK now always reveals the real page if loading overruns, so you can see and use whatever is underneath, and records why it overran.
+- Matchmaker ping never worked. Krunker advertises a port that does not accept connections, so every measurement timed out and every lobby showed a dash. Ping now measures against a port that answers, and ignores the one-off cost of the first connection to a server.
+- Lobby text was inserted as markup, so a hostile map name could inject content into the client. It is now plain text.
+- Linux ran through XWayland because the client forced X11, six Electron versions after native Wayland became the default - and that is the configuration where mouse capture is actually broken on fractionally scaled displays. The display server is now chosen from your session.
+- Linux desktop entry was named in a way desktop environments cannot match, so WOK showed a generic icon in the dock and window switcher.
+- Borderless mode had rounded corners on Linux, which rounded off the corners of the screen.
+
+### Added
+- Themes that restyle the whole game, not just WOK's own panels: menus, HUD, scoreboard, chat, shop, popups and more. Six to choose from, including Silk, a light Apple-styled theme that keeps the HUD dark, and Terminal. Switching is instant. Your own .css files still work, and a template is written into the themes folder to start from.
+- A custom name and clan shown everywhere the game draws yours - chat, kill feed, scoreboard, leaderboard, HUD and menu. Local display only: other players and the game itself still see your real name, and copied match results keep it too.
+- Choose which monitor the game opens on. Remembers the monitor across reboots and cable changes, and falls back to your primary display without forgetting the choice if it is unplugged.
+- Rebuilt matchmaker presentation: an animated searching state showing your filters and elapsed time, a found-lobby card with region, ping, mode, map, players and time remaining, your own hotkeys on the buttons, and an explanation naming the filter responsible when nothing matches.
+- The Windows installer is a real product install now - welcome, licence, component choices, a branded progress log and a finish page, with correct Add/Remove Programs details and an uninstaller that leaves nothing behind.
+- Diagnostics for measuring the real game rather than assuming: a WebGL call census, a gameplay frame log, a menu structure probe and an identity-source search.
+
+### Changed
+- Settings are reorganised into Performance, Game, Visuals, Matchmaker, Advanced, Legacy and About, chosen from a sidebar instead of stacked collapsible sections. Every description rewritten to the shortest form that still says what you need.
+- The Krunker tab that holds these settings is now called WOK.
+- The calibration progress bar is driven by the clock instead of by frames, so it no longer freezes and jump. Calibration screens say what matters and nothing else.
+- Calibration no longer promises to switch back "if it plays worse" - it switches back if it runs badly, which is what it can actually detect.
+- The graphics profile you were measured to be fastest on is kept when Competitive Mode is switched off. Competitive Mode governs in-game visual settings.
+
 ## Unreleased
 
 ### Themes

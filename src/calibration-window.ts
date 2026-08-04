@@ -1,6 +1,7 @@
 import type { CalibrationCandidate, CalibrationLowConfidenceReason, CalibrationResult, EffectiveBackendVerification } from './calibration.ts';
 import { CALIBRATION_BENCHMARK_MS, CALIBRATION_MIN_SAMPLES } from './calibration.ts';
 import {
+	createEntitySimulation,
 	createWorkload,
 	createWorkloadSpec,
 	createWorkloadSpin,
@@ -20,6 +21,7 @@ import {
 	BENCHMARK_GPU_QUERY_POOL_SIZE,
 	BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
 	BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+	BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL,
 	BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
 	BENCHMARK_GPU_SAMPLE_MIN_MS,
 	BENCHMARK_LONG_FRAME_MS,
@@ -67,6 +69,7 @@ function embeddedModulesScript(): string {
 		BENCHMARK_GPU_QUERY_POOL_SIZE,
 		BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
 		BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+		BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL,
 		BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
 		BENCHMARK_GPU_SAMPLE_MIN_MS,
 		BENCHMARK_LONG_FRAME_MS,
@@ -78,6 +81,7 @@ function embeddedModulesScript(): string {
 	return `${constantLines}
 			const mulberry32 = ${mulberry32.toString()};
 			const createWorkload = ${createWorkload.toString()};
+			const createEntitySimulation = ${createEntitySimulation.toString()};
 			const createWorkloadSpin = ${createWorkloadSpin.toString()};
 			const runBenchmarkTrial = ${runBenchmarkTrial.toString()};`;
 }
@@ -272,9 +276,16 @@ export function buildCalibrationTrialPage(
 				} catch (_error) { /* battery status is diagnostic only */ }
 
 				let workload;
+				let simulateEntities;
 				let spin;
 				try {
 					workload = createWorkload(gl, WORKLOAD_SPEC, canvas.width, canvas.height);
+					simulateEntities = createEntitySimulation(
+						WORKLOAD_SPEC.seed,
+						WORKLOAD_SPEC.constants.entityCount,
+						WORKLOAD_SPEC.constants.entitySubsteps,
+						WORKLOAD_SPEC.constants.entityNeighborChecks
+					);
 					spin = createWorkloadSpin(WORKLOAD_SPEC.seed, WORKLOAD_SPEC.constants.jsSpinIterations);
 				} catch (_error) {
 					return failedTrial();
@@ -317,7 +328,10 @@ export function buildCalibrationTrialPage(
 					onProgress: update => updateUi(update, false),
 					renderFrame: frameIndex => { if (!contextLost) workload.renderFrame(frameIndex); },
 					requestFrame: callback => requestAnimationFrame(callback),
-					spin: () => { spinSink += spin(); return spinSink; },
+					// The main-thread lane, run per frame before any GL call, exactly as a game runs
+					// its simulation before submitting the frame it produced: the v3 entity update
+					// plus the residual unstructured spin.
+					spin: () => { spinSink += simulateEntities() + spin(); return spinSink; },
 					startSampler: (callback, intervalMs) => {
 						const timer = setInterval(callback, intervalMs);
 						return () => clearInterval(timer);

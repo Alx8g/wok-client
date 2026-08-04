@@ -8,7 +8,8 @@ import {
 } from './calibration-benchmark.ts';
 
 const CALIBRATION_STATE_VERSION = 2;
-export const CALIBRATION_VERSION = 3;
+/** v4: fence ring depth 2 -> 6 — pacing semantics changed, so v3 verdicts never compare silently. */
+export const CALIBRATION_VERSION = 4;
 export const CALIBRATION_BENCHMARK_MS = 2_800;
 export const CALIBRATION_MIN_SAMPLES = 45;
 export const CALIBRATION_SCORE_TIE_MINIMUM = 5;
@@ -593,6 +594,15 @@ export function prepareCalibrationState(
 	return existing?.rerunRequested ? startCalibrationRun(reset) : reset;
 }
 
+/**
+ * Relative score. Shape deliberately unchanged for workload v2 (findings §5-6): under depth-6
+ * pacing the rAF loop is paced by real per-frame cost, so the submission lane's API-thread and
+ * driver/translation cost lands directly in the frame intervals that averageFps, 1% low, and
+ * p95 already aggregate. No separate cpuSubmit term is added — the renderer-side bracket only
+ * sees a slice of the submission pipeline (the GPU-process service and driver cost surfaces as
+ * frame-interval back-pressure), and a second term would double-count the slice it does see.
+ * cpuSubmitP50/P95 remain reported diagnostic evidence, like GPU time (design §2.2).
+ */
 export function calculateCalibrationScore(metrics: CalibrationMetrics, _framePolicy: FramePolicy = 'uncapped'): number {
 	if (!metrics.success || metrics.sampleCount < CALIBRATION_MIN_SAMPLES) return -1_000_000;
 

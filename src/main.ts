@@ -728,6 +728,29 @@ function isTrustedGameIpcSender(event: IpcMainEvent | IpcMainInvokeEvent): boole
 	return parseKrunkerUrl(event.senderFrame.url, true) !== undefined;
 }
 
+// Diagnostic-only gameplay frame log (WOK_FPS_LOG). Emits one line per sampled window so a
+// backend A/B can be played uninterrupted; reading the overlay by hand perturbs the tail.
+if (process.env.WOK_FPS_LOG) {
+	ipcMain.on('wok_fps_log', (event, sample: unknown) => {
+		if (!isTrustedGameIpcSender(event)) return;
+		if (!sample || typeof sample !== 'object' || Array.isArray(sample)) return;
+		const values = sample as Record<string, unknown>;
+		const numeric = (key: string) => (typeof values[key] === 'number' && Number.isFinite(values[key]) ? Number(values[key]) : -1);
+		console.log(`[wok-fps] backend=${graphicsSelection.backend} avg=${numeric('averageFps').toFixed(1)} 1%low=${numeric('onePercentLowFps').toFixed(1)} p95=${numeric('p95FrameTimeMs').toFixed(2)}ms worst=${numeric('worstFrameTimeMs').toFixed(2)}ms samples=${numeric('sampleCount')} window=${numeric('windowSeconds').toFixed(1)}s`);
+	});
+}
+
+// Diagnostic-only WebGL call census (WOK_DRAW_STATS). Logs one bounded report per session.
+if (process.env.WOK_DRAW_STATS) {
+	ipcMain.on('wok_draw_stats', (event, report: unknown) => {
+		if (!isTrustedGameIpcSender(event)) return;
+		if (!report || typeof report !== 'object' || Array.isArray(report)) return;
+		const values = report as Record<string, unknown>;
+		const numeric = (key: string) => (typeof values[key] === 'number' && Number.isFinite(values[key]) ? Number(values[key]) : -1);
+		console.log(`[wok-draw-census] frames=${numeric('frames')} draws=${numeric('medianDraws')} (p95 ${numeric('p95Draws')}, max ${numeric('maxDraws')}) textureBinds=${numeric('medianTextureBinds')} (p95 ${numeric('p95TextureBinds')}) programSwitches=${numeric('medianProgramSwitches')} (p95 ${numeric('p95ProgramSwitches')})`);
+	});
+}
+
 if (perfMarksEnabled) {
 	ipcMain.on('wok_perf_mark', (event, name: unknown, wallClockMs: unknown) => {
 		if (!isTrustedGameIpcSender(event)) return;

@@ -1,6 +1,7 @@
 import {
 	RUNTIME_LAB_PAGE_ID,
 	RUNTIME_LAB_PROTOCOL_VERSION,
+	RUNTIME_LAB_WORKLOAD_VERSION,
 	type RuntimeLabResultEnvelope
 } from '../src/shared/protocol.ts';
 
@@ -78,7 +79,8 @@ export function createTestResult(overrides: Partial<RuntimeLabResultEnvelope> = 
 			pageScriptStartMs: 10,
 			timeOriginEpochMs: 1_700_000_000_000
 		},
-		workloadVersion: 1,
+		// Tracks the production workload so parity fixtures can never lag a WORKLOAD_VERSION bump.
+		workloadVersion: RUNTIME_LAB_WORKLOAD_VERSION,
 		...overrides
 	};
 }

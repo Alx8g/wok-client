@@ -5,7 +5,41 @@ import { ipcRenderer, webFrame } from 'electron';
 import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
 import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
 import { GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
+import { installDrawCallCensus } from './draw-call-stats.ts';
+import { startGameplayFpsLog } from './gameplay-fps-log.ts';
+import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader } from './weapon-particle-loader.ts';
+
+// Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
+// Measures what a real Krunker frame issues so the calibration workload can be anchored to the
+// game instead of an assumption; never installed in a normal session (the wrappers themselves
+// would perturb the frame budget being measured).
+if (process.env.WOK_DRAW_STATS) {
+	const glPrototype = typeof WebGL2RenderingContext === 'function'
+		? WebGL2RenderingContext.prototype as unknown as Record<string, unknown>
+		: undefined;
+	if (glPrototype) {
+		installDrawCallCensus({
+			isActive: () => document.pointerLockElement !== null,
+			report: report => { ipcRenderer.send('wok_draw_stats', report); },
+			requestFrame: callback => { requestAnimationFrame(() => { callback(); }); },
+			target: glPrototype
+		});
+	}
+}
+
+// Diagnostic-only gameplay frame log. Inert unless WOK_FPS_LOG is set in the environment.
+if (process.env.WOK_FPS_LOG) {
+	const stats = new RollingPerformanceStats();
+	startGameplayFpsLog({
+		emit: sample => { ipcRenderer.send('wok_fps_log', sample); },
+		isActive: () => document.pointerLockElement !== null,
+		now: () => performance.now(),
+		recordFrame: (timestamp, frameTimeMs) => { stats.recordFrame(timestamp, frameTimeMs); },
+		requestFrame: callback => { requestAnimationFrame(callback); },
+		snapshot: now => stats.snapshot(now)
+	});
+}
 
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);

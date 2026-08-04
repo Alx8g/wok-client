@@ -10,8 +10,48 @@
  */
 
 export const BENCHMARK_GPU_QUERY_POOL_SIZE = 8;
-/** Queue depth 2 approximates Chromium's own frame buffering (design §2.3); ring holds depth + 1 fences. */
-export const BENCHMARK_FENCE_QUEUE_DEPTH = 2;
+/**
+ * TIME_ELAPSED evidence is sampled on one measured frame in eight rather than instrumented on
+ * every frame, because the instrumentation is not backend-neutral.
+ *
+ * Measured on the reference machine (Iris Xe 0x46A6, workload v3, variants interleaved inside
+ * every run so drift cannot be attributed to a variant —
+ * `.working/simulator-v2-acceptance/instrumentation-ab.mjs`): removing the per-frame timer query
+ * raised d3d11on12's average frame rate by 25.1% / 22.3% / 35.7% across three runs while moving
+ * `default` by -0.7% / -5.9% / +13.6%. That asymmetry has a documented mechanism: on ANGLE/D3D11
+ * a query poll is a driver call, but under D3D11on12 it enters the translation layer's batched
+ * context, where `Query11::testQuery` polls with flush permitted and a poll can force the
+ * expensive drain-and-ExecuteCommandLists path (findings.md §2.4, §2.7, which flagged exactly this
+ * as "possible timer-query measurement inflation under the translation layer, unverified").
+ *
+ * A benchmark may not tax one candidate ~28% and another ~2% and then compare their frame rates.
+ * Sampling keeps the evidence — a 2.8 s trial at 250 fps still yields ~85 GPU samples, far more
+ * than the percentiles need — while cutting the tax by the sampling interval. The disjoint
+ * demotion ratio below is therefore measured against GPU sampling attempts rather than against
+ * frame count, so its meaning does not change with this interval.
+ */
+export const BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL = 8;
+/**
+ * Fence queue depth 6 (v4 pacing semantics); ring holds depth + 1 fences.
+ *
+ * Depth 2 approximated Chromium's own frame buffering (design §2.3) but made the gate the pacing
+ * authority on backends whose fences signal on submission activity rather than GPU completion:
+ * on D3D11on12 every sync poll is a DONOTFLUSH GetData that can never advance the translation
+ * layer's replay/submit pipeline, so withholding submission on a stalled tick starved the very
+ * mechanism that signals the gate fence (.working/fence-artifact-rootcause/findings.md §2). The
+ * 42-run probe matrix on the reference machine (Iris Xe 0x46A6, results/summary.md) measured the
+ * limit cycle at depth 2 — d3d11on12 stall 0.33, ~77 fps — and its disappearance at depth 6
+ * (V3d6: stall 0.00 3/3 runs, ~212 fps, the tightest variance of any jam-free variant; ungated
+ * V4 measured equally jam-free but noisier). The measured fence-observability latency under
+ * continuous submission is ~6 ticks (V3d6/V4 p50/p95 5-6/6 ticks), so a depth-6 horizon absorbs
+ * it: the gate still bounds in-flight work as a tripwire against runaway submission masking, but
+ * it no longer sets frame cadence on any measured backend. Completion honesty is preserved by
+ * the instrumentation that never paced in the first place: TIME_ELAPSED percentiles with
+ * disjoint/plausibility rejection, cpuSubmit bracketing, and the two contamination flags below —
+ * BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG stays armed so a backend that stalls even this
+ * deep horizon is reported as unmeasurable rather than slow.
+ */
+export const BENCHMARK_FENCE_QUEUE_DEPTH = 6;
 export const BENCHMARK_FENCE_RING_SIZE = BENCHMARK_FENCE_QUEUE_DEPTH + 1;
 export const BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO = 0.05;
 export const BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO = 0.2;
@@ -97,6 +137,13 @@ export interface BenchmarkTrialHooks {
 	onProgress?(progress: { phase: 'warmup' | 'measure'; ratio: number }): void;
 	renderFrame(frameIndex: number): void;
 	requestFrame(callback: (timestamp: number) => void): void;
+	/**
+	 * The frame's main-thread lane, run before submission the way a game runs its simulation
+	 * before submitting the frame it produced (since workload v3: entity update + residual spin,
+	 * carried unchanged into v4). It is
+	 * deliberately inside the measured frame and outside the cpuSubmit bracket, so it contends for
+	 * the thread with submission without being counted as submission cost.
+	 */
 	spin(): number;
 	/** Starts the event-loop lateness sampler; returns a stop function. */
 	startSampler(callback: () => void, intervalMs: number): () => void;
@@ -160,7 +207,11 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		if (gl && frameTimes.length < config.minSamples) rejectionReasons.add('insufficient-samples');
 		let gpuTimingStatus: BenchmarkGpuTimingStatus = ext ? 'measured' : 'unsupported';
 		if (ext) {
-			const disjointExcessive = gpuDisjointDiscardCount > frameTimes.length * BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO;
+			// Relative to sampling attempts, not to frame count: GPU timing is sampled on one
+			// frame in BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL, so a frame-relative threshold would
+			// silently loosen by that factor.
+			const disjointAttemptCount = gpuSamplesMs.length + gpuImplausibleCount + gpuDisjointDiscardCount;
+			const disjointExcessive = gpuDisjointDiscardCount > disjointAttemptCount * BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO;
 			const gpuAttemptCount = gpuSamplesMs.length + gpuImplausibleCount;
 			const implausibleExcessive = gpuAttemptCount > 0 && gpuImplausibleCount > gpuAttemptCount * BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO;
 			if (disjointExcessive || implausibleExcessive || gpuSamplesMs.length === 0) gpuTimingStatus = 'unreliable';
@@ -190,7 +241,10 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		// time stays far below the frame interval, the fence ring itself — not the backend's
 		// rendering throughput — produced the frame times. Backends translate fence signaling
 		// differently (D3D11on12 in particular), so such a trial is not comparable evidence
-		// against a backend that did not stall. Diagnostic, never a scored input.
+		// against a backend that did not stall. At depth 6 no measured backend trips this (probe
+		// V3d6: stall 0.00 on both d3d11on12 and default); it stays armed as the tripwire for
+		// backends whose fence observability defeats even the deep horizon (findings §4e).
+		// Diagnostic, never a scored input.
 		const stallRatioValue = totalTicks > 0 ? stalledTicks / totalTicks : 0;
 		if (
 			gpuTimingStatus === 'measured'
@@ -348,9 +402,12 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 					: { phase: 'warmup', ratio: Math.min(1, (timestamp - start) / config.warmupMinMs) });
 			}
 
-			// Bounded in-flight work: frame N waits for frame N-2's fence with a non-blocking
-			// SYNC_STATUS poll; an unsignaled fence skips submission so the frame interval grows
-			// to match actual GPU throughput (design §2.3).
+			// Bounded in-flight work: frame N waits for frame N-6's fence with a non-blocking
+			// SYNC_STATUS poll. At depth 6 the horizon exceeds the worst measured fence
+			// observability latency (~6 ticks on D3D11on12 under continuous submission, probe
+			// V3d6/V4), so rAF and compositor back-pressure pace the loop and the gate fires only
+			// when in-flight work genuinely runs away — a tripwire, not the pacing authority.
+			// When it does fire, the stall evidence feeds the fence-pacing contamination flag.
 			if (measuring) totalTicks++;
 			const gateSlot = fences[(submittedFrames - BENCHMARK_FENCE_QUEUE_DEPTH + BENCHMARK_FENCE_RING_SIZE * 2) % BENCHMARK_FENCE_RING_SIZE];
 			if (submittedFrames >= BENCHMARK_FENCE_QUEUE_DEPTH && gateSlot && gateSlot.frameIndex === submittedFrames - BENCHMARK_FENCE_QUEUE_DEPTH) {
@@ -378,7 +435,11 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 
 			hooks.spin();
 			const submitStart = hooks.now();
-			const query = measuring && extension ? acquireQuery() : undefined;
+			// Sampled, not per-frame: see BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL. Instrumenting every
+			// frame costs D3D11on12 ~28% of its frame rate and native D3D11 ~2%, which would make
+			// the instrument decide the comparison it exists to report.
+			const sampleThisFrame = submittedFrames % BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL === 0;
+			const query = measuring && extension && sampleThisFrame ? acquireQuery() : undefined;
 			if (query !== undefined) gl.beginQuery(extension.TIME_ELAPSED_EXT, query);
 			hooks.renderFrame(submittedFrames);
 			if (query !== undefined) {

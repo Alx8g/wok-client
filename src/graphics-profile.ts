@@ -420,11 +420,12 @@ export function clearKeptGraphicsBackend(
 	};
 }
 
-export function recordGraphicsGpuFailure(
+function recordGpuFailure(
 	state: GraphicsProfileState,
 	backend: AppliedGraphicsBackend,
 	reason: string,
-	now: number = Date.now()
+	quarantine: boolean,
+	now: number
 ): GraphicsProfileState {
 	// Chromium can report several teardown events for one failed GPU process. Once this
 	// launch has recorded its confirmed failure, later same-run events are diagnostics,
@@ -434,7 +435,10 @@ export function recordGraphicsGpuFailure(
 	const previous = state.backendFailures.find(failure => failure.backend === backend);
 	const previousIsRecent = previous && now <= previous.quarantineUntil + GRAPHICS_QUARANTINE_MAX_MS;
 	const failureCount = previousIsRecent ? previous.failureCount + 1 : 1;
-	const quarantineUntil = backend === 'default' ? now : now + graphicsBackendCooldownMs(failureCount);
+	// A non-quarantining record (and any 'default' failure, which has no safer fallback) keeps
+	// the failure history without ever blocking the backend: quarantineUntil never lies in the
+	// future, so activeQuarantinedBackends ignores the entry.
+	const quarantineUntil = !quarantine || backend === 'default' ? now : now + graphicsBackendCooldownMs(failureCount);
 	const failure: GraphicsBackendFailure = {
 		backend,
 		failureCount,
@@ -457,6 +461,47 @@ export function recordGraphicsGpuFailure(
 		updatedAt: now
 	};
 	return releaseExpiredGraphicsQuarantines(failedState, now);
+}
+
+export function recordGraphicsGpuFailure(
+	state: GraphicsProfileState,
+	backend: AppliedGraphicsBackend,
+	reason: string,
+	now: number = Date.now()
+): GraphicsProfileState {
+	return recordGpuFailure(state, backend, reason, true, now);
+}
+
+/**
+ * Records a GPU-process failure for a manually selected backend without quarantining it (audit
+ * C5): the user's explicit choice keeps applying on the next launch, but the crash enters the
+ * failure history so the settings advisory and the diagnostics report can show a crash-looping
+ * manual selection instead of dropping the evidence. A later clean launch of the same backend
+ * clears the history exactly like a quarantined one.
+ */
+export function recordManualGraphicsGpuFailure(
+	state: GraphicsProfileState,
+	backend: AppliedGraphicsBackend,
+	reason: string,
+	now: number = Date.now()
+): GraphicsProfileState {
+	return recordGpuFailure(state, backend, reason, false, now);
+}
+
+/**
+ * Advisory for a crash-looping manual backend selection. Manual selections are exempt from
+ * quarantine by design, so this advisory (surfaced through gpuAdvisory) and the diagnostics
+ * failure history are the only places their GPU-process failures become visible.
+ */
+export function describeManualBackendFailures(
+	state: GraphicsProfileState,
+	selection: Pick<GraphicsSelection, 'backend' | 'source'>
+): string | undefined {
+	if (selection.source !== 'manual') return undefined;
+	const failure = state.backendFailures.find(entry => entry.backend === selection.backend);
+	if (!failure) return undefined;
+	const times = failure.failureCount === 1 ? 'once' : `${failure.failureCount} times`;
+	return `The manually selected ${selection.backend} backend crashed its GPU process ${times} recently. Manual selections are never quarantined; switch the graphics backend to Auto if the crashes continue.`;
 }
 
 /** @deprecated Use recordGraphicsGpuFailure for an explicitly observed GPU-process failure. */

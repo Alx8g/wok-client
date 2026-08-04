@@ -25,12 +25,14 @@ import {
 	clearKeptGraphicsBackend,
 	completeGraphicsLaunch,
 	createGraphicsProfileState,
+	describeManualBackendFailures,
 	isGraphicsBackendQuarantined,
 	keepCurrentGraphicsBackend,
 	normalizeGraphicsDevices,
 	parseGraphicsProfileState,
 	recordCleanGraphicsLaunchInterruption,
 	recordGraphicsGpuFailure,
+	recordManualGraphicsGpuFailure,
 	recordUnknownGraphicsLaunchInterruption,
 	recoverInterruptedGraphicsLaunch,
 	releaseExpiredGraphicsQuarantines,
@@ -87,7 +89,9 @@ import {
 } from './calibration.ts';
 import { WORKLOAD_CONSTANTS, WORKLOAD_VERSION } from './calibration-workload.ts';
 import type { CompetitiveGameSettings } from './competitive-mode.ts';
+import { parseSettingsBaselineMarker, planSettingsBaseline, type SettingsBaselineMarker } from './settings-baseline.ts';
 import { containsObsoletePreferences, parseUserPreferencePatch } from './user-preferences.ts';
+import { resolveGameplayWindowGeometry } from './window-geometry.ts';
 import {
 	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
 	adaptiveValidationProfileIdentitiesEqual,
@@ -663,38 +667,37 @@ if (userPrefs.cssSwapper !== 'None') ensureCssStorage();
 
 // convert legacy settings files to newer formats
 let modifiedSettings = settingsNeedCanonicalRewrite;
-let writeSafetyBaseline = false;
 
 const indexedUserPrefs = userPrefs as UserPrefs;
 
-// Existing Crankshaft/WOK profiles may have Terms-sensitive features enabled by default.
-// Reset them once, then preserve any later explicit user choice.
-if (!existsSync(safetyBaselinePath)) {
-	const safeFeatureDefaults: Partial<UserPrefs> = {
-		competitionAutomation: false,
-		customFilters: false,
-		hideAds: 'off',
-		matchmaker: false,
-		resourceSwapper: false
-	};
-	for (const [key, value] of Object.entries(safeFeatureDefaults)) {
-		if (indexedUserPrefs[key] === value || value === undefined) continue;
-		indexedUserPrefs[key] = value;
-		modifiedSettings = true;
+// Existing profiles may carry defaults this project no longer ships (Terms-sensitive features
+// and the default-on safeFlags_gpuRasterizing era). Each baseline version resets them once and
+// then preserves any later explicit user choice; see src/settings-baseline.ts. A marker that
+// exists but cannot be parsed leaves everything untouched: never rewrite preferences on
+// ambiguous evidence.
+let settingsBaselineMarker: SettingsBaselineMarker | undefined;
+let settingsBaselineMarkerUnreadable = false;
+if (existsSync(safetyBaselinePath)) {
+	try {
+		settingsBaselineMarker = parseSettingsBaselineMarker(JSON.parse(readFileSync(safetyBaselinePath, 'utf-8')));
+		settingsBaselineMarkerUnreadable = settingsBaselineMarker === undefined;
+	} catch (error) {
+		console.error('Failed to read the settings baseline marker; leaving preferences unchanged', error);
+		settingsBaselineMarkerUnreadable = true;
 	}
-	writeSafetyBaseline = true;
+}
+const settingsBaselinePlan = settingsBaselineMarkerUnreadable
+	? { patch: {} }
+	: planSettingsBaseline(settingsBaselineMarker, indexedUserPrefs);
+for (const [key, value] of Object.entries(settingsBaselinePlan.patch)) {
+	indexedUserPrefs[key] = value;
+	modifiedSettings = true;
 }
 
 // initially, fullscreen was a true/false, now it's "windowed", "fullscreen" or "borderless"
 if (typeof userPrefs.fullscreen === 'boolean') {
 	modifiedSettings = true;
 	if (userPrefs.fullscreen === true) userPrefs.fullscreen = 'fullscreen'; else userPrefs.fullscreen = 'windowed';
-}
-
-// borderless is now broken on windows, and I don't think there's a fix?
-if (process.platform === "win32" && userPrefs.fullscreen === 'borderless') {
-	userPrefs.fullscreen = 'windowed';
-	modifiedSettings = true;
 }
 
 // initially, hideAds was a true/false, now it's "block", "hide" or "off"
@@ -710,11 +713,10 @@ if (userPrefs.immersiveSplashBackgroundColor === '#171717') {
 }
 // write the new settings format to the settings.json file right after the conversion
 if (modifiedSettings) writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
-if (writeSafetyBaseline) {
-	writeFileSync(safetyBaselinePath, JSON.stringify({ appliedAt: Date.now(), version: 1 }, null, 2), {
-		encoding: 'utf-8',
-		flag: 'wx'
-	});
+if (settingsBaselinePlan.marker) {
+	// May overwrite a version-1 marker during the upgrade; the preference patch above has
+	// already been applied and persisted, so the marker is safe to advance.
+	writeFileSync(safetyBaselinePath, JSON.stringify(settingsBaselinePlan.marker, null, 2), { encoding: 'utf-8' });
 }
 
 let mainWindow: BrowserWindow;
@@ -743,6 +745,9 @@ app.on('gpu-info-update', () => {
 
 function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
 	const integratedGpuAssessment = assessIntegratedGpuUsage(graphicsProfileState.devices);
+	// A crash-looping manual backend outranks the integrated-GPU hint: manual selections are
+	// never quarantined, so this advisory is the only surface where those failures show up.
+	const manualFailureAdvisory = describeManualBackendFailures(graphicsProfileState, graphicsSelection);
 	return {
 		activeBackend: graphicsSelection.backend,
 		preference: graphicsSelection.preference,
@@ -750,9 +755,14 @@ function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
 		reason: graphicsSelection.reason,
 		source: graphicsSelection.source,
 		features: gpuFeatureStatus,
-		...(integratedGpuAssessment.suspectedIntegratedFallback
-			? { gpuAdvisory: 'Running on the integrated GPU while a discrete GPU is present. Set the high-performance GPU for WOK Client in your OS graphics settings.' }
-			: {})
+		...(manualFailureAdvisory
+			? { gpuAdvisory: manualFailureAdvisory, gpuAdvisoryKind: 'manual-backend-failure' as const }
+			: integratedGpuAssessment.suspectedIntegratedFallback
+				? {
+					gpuAdvisory: 'Running on the integrated GPU while a discrete GPU is present. Set the high-performance GPU for WOK Client in your OS graphics settings.',
+					gpuAdvisoryKind: 'integrated-fallback' as const
+				}
+				: {})
 	};
 }
 
@@ -879,11 +889,17 @@ app.on('child-process-gone', (_event, details) => {
 		appQuitting
 		|| details.type !== 'GPU'
 		|| !graphicsFailureReasons.has(details.reason)
-		|| !['auto', 'calibration', 'retained'].includes(graphicsSelection.source)
+		// Recovery launches already run the safest fallback; there is no better backend to
+		// steer to and no user choice to advise about.
+		|| graphicsSelection.source === 'recovery'
 	) return;
 
 	const reason = `GPU process ${details.reason} with exit code ${details.exitCode}.`;
-	const failedState = recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
+	// A manual selection is recorded without quarantine (audit C5): the explicit choice keeps
+	// applying, but the crash loop becomes visible in diagnostics and the settings advisory.
+	const failedState = graphicsSelection.source === 'manual'
+		? recordManualGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason)
+		: recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
 	if (failedState === graphicsProfileState) {
 		console.error(`Additional GPU teardown event after the ${graphicsSelection.backend} launch failure: ${reason}`);
 		return;
@@ -891,7 +907,11 @@ app.on('child-process-gone', (_event, details) => {
 	graphicsProfileState = failedState;
 	persistGraphicsProfile();
 	if (queuedCalibrationCandidate) activeCalibrationFailureReason = reason;
-	console.error(`${graphicsSelection.source === 'calibration' ? 'Calibrated' : 'Automatic'} graphics backend ${graphicsSelection.backend} failed and will fall back on the next launch.`);
+	if (graphicsSelection.source === 'manual') {
+		console.error(`Manually selected graphics backend ${graphicsSelection.backend} failed; it stays selected (manual choices are never quarantined) and the failure was recorded for diagnostics.`);
+	} else {
+		console.error(`${graphicsSelection.source === 'calibration' ? 'Calibrated' : 'Automatic'} graphics backend ${graphicsSelection.backend} failed and will fall back on the next launch.`);
+	}
 });
 
 function observeGraphicsLaunchRenderer(window: BrowserWindow, onRendererGone?: () => void) {
@@ -1209,26 +1229,7 @@ function calibrationDataUrl(html: string): string {
 
 /** Keeps calibration and gameplay on the same primary-display surface and window mode. */
 function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
-	const display = screen.getPrimaryDisplay();
-	const geometry: BrowserWindowConstructorOptions = {
-		center: true,
-		fullscreen: false,
-		height: Math.round(display.size.height * windowScale),
-		width: Math.round(display.size.width * windowScale)
-	};
-
-	if (userPrefs.fullscreen === 'fullscreen') return { ...geometry, fullscreen: true };
-	if (userPrefs.fullscreen === 'borderless') {
-		return {
-			...geometry,
-			frame: false,
-			fullscreenable: false,
-			height: display.bounds.height,
-			kiosk: true,
-			width: display.bounds.width
-		};
-	}
-	return geometry;
+	return resolveGameplayWindowGeometry(userPrefs.fullscreen, screen.getPrimaryDisplay(), windowScale);
 }
 
 const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
@@ -1400,8 +1401,16 @@ function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
 		platform: process.platform,
 		recommendedBackend: graphicsProfileState.recommendedBackend
 	});
-	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, Boolean(userPrefs.competitiveMode));
-	if (preparedState !== calibrationState) writeCalibrationStateSync(preparedState);
+	const previousCalibrationState = calibrationState;
+	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, Boolean(userPrefs.competitiveMode), process.platform);
+	if (preparedState !== previousCalibrationState) {
+		writeCalibrationStateSync(preparedState);
+		// Off Windows the candidate space offers no backend comparison, so calibration completes
+		// immediately instead of consenting, relaunching, and benchmarking one candidate (C2).
+		if (preparedState.completionReason && preparedState.completionReason !== previousCalibrationState?.completionReason) {
+			console.log(`Calibration completed without a benchmark cycle: ${preparedState.completionReason}`);
+		}
+	}
 	calibrationState = preparedState;
 	return preparedState;
 }

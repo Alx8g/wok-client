@@ -6,6 +6,7 @@ import {
 	clearKeptGraphicsBackend,
 	completeGraphicsLaunch,
 	createGraphicsProfileState,
+	describeManualBackendFailures,
 	GRAPHICS_QUARANTINE_BASE_MS,
 	GRAPHICS_QUARANTINE_MAX_MS,
 	graphicsBackendCooldownMs,
@@ -17,6 +18,7 @@ import {
 	recommendGraphicsBackend,
 	recordCleanGraphicsLaunchInterruption,
 	recordGraphicsGpuFailure,
+	recordManualGraphicsGpuFailure,
 	recordUnknownGraphicsLaunchInterruption,
 	recoverInterruptedGraphicsLaunch,
 	selectGraphicsBackend,
@@ -368,4 +370,82 @@ test('assessIntegratedGpuUsage falls back to the renderer string when active fla
 	assert.equal(assessIntegratedGpuUsage([unflaggedIntel, unflaggedNvidia], nvidiaRenderer).suspectedIntegratedFallback, false);
 	// No usable evidence in either direction.
 	assert.equal(assessIntegratedGpuUsage([unflaggedIntel, unflaggedNvidia], '').suspectedIntegratedFallback, false);
+});
+
+test('manual-backend GPU failures are recorded without quarantine and keep the manual choice', () => {
+	let state = intelGraphicsState();
+	const manualSelection = selectGraphicsBackend('d3d11', state, 'win32', START_TIME);
+	assert.equal(manualSelection.source, 'manual');
+
+	state = beginGraphicsLaunch(state, manualSelection, START_TIME + 1);
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process crashed with exit code 5.', START_TIME + 2);
+
+	// The failure is fully recorded...
+	assert.equal(state.launchPending, false);
+	assert.equal(state.lastLaunchOutcome, 'gpu-failure');
+	assert.equal(state.gpuFailureCount, 1);
+	assert.deepEqual(state.backendFailures, [{
+		backend: 'd3d11',
+		failureCount: 1,
+		lastFailedAt: START_TIME + 2,
+		quarantineUntil: START_TIME + 2,
+		reason: 'GPU process crashed with exit code 5.'
+	}]);
+	// ...but never quarantined: the explicit manual choice keeps applying on the next launch.
+	assert.equal(isGraphicsBackendQuarantined(state, 'd3d11', START_TIME + 3), false);
+	assert.deepEqual(state.blockedBackends, []);
+	assert.equal(selectGraphicsBackend('d3d11', state, 'win32', START_TIME + 3).backend, 'd3d11');
+});
+
+test('repeated manual failures accumulate history and duplicate teardown events stay deduplicated', () => {
+	let state = intelGraphicsState();
+	state = beginGraphicsLaunch(state, selectGraphicsBackend('d3d11', state, 'win32', START_TIME), START_TIME + 1);
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process crashed.', START_TIME + 2);
+	const firstFailureState = state;
+	// Same launch: Chromium can emit several teardown events for one failed GPU process.
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process abnormal-exit.', START_TIME + 3);
+	assert.equal(state, firstFailureState);
+
+	// Next crash-looping launch.
+	state = beginGraphicsLaunch(state, selectGraphicsBackend('d3d11', state, 'win32', START_TIME + 10), START_TIME + 10);
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process crashed.', START_TIME + 11);
+	assert.equal(state.backendFailures[0].failureCount, 2);
+	assert.equal(isGraphicsBackendQuarantined(state, 'd3d11', START_TIME + 12), false);
+
+	// The recorded history survives the profile's JSON round trip.
+	const persisted = parseGraphicsProfileState(JSON.parse(JSON.stringify(state)), START_TIME + 12);
+	assert.ok(persisted);
+	assert.equal(persisted.backendFailures[0].failureCount, 2);
+	assert.equal(isGraphicsBackendQuarantined(persisted, 'd3d11', START_TIME + 12), false);
+});
+
+test('a clean launch clears manual failure history exactly like a quarantined one', () => {
+	let state = intelGraphicsState();
+	state = beginGraphicsLaunch(state, selectGraphicsBackend('d3d11', state, 'win32', START_TIME), START_TIME + 1);
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process crashed.', START_TIME + 2);
+
+	state = beginGraphicsLaunch(state, selectGraphicsBackend('d3d11', state, 'win32', START_TIME + 10), START_TIME + 10);
+	state = completeGraphicsLaunch(state, START_TIME + 11);
+	assert.deepEqual(state.backendFailures, []);
+	assert.equal(state.gpuFailureCount, 0);
+});
+
+test('describeManualBackendFailures advises only about the crashing manual selection', () => {
+	let state = intelGraphicsState();
+	state = beginGraphicsLaunch(state, selectGraphicsBackend('d3d11', state, 'win32', START_TIME), START_TIME + 1);
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process crashed.', START_TIME + 2);
+
+	const advisory = describeManualBackendFailures(state, { backend: 'd3d11', source: 'manual' });
+	assert.match(advisory ?? '', /manually selected d3d11 backend crashed its GPU process once/u);
+	assert.match(advisory ?? '', /never quarantined/u);
+
+	// A second recent failure changes the count wording.
+	state = beginGraphicsLaunch(state, selectGraphicsBackend('d3d11', state, 'win32', START_TIME + 10), START_TIME + 10);
+	state = recordManualGraphicsGpuFailure(state, 'd3d11', 'GPU process crashed.', START_TIME + 11);
+	assert.match(describeManualBackendFailures(state, { backend: 'd3d11', source: 'manual' }) ?? '', /2 times/u);
+
+	// No advisory for other selection sources, other backends, or clean manual choices.
+	assert.equal(describeManualBackendFailures(state, { backend: 'd3d11', source: 'auto' }), undefined);
+	assert.equal(describeManualBackendFailures(state, { backend: 'vulkan', source: 'manual' }), undefined);
+	assert.equal(describeManualBackendFailures(intelGraphicsState(), { backend: 'd3d11', source: 'manual' }), undefined);
 });

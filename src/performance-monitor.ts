@@ -191,7 +191,11 @@ function renderOverlay(now = performance.now()) {
 		`rAF p95       ${snapshot.p95FrameTimeMs.toFixed(2)} ms`,
 		`rAF worst     ${snapshot.worstFrameTimeMs.toFixed(2)} ms`,
 		`backend       ${runtimeInfo.activeBackend} (${runtimeInfo.source})`,
-		...(runtimeInfo.gpuAdvisory ? ['GPU WARNING   integrated GPU active, discrete GPU idle'] : []),
+		...(runtimeInfo.gpuAdvisory
+			? [`GPU WARNING   ${runtimeInfo.gpuAdvisoryKind === 'manual-backend-failure'
+				? 'manual backend crashing, never quarantined'
+				: 'integrated GPU active, discrete GPU idle'}`]
+			: []),
 		`WebGL         ${webglStatus}`,
 		`raster        ${rasterStatus}`,
 		`samples       ${snapshot.sampleCount}`,

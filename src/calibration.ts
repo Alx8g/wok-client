@@ -142,6 +142,8 @@ export interface CalibrationState {
 	candidates: CalibrationCandidate[];
 	competitiveModeWasEnabled: boolean;
 	completedAt?: number;
+	/** Set when calibration completed without a benchmark cycle (audit C2); absent for measured runs. */
+	completionReason?: string;
 	confirmation?: CalibrationConfirmationStatus;
 	fieldRejectedCandidateIds: string[];
 	launchCount: number;
@@ -283,6 +285,47 @@ export function createCalibrationCandidates({
 	return candidates.slice(0, 2);
 }
 
+/**
+ * True when the staged candidates offer a genuine backend comparison for the shootout. Windows
+ * plans always run (kept as-is; whether a capped/uncapped pairing of one backend is worth its
+ * launches is A8's territory, not this guard's). Off Windows the automatic candidate space
+ * collapses to Chromium default — macOS default is already ANGLE-Metal and the d3d11 pair is
+ * Windows-only — so unless a manual selection contributes a genuinely different backend (for
+ * example vulkan on Linux), the consent/relaunch/benchmark cycle would measure one candidate
+ * against itself (audit C2).
+ */
+export function calibrationOffersBackendComparison(
+	candidates: CalibrationCandidate[],
+	platform: NodeJS.Platform = process.platform
+): boolean {
+	if (platform === 'win32') return true;
+	return new Set(candidates.map(candidate => candidate.backend)).size > 1;
+}
+
+/** Reason persisted (and shown in diagnostics) when calibration completes without a benchmark cycle. */
+export const CALIBRATION_NO_COMPARISON_REASON = 'Only the Chromium default backend is available to benchmark on this platform, so calibration completed immediately with the default profile instead of measuring one candidate against itself.';
+
+/**
+ * Completes calibration without running the consent/launch/benchmark cycle. No selection is
+ * applied or changed: with no results and no recommendation, the automatic recommendation
+ * (Chromium default off Windows) stays in charge, and the reason is persisted so diagnostics
+ * and future readers can tell an unmeasured completion from a measured one.
+ */
+export function completeCalibrationWithoutComparison(
+	state: CalibrationState,
+	reason: string = CALIBRATION_NO_COMPARISON_REASON,
+	now: number = Date.now()
+): CalibrationState {
+	return {
+		...state,
+		completedAt: now,
+		completionReason: reason,
+		rerunRequested: false,
+		status: 'complete',
+		updatedAt: now
+	};
+}
+
 function detectEffectiveRendererBackend(webglRenderer: string): ExplicitGraphicsBackend | undefined {
 	const normalized = webglRenderer.toLowerCase();
 	const compact = normalized.replaceAll(/[\s_-]+/gu, '');
@@ -395,6 +438,7 @@ export function startCalibrationRun(state: CalibrationState, now: number = Date.
 	}
 	const {
 		completedAt: _completedAt,
+		completionReason: _completionReason,
 		confirmation: _confirmation,
 		previousSelection: _previousSelection,
 		provisionalSince: _provisionalSince,
@@ -509,7 +553,8 @@ export function prepareCalibrationState(
 	existing: CalibrationState | undefined,
 	signature: CalibrationSignature,
 	candidates: CalibrationCandidate[],
-	competitiveModeEnabled: boolean
+	competitiveModeEnabled: boolean,
+	platform: NodeJS.Platform = process.platform
 ): CalibrationState {
 	if (existing && calibrationSignaturesEqual(existing.signature, signature) && !existing.rerunRequested) {
 		if (existing.signature.appVersion === signature.appVersion) return existing;
@@ -537,6 +582,13 @@ export function prepareCalibrationState(
 	}
 
 	const reset = createCalibrationState(signature, candidates, competitiveModeEnabled, existing);
+	// With nothing to compare, the consent/relaunch/benchmark cycle would measure one candidate
+	// against itself (audit C2): complete immediately instead, whether this is a fresh state
+	// (no consent dialog will ever be offered for it) or an explicit rerun (the single-candidate
+	// launch cycle is skipped). The automatic default profile stays in charge.
+	if (!calibrationOffersBackendComparison(candidates, platform)) {
+		return completeCalibrationWithoutComparison(reset);
+	}
 	// An explicit rerun is itself consent, so the fresh plan starts immediately.
 	return existing?.rerunRequested ? startCalibrationRun(reset) : reset;
 }
@@ -1395,6 +1447,7 @@ export function parseCalibrationState(value: unknown): CalibrationState | undefi
 		...core,
 		...(value.autoRollbackUsed === true ? { autoRollbackUsed: true as const } : {}),
 		...(calibrationOfferDeclinedAt !== undefined ? { calibrationOfferDeclinedAt } : {}),
+		...(typeof value.completionReason === 'string' ? { completionReason: value.completionReason } : {}),
 		...(confirmation ? { confirmation } : {}),
 		fieldRejectedCandidateIds,
 		launchCount: Math.max(0, Math.trunc(finiteNumber(value.launchCount))),

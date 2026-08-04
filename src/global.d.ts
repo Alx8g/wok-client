@@ -23,8 +23,14 @@ interface GraphicsRuntimeInfo {
 	reason: string;
 	source: string;
 	features: Record<string, string>;
-	/** Present when the active adapter looks integrated while a discrete adapter exists. */
+	/**
+	 * Present when something about the GPU setup deserves the user's attention: the active
+	 * adapter looks integrated while a discrete adapter exists, or a manually selected backend
+	 * keeps crashing its GPU process (manual choices are never quarantined).
+	 */
 	gpuAdvisory?: string;
+	/** Machine-readable advisory category for compact surfaces such as the overlay. */
+	gpuAdvisoryKind?: 'integrated-fallback' | 'manual-backend-failure';
 }
 
 interface CompetitiveModeRuntimeInfo {

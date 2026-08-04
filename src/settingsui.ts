@@ -125,17 +125,22 @@ async function applyCustomCssSelection(value: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
+	headingPerformance: { title: 'Performance', type: 'heading', safety: 0, cat: 0 },
 	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: "Finds the fastest graphics settings for YOUR PC and turns down Krunker's visual extras for more FPS. It measures a few options and keeps the best one. Your Krunker settings are saved first and put back if you turn this off.", safety: 0, cat: 0 },
-	fpsUncap: { title: 'Manual Un-cap FPS', type: 'bool', desc: 'Used when Competitive mode is off. Competitive mode uses the frame policy selected by calibration.', safety: 0, cat: 0 },
-	graphicsBackend: { title: 'Manual Graphics Backend', type: 'sel', desc: 'Used when Competitive mode is off. Auto selects a conservative hardware profile. D3D11on12 is tuned for Intel-only Windows systems; Vulkan is experimental.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
-	performanceOverlay: { title: 'Performance Diagnostics', type: 'bool', desc: 'Shows lightweight renderer FPS/frame-time diagnostics plus Krunker-reported ping, variation, assigned region, TPS, and the game\'s lag warning. Reported ping is shown as-is and is not claimed to be RTT. Alt+F8 toggles visibility.', safety: 0, cat: 0, refreshOnly: true },
-	fullscreen: { title: 'Start in Windowed/Fullscreen mode', type: 'sel', desc: "Fullscreen is recommended for play: windowed and maximized modes add a desktop-composition hop that costs frame pacing and latency. 'Borderless' is a frameless window covering the whole screen; try it if fullscreen is unstable.", safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', 'borderless'] },
-	resourceSwapper: { title: 'Legacy Resource Swapper', type: 'bool', desc: 'Disabled by default. Prefer Krunker\'s official resource-pack and mod APIs; unofficial replacement may conflict with current service rules.', safety: 3, cat: 0 },
-	discordRPC: { title: 'Legacy Discord Rich Presence', type: 'bool', desc: 'Uses the upstream Crankshaft Discord application until WOK Client receives its own Discord application ID.', safety: 0, cat: 0 },
-	extendedRPC: { title: 'Extended Discord RPC', type: 'bool', desc: 'Adds WOK Client and upstream source buttons. No effect if RPC is off.', safety: 0, cat: 0, instant: true },
-	hideAds: { title: 'Legacy Ad Controls', type: 'sel', desc: 'Disabled by default. Blocking or hiding advertisements may conflict with current service requirements. Changing network blocking requires an app restart.', safety: 4, cat: 0, opts: ['off', 'hide', 'block'] },
-	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Disabled by default. Filters can modify or cancel game requests and may conflict with current service rules. Changes require an app restart.', safety: 4, cat: 0 },
-	saveMatchResultJSONButton: { title: 'Match Result To Clipboard', type: 'bool', desc: 'New button on match end which copies the match results JSON.', safety: 0, cat: 0, refreshOnly: true },
+	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'Shows FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
+	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto unless you know what you are doing. Competitive Mode sets this to whichever option measured fastest on your PC.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
+	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render frames as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
+	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen is best for playing - windowed modes add an extra desktop compositing step that costs frame pacing.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
+
+	headingExtras: { title: 'Extras', type: 'heading', safety: 0, cat: 0 },
+	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 0 },
+	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status. No effect if Rich Presence is off.', safety: 0, cat: 0, instant: true },
+	saveMatchResultJSONButton: { title: 'Copy Match Results', type: 'bool', desc: 'Adds a button at the end of a match that copies the scoreboard.', safety: 0, cat: 0, refreshOnly: true },
+
+	headingLegacy: { title: 'Legacy (off by default)', type: 'heading', safety: 0, cat: 0 },
+	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has its own mod support - prefer that. May conflict with current game rules.', safety: 3, cat: 0 },
+	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks advertisements. May conflict with current game rules. Restart required.', safety: 4, cat: 0, opts: ['off', 'hide', 'block'] },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Lets your own rules modify or cancel game requests. May conflict with current game rules. Restart required.', safety: 4, cat: 0 },
 
 	cssSwapper: cssSwapperOption,
 	menuTimer: { title: 'Menu Timer', type: 'bool', safety: 0, cat: 1, instant: true },
@@ -180,7 +185,7 @@ const safetyDesc = [
 
 /** index-based category names. n = name, c = class */
 const categoryNames: CategoryName[] = [
-	{ name: 'Client Settings', cat: 'mainSettings' },
+	{ name: 'WOK', cat: 'mainSettings' },
 	{ name: 'Visual Settings', cat: 'styleSettings' },
 	{ name: 'Matchmaker', cat: 'matchmakerSettings' },
 	{ name: 'Advanced Settings', cat: 'advSettings' }
@@ -732,7 +737,7 @@ const skeleton = {
 	/** make a settings category header element */
 	catHedElem: (title: string) => createElement('div', {
 		class: 'setHed Crankshaft-setHed'.split(' '),
-		innerHTML: `<span class="material-icons plusOrMinus">keyboard_arrow_down</span> ${title}`
+		innerHTML: `${title}`
 	}),
 
 	/** make a settings category body element */
@@ -786,6 +791,9 @@ const crankshaftSettingsHolder = createElement('div', {
  */
 let settingElementPairs: { [key: string]: SettingElem } = {};
 
+/** Sidebar section the user last opened; survives re-renders so a refresh never dumps them back to the top. */
+let activeSettingsCategory = 0;
+
 function toggleSettingsCategory(header: Element) {
 	const sibling = header.nextElementSibling;
 	if (!sibling) return;
@@ -815,12 +823,32 @@ export function renderSettings() {
 	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
 		.filter(setting => settingSearchFilter(setting, filter));
 	const categoryBodies = new Map<number, HTMLElement>();
+	const categorySections = new Map<number, HTMLElement>();
+	// Sidebar layout: sections are chosen from a persistent nav rather than hunted for by
+	// scrolling through stacked collapsibles. One section is visible at a time, so the list the
+	// user is reading is never buried under the ones they are not.
+	const nav = createElement('div', { class: ['Crankshaft-settings-nav'] });
+	const pane = createElement('div', { class: ['Crankshaft-settings-pane'] });
+	crankshaftSettingsHolder.append(nav, pane);
+	const navButtons = new Map<number, HTMLElement>();
+	const showCategory = (categoryIndex: number) => {
+		activeSettingsCategory = categoryIndex;
+		for (const [index, button] of navButtons) button.classList.toggle('active', index === categoryIndex);
+		for (const [index, section] of categorySections) section.classList.toggle('hidden', index !== categoryIndex);
+	};
 	const ensureCategory = (categoryIndex: number): HTMLElement => {
 		const existing = categoryBodies.get(categoryIndex);
 		if (existing) return existing;
 		const category = categoryNames[categoryIndex];
 		const body = skeleton.catBodElem(category.cat, category.note ? skeleton.notice(category.note) : '');
-		crankshaftSettingsHolder.append(skeleton.catHedElem(category.name), body);
+		const section = createElement('div', { class: ['Crankshaft-settings-section'] });
+		section.append(skeleton.catHedElem(category.name), body);
+		pane.append(section);
+		const button = createElement('div', { class: ['Crankshaft-settings-navitem'], innerHTML: category.name });
+		button.addEventListener('click', () => { showCategory(categoryIndex); });
+		nav.append(button);
+		navButtons.set(categoryIndex, button);
+		categorySections.set(categoryIndex, section);
 		categoryBodies.set(categoryIndex, body);
 		return body;
 	};
@@ -843,6 +871,8 @@ export function renderSettings() {
 	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
 	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK Client folder', e => openPath(e, paths.configPath)));
 	mainCategory.prepend(buttonsHolder, supportHolder);
+
+	showCategory(categorySections.has(activeSettingsCategory) ? activeSettingsCategory : [...categorySections.keys()][0] ?? 0);
 
 	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder);
 }

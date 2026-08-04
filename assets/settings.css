@@ -451,3 +451,84 @@ input:checked+.advancedSlider:hover {
 #clientExit {
 	display: flex !important;
 }
+
+/* Sidebar settings layout: pick a section from a persistent nav instead of scrolling
+   through stacked collapsibles. Only the chosen section is mounted in the viewport. */
+.Crankshaft-settings {
+	display: flex;
+	align-items: flex-start;
+	gap: 18px;
+}
+
+.Crankshaft-settings-nav {
+	flex: 0 0 168px;
+	position: sticky;
+	top: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	padding-right: 14px;
+	border-right: 1px solid rgba(255, 255, 255, .08);
+}
+
+.Crankshaft-settings-navitem {
+	padding: 10px 12px;
+	border-left: 3px solid transparent;
+	color: rgba(255, 255, 255, .62);
+	font-size: 15px;
+	font-weight: 600;
+	letter-spacing: .02em;
+	cursor: pointer;
+	user-select: none;
+	transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.Crankshaft-settings-navitem:hover {
+	color: #fff;
+	background: rgba(255, 255, 255, .05);
+}
+
+.Crankshaft-settings-navitem.active {
+	color: #fff;
+	background: rgba(251, 192, 45, .10);
+	border-left-color: #FBC02D;
+}
+
+.Crankshaft-settings-pane {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.Crankshaft-settings-section.hidden {
+	display: none;
+}
+
+/* The section title is redundant with the highlighted nav item, so keep it quiet. */
+.Crankshaft-settings-section .Crankshaft-setHed {
+	cursor: default;
+	margin-top: 0;
+	opacity: .55;
+	font-size: 13px;
+	letter-spacing: .08em;
+	text-transform: uppercase;
+}
+
+/* Group headings inside a section. */
+.Crankshaft-settings .setting.heading {
+	padding: 18px 0 2px;
+	border: 0;
+	background: none;
+}
+
+.Crankshaft-settings .setting.heading .setting-title {
+	font-size: 13px;
+	font-weight: 700;
+	letter-spacing: .10em;
+	text-transform: uppercase;
+	color: #FBC02D;
+	margin: 0;
+}
+
+.Crankshaft-settings .setting.heading:first-child {
+	padding-top: 4px;
+}

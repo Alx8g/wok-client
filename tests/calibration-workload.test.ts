@@ -114,15 +114,21 @@ function renderFrames(seed: number, frameCount: number): { digest: string; drawC
 	return { digest: commandStreamDigest(recording.calls), drawCalls: workload.drawCallsPerFrame, perFrame };
 }
 
-test('workload v3 constants match the frozen design table', () => {
-	assert.equal(WORKLOAD_VERSION, 3);
-	// Batched-engine draw budget, not a draw-call stress test: v2's 1,000 draws/frame cost 3x the
-	// real frame budget in GPU time on the reference machine and ranked the backends backwards.
-	assert.equal(WORKLOAD_DRAWS_PER_FRAME, 100);
-	assert.equal(WORKLOAD_CONSTANTS.opaqueDraws, 50);
-	assert.equal(WORKLOAD_CONSTANTS.transparentDraws, 14);
-	assert.equal(WORKLOAD_CONSTANTS.uiDraws, 10);
-	assert.equal(WORKLOAD_CONSTANTS.programSwitchInterval, 12);
+test('workload v4 constants match the frozen design table', () => {
+	assert.equal(WORKLOAD_VERSION, 4);
+	// The MEASURED shape of a real Krunker gameplay frame (WOK_DRAW_STATS census, 240
+	// pointer-locked frames, reference machine): 23 draws, 17 program switches, 20 texture
+	// binds — essentially unbatched, one program + one texture per object. Prior versions
+	// assumed the opposite shape (v2: 1,000 draws amortising few state changes; v3: ~100 draws
+	// at material-batch intervals) and both mis-ranked the backends.
+	assert.equal(WORKLOAD_DRAWS_PER_FRAME, 23);
+	assert.equal(WORKLOAD_CONSTANTS.opaqueDraws, 12);
+	assert.equal(WORKLOAD_CONSTANTS.opaqueProgramSwitches, 7);
+	assert.equal(WORKLOAD_CONSTANTS.opaqueTextureBinds, 10);
+	assert.equal(WORKLOAD_CONSTANTS.transparentDraws, 6);
+	assert.equal(WORKLOAD_CONSTANTS.transparentProgramSwitches, 2);
+	assert.equal(WORKLOAD_CONSTANTS.transparentTextureBinds, 3);
+	assert.equal(WORKLOAD_CONSTANTS.uiDraws, 2);
 	// GPU-lane resources: the WORKLOAD_VERSION 1 freeze, carried unchanged.
 	assert.equal(WORKLOAD_CONSTANTS.sceneTextureCount, 8);
 	assert.equal(WORKLOAD_CONSTANTS.sceneTextureSize, 256);
@@ -134,18 +140,17 @@ test('workload v3 constants match the frozen design table', () => {
 	assert.equal(WORKLOAD_CONSTANTS.warmupMaxMs, 5_000);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleFrames, 30);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleRatio, 3);
-	// Main-thread lane: the v3 addition. Fixed iteration counts, never a time budget.
+	// Main-thread lane: unchanged from v3. Fixed iteration counts, never a time budget.
 	assert.equal(WORKLOAD_CONSTANTS.entityCount, 12_288);
 	assert.equal(WORKLOAD_CONSTANTS.entitySubsteps, 4);
 	assert.equal(WORKLOAD_CONSTANTS.entityNeighborChecks, 24_576);
 	assert.equal(WORKLOAD_CONSTANTS.jsSpinIterations, 160_000);
-	// Sprite/state-churn lane: material-batch churn intervals, not v2's every-2/every-4 torture test.
-	assert.equal(WORKLOAD_CONSTANTS.submissionDraws, 26);
-	assert.equal(WORKLOAD_CONSTANTS.submissionProgramSwitchInterval, 6);
-	assert.equal(WORKLOAD_CONSTANTS.submissionTextureBindInterval, 4);
-	assert.equal(WORKLOAD_CONSTANTS.submissionBlendToggleInterval, 8);
+	// Sprite lane: one program switch and one texture bind per draw — the measured adjacency.
+	assert.equal(WORKLOAD_CONSTANTS.submissionDraws, 3);
+	assert.equal(WORKLOAD_CONSTANTS.submissionProgramSwitches, 3);
+	assert.equal(WORKLOAD_CONSTANTS.submissionTextureBinds, 3);
 	assert.equal(WORKLOAD_CONSTANTS.streamChunkBytes, 4_096);
-	assert.equal(WORKLOAD_CONSTANTS.streamChunksPerFrame, 8);
+	assert.equal(WORKLOAD_CONSTANTS.streamChunksPerFrame, 3);
 	assert.equal(WORKLOAD_SHADER_SOURCES.length, 10);
 	assert.deepEqual(WORKLOAD_SHADER_SOURCES.map(shader => shader.name), [
 		'lit-textured',
@@ -201,45 +206,55 @@ test('animation is frame-index-driven with no wall-clock reads in the command pa
 	assert.notEqual(commandStreamDigest(recordingA.calls.slice(startThird)), firstRender);
 });
 
-test('per-frame command stream matches the design lane shape', () => {
+test('per-frame command stream reproduces the measured Krunker census exactly', () => {
 	const { drawCalls, perFrame } = renderFrames(WORKLOAD_SEED, 2);
 	assert.equal(drawCalls, WORKLOAD_DRAWS_PER_FRAME);
 
-	const laneProgramSwitches = Math.ceil(WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionProgramSwitchInterval);
-	const laneTextureBinds = Math.ceil(WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionTextureBindInterval);
+	// The WOK_DRAW_STATS census medians (240 pointer-locked real gameplay frames, reference
+	// machine): 23 draws, 17 program switches, 20 texture binds per frame. These are the
+	// numbers the workload exists to model, so they are pinned as exact equalities — any
+	// change to the lane structure that moves them is a workload re-shape and must bump
+	// WORKLOAD_VERSION with fresh evidence.
+	const MEASURED_DRAWS = 23;
+	const MEASURED_PROGRAM_SWITCHES = 17;
+	const MEASURED_TEXTURE_BINDS = 20;
+
+	// The same totals, derived from the constants: 5 structural switches (skybox, heightfield,
+	// first smoke layer, post-tint, UI) + the per-lane exact counts; 4 structural binds
+	// (heightfield, two smoke layers, UI atlas) + the per-lane exact counts.
+	const expectedSwitches = 5
+		+ WORKLOAD_CONSTANTS.opaqueProgramSwitches
+		+ WORKLOAD_CONSTANTS.transparentProgramSwitches
+		+ WORKLOAD_CONSTANTS.submissionProgramSwitches;
+	const expectedBinds = 4
+		+ WORKLOAD_CONSTANTS.opaqueTextureBinds
+		+ WORKLOAD_CONSTANTS.transparentTextureBinds
+		+ WORKLOAD_CONSTANTS.submissionTextureBinds;
+	assert.equal(expectedSwitches, MEASURED_PROGRAM_SWITCHES);
+	assert.equal(expectedBinds, MEASURED_TEXTURE_BINDS);
+	assert.equal(WORKLOAD_DRAWS_PER_FRAME, MEASURED_DRAWS);
+
 	for (const frame of perFrame) {
 		const count = (method: string) => frame.filter(call => call.method === method).length;
-		assert.equal(count('drawElements') + count('drawArrays'), WORKLOAD_DRAWS_PER_FRAME);
-		// Every one of the ten programs is exercised each frame, and the switching happens at
-		// material-batch granularity: the scene lane switches once per programSwitchInterval
-		// opaque draws plus once per pass boundary, and the sprite lane adds its churn on top.
+		assert.equal(count('drawElements') + count('drawArrays'), MEASURED_DRAWS);
+		assert.equal(count('useProgram'), MEASURED_PROGRAM_SWITCHES);
+		assert.equal(count('bindTexture'), MEASURED_TEXTURE_BINDS);
+		// Every one of the ten programs is exercised each frame: the census shape is roughly one
+		// program per object, so program variety — not draw volume — carries the state churn.
 		const programsUsed = new Set(frame.filter(call => call.method === 'useProgram').map(call => String(call.args[0])));
 		assert.equal(programsUsed.size, WORKLOAD_SHADER_SOURCES.length, `expected every program to be used, got ${programsUsed.size}`);
-		// Scene-lane switches: one per programSwitchInterval opaque draws, plus at most a handful
-		// of pass boundaries (skybox, heightfield, transparent, fullscreen, post, UI).
-		const sceneProgramSwitches = Math.ceil((WORKLOAD_CONSTANTS.opaqueDraws - 2) / WORKLOAD_CONSTANTS.programSwitchInterval);
-		const programSwitches = count('useProgram');
-		assert.ok(programSwitches >= sceneProgramSwitches + laneProgramSwitches, `expected lane program churn, got ${programSwitches}`);
-		assert.ok(programSwitches <= sceneProgramSwitches + laneProgramSwitches + 12, `program switches out of band: ${programSwitches}`);
-		// Scene-lane texture binds: one per textureBindInterval opaque draws plus the pass
-		// boundaries; the sprite lane adds one per submissionTextureBindInterval draws.
-		const sceneTextureBinds = Math.ceil((WORKLOAD_CONSTANTS.opaqueDraws - 2) / WORKLOAD_CONSTANTS.textureBindInterval);
-		const textureBinds = frame.filter(call => call.method === 'bindTexture').length;
-		assert.ok(
-			textureBinds >= sceneTextureBinds + laneTextureBinds && textureBinds <= sceneTextureBinds + laneTextureBinds + 12,
-			`texture binds out of band: ${textureBinds}`
-		);
 		// Blend and depth-mask state toggles happen (blend on/off + UI, depth-mask off/on, plus
-		// the submission lane's blend toggling).
+		// the blend-func flips where a pass or sprite changes blend mode).
 		assert.ok(count('depthMask') >= 2);
 		assert.ok(count('enable') + count('disable') >= 4);
+		assert.ok(count('blendFunc') >= 4, `expected blend-func churn, got ${count('blendFunc')}`);
 		// Per-draw uniform uploads: a mat4 model matrix and a vec4 tint for every draw.
 		assert.ok(count('uniformMatrix4fv') >= WORKLOAD_DRAWS_PER_FRAME);
 		assert.ok(count('uniform4f') >= WORKLOAD_DRAWS_PER_FRAME);
 	}
 });
 
-test('the v3 sprite lane streams vertex data and churns state at the tuned intervals', () => {
+test('the sprite lane streams vertex data and switches state per draw', () => {
 	const { perFrame } = renderFrames(WORKLOAD_SEED, 2);
 
 	for (const frame of perFrame) {
@@ -248,11 +263,6 @@ test('the v3 sprite lane streams vertex data and churns state at the tuned inter
 		assert.equal(count('bufferSubData'), WORKLOAD_CONSTANTS.streamChunksPerFrame);
 		// drawArrays covers the fullscreen layers (3), the UI quads, and every sprite draw.
 		assert.equal(count('drawArrays'), 3 + WORKLOAD_CONSTANTS.uiDraws + WORKLOAD_CONSTANTS.submissionDraws);
-		// Blend enable/disable alternates between lane blocks: real blend-state churn, not a
-		// single set-and-forget (about one toggle per two blocks, both directions exercised).
-		const laneBlocks = Math.ceil(WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionBlendToggleInterval);
-		assert.ok(count('enable') + count('disable') >= laneBlocks - 2, `expected lane blend toggling, got ${count('enable')}e/${count('disable')}d`);
-		assert.ok(count('blendFunc') >= laneBlocks / 2, `expected lane blend-func flips, got ${count('blendFunc')}`);
 	}
 
 	// The stream is live: the uploaded chunk contents must differ frame-to-frame, so a backend

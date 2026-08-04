@@ -260,12 +260,13 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 });
 
 test('v4 signatures stamp the current benchmark and workload versions', () => {
-	// Benchmark 4 = depth-6 fence pacing; workload 3 = the right-sized render lane plus the
+	// Benchmark 4 = depth-6 fence pacing; workload 4 = the render lane rebuilt to the measured
+	// Krunker census (23 draws / 17 program switches / 20 texture binds per frame) plus the
 	// main-thread entity lane. Both bumps invalidate every earlier verdict through the signature.
 	assert.equal(CALIBRATION_VERSION, 4);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
-	assert.equal(WORKLOAD_VERSION, 3);
+	assert.equal(WORKLOAD_VERSION, 4);
 });
 
 test('treats app version as informational while relevant signature fields invalidate', () => {
@@ -420,13 +421,15 @@ test('trial page embeds the workload and completion-honest measurement modules',
 	assert.match(page, /const createWorkloadSpin = /);
 	assert.match(page, /const runBenchmarkTrial = /);
 	assert.match(page, /"jsSpinIterations":160000/);
-	// v3 constants travel with the page: the main-thread entity lane and the right-sized render
-	// lane inside WORKLOAD_SPEC, the depth-6 pacing through the embedded-constant block.
+	// v4 constants travel with the page: the main-thread entity lane and the census-shaped
+	// render lane inside WORKLOAD_SPEC, the depth-6 pacing through the embedded-constant block.
 	assert.match(page, /"entityCount":12288/);
 	assert.match(page, /"entitySubsteps":4/);
 	assert.match(page, /"entityNeighborChecks":24576/);
-	assert.match(page, /"submissionDraws":26/);
-	assert.match(page, /"streamChunksPerFrame":8/);
+	assert.match(page, /"opaqueProgramSwitches":7/);
+	assert.match(page, /"opaqueTextureBinds":10/);
+	assert.match(page, /"submissionDraws":3/);
+	assert.match(page, /"streamChunksPerFrame":3/);
 	assert.match(page, /const BENCHMARK_FENCE_QUEUE_DEPTH = 6;/);
 	assert.match(page, /const BENCHMARK_FENCE_RING_SIZE = 7;/);
 	assert.match(page, /bufferSubData/);

@@ -1009,17 +1009,33 @@ function beginCustomIdentityWatch() {
 	identityStarterHandle = window.setInterval(tryStart, 500);
 	tryStart();
 	// This preload instance may never be handed preferences: the boot payload and the
-	// injectClientCSS push both land on the document Krunker discards. Ask for them directly.
-	if (!latestUserPrefs) {
+	// injectClientCSS push both land on the document Krunker discards. Ask for them directly -
+	// and keep asking, because main only answers a sender it can identify as the game frame, which
+	// is not yet true while the first document is still being replaced. A single early attempt
+	// returns nothing and, worse, returned it silently.
+	const fetchPrefs = () => {
+		if (latestUserPrefs) return;
 		void ipcRenderer.invoke('wok_get_user_prefs')
 			.then((prefs: UserPrefs | undefined) => {
-				if (!prefs || latestUserPrefs) return;
+				if (latestUserPrefs) return;
+				if (!prefs) {
+					traceStartup('preference fetch returned nothing (sender not trusted yet)');
+					return;
+				}
 				latestUserPrefs = prefs;
 				traceStartup('preferences fetched directly');
 				tryStart();
 			})
 			.catch(error => { traceStartup(`preference fetch failed: ${String(error)}`); });
-	}
+	};
+	fetchPrefs();
+	const prefsPoll = window.setInterval(() => {
+		if (latestUserPrefs) {
+			window.clearInterval(prefsPoll);
+			return;
+		}
+		fetchPrefs();
+	}, 2_000);
 }
 
 function traceStartup(message: string) {

@@ -5,6 +5,7 @@
 	"private": true,
 	"description": "Hardware-adaptive, performance-focused Krunker desktop client based on Crankshaft",
 	"main": "./bundle/main.mjs",
+	"desktopName": "wok-client.desktop",
 	"type": "module",
 	"scripts": {
 		"postinstall": "node scripts/install-electron.mjs",

@@ -87,6 +87,19 @@ test('accepts only explicit matchmaker map scopes', () => {
 	}), {});
 });
 
+test('registers the display preference so a saved monitor survives a reload', () => {
+	assert.deepEqual(parseUserPreferencePatch({ display: 'auto' }), { display: 'auto' });
+	assert.deepEqual(parseUserPreferencePatch({ display: 'd:22:lg-27gn950' }), { display: 'd:22:lg-27gn950' });
+});
+
+test('drops hand-edited display values instead of persisting an unresolvable monitor key', () => {
+	assert.deepEqual(parseUserPreferencePatch({
+		display: 'monitor 2'
+	}), {});
+	assert.deepEqual(parseUserPreferencePatch({ display: 22 }), {});
+	assert.deepEqual(parseUserPreferencePatch({ display: { id: 22 } }), {});
+});
+
 test('detects settings that need legacy matchmaker map-scope migration', () => {
 	assert.equal(shouldMigrateMatchmakerMapScope({ matchmaker: true }), true);
 	assert.equal(shouldMigrateMatchmakerMapScope({ matchmaker_mapScope: 'all' }), false);

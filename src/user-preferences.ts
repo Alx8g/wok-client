@@ -3,6 +3,7 @@ import {
 	parseCustomIdentityPreference
 } from './custom-identity.ts';
 import { parseThemePreference } from './themes.ts';
+import { isDisplayPreference } from './display-selection.ts';
 
 const OBSOLETE_PREFERENCE_KEYS = new Set([
 	// Superseded by 'theme', which also selects the bundled themes. See migrateThemePreference.
@@ -146,6 +147,10 @@ function parsePreferenceValue(key: string, value: unknown): UserPrefValue | unde
 	if (key === 'immersiveSplashBackgroundColor') {
 		return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/u.test(value) ? value : undefined;
 	}
+
+	// Not an enum: the option set is whatever monitors are attached right now. The key format is
+	// validated instead, and an unattached display resolves to primary at launch.
+	if (key === 'display') return isDisplayPreference(value) ? value : undefined;
 
 	if (key === 'overrideURL') return parseKrunkerOverrideUrl(value);
 	return undefined;

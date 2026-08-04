@@ -1,4 +1,5 @@
 import { readdirSync } from 'fs';
+import { DISPLAY_PREFERENCE_AUTO, type DisplayOption } from './display-selection.ts';
 import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
@@ -44,6 +45,21 @@ if (document.readyState === 'loading') document.addEventListener('DOMContentLoad
 else requestUserPrefs();
 
 // Theme options are declared here so that TS knows they are the correct type for modifications under the m_userPrefs_for_settingUI message
+/**
+ * The monitor list is whatever is attached right now, so main enumerates it and sends it with the
+ * preferences; this declaration exists up front only so TS knows the type being mutated. Values are
+ * opaque display keys (src/display-selection.ts), which is why this select needs optLabels.
+ */
+const displayOption: SelectSettingDescItem = {
+	title: 'Display',
+	type: 'sel',
+	desc: 'Which monitor the game opens on. Falls back to primary if unplugged.',
+	safety: 0,
+	cat: 0,
+	opts: [DISPLAY_PREFERENCE_AUTO],
+	optLabels: ['Automatic (primary display)']
+};
+
 const themeOption: SelectSettingDescItem = {
 	title: 'Theme',
 	type: 'sel',
@@ -60,7 +76,16 @@ const themeOption: SelectSettingDescItem = {
 	}
 }
 
-ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, received_userPrefs: UserPrefs) => {
+ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, received_userPrefs: UserPrefs, received_displays: DisplayOption[]) => {
+	// A missing list (older main, or an enumeration failure) leaves the picker on Automatic only.
+	// The stored key is never rewritten from here: main already appends an entry for a remembered
+	// monitor that is not attached, so unplugging one shows the truth without discarding the choice.
+	const displayOptions = Array.isArray(received_displays) && received_displays.length > 0
+		? received_displays
+		: [{ value: DISPLAY_PREFERENCE_AUTO, label: 'Automatic (primary display)' }];
+	displayOption.opts = displayOptions.map(option => option.value);
+	displayOption.optLabels = displayOptions.map(option => option.label);
+
 	// main sends us the path to settings and also settings themselves on initial load.
 	userPrefsPath = received_paths.settingsPath;
 	paths = received_paths;
@@ -131,6 +156,7 @@ const settingsDesc: SettingsDesc = {
 	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto. Competitive Mode picks whichever measured fastest here.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
 	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
+	display: displayOption,
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },

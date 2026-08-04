@@ -13,11 +13,19 @@ export type GameplayDisplay = Pick<Display, 'bounds' | 'size'>;
  * the preference was silently rewritten to windowed there (audit A4). A frameless screen-bounds
  * window needs no kiosk state, works on every platform, and is also the window shape DWM can
  * promote out of desktop composition on Windows.
+ *
+ * `placeExplicitly` is what makes the `display` preference (src/display-selection.ts) real for the
+ * windowed, maximized, and fullscreen modes. Electron's `center: true` centres on the *primary*
+ * display, and `fullscreen: true` goes fullscreen on whichever display the window landed on - so
+ * without explicit coordinates a chosen secondary monitor is silently ignored. Placement stays
+ * opt-in rather than unconditional so the default (primary) path keeps the exact centring Electron
+ * has always done for it, work area and all.
  */
 export function resolveGameplayWindowGeometry(
 	mode: string,
 	display: GameplayDisplay,
-	windowScale: number
+	windowScale: number,
+	placeExplicitly = false
 ): BrowserWindowConstructorOptions {
 	if (mode === 'borderless') {
 		return {
@@ -32,14 +40,20 @@ export function resolveGameplayWindowGeometry(
 		};
 	}
 
-	const geometry: BrowserWindowConstructorOptions = {
-		center: true,
-		fullscreen: false,
-		height: Math.round(display.size.height * windowScale),
-		width: Math.round(display.size.width * windowScale)
-	};
+	const width = Math.round(display.size.width * windowScale);
+	const height = Math.round(display.size.height * windowScale);
+	const geometry: BrowserWindowConstructorOptions = placeExplicitly
+		? {
+			fullscreen: false,
+			height,
+			width,
+			x: display.bounds.x + Math.round((display.bounds.width - width) / 2),
+			y: display.bounds.y + Math.round((display.bounds.height - height) / 2)
+		}
+		: { center: true, fullscreen: false, height, width };
 	if (mode === 'fullscreen') return { ...geometry, fullscreen: true };
 	// 'maximized' starts from the windowed rectangle; the actual maximize is applied by the
-	// window wiring once the window exists (ready-to-show / calibration grace period).
+	// window wiring once the window exists (ready-to-show / calibration grace period). Because the
+	// rectangle already sits on the chosen display, the native maximize expands onto it.
 	return geometry;
 }

@@ -146,6 +146,10 @@ interface SettingItemGeneric {
  * sel has to have an opts with a string array.
  * optLabels, when present, must be the same length as opts: opts holds the values persisted in
  * settings.json and optLabels the text shown for each, so a label can change without migrating.
+ *
+ * `optLabels` is optional and, when present, must be the same length as `opts`: it lets the stored
+ * value differ from the text the player reads. Needed wherever the persisted value is an opaque
+ * key rather than a word - the display picker stores a monitor key but shows a resolution.
  */
 interface SelectSettingDescItem extends SettingItemGeneric { type: 'sel', opts?: string[], optLabels?: string[] }
 
@@ -181,6 +185,8 @@ interface RenderReadySetting extends SettingItemGeneric {
 
 	// for sel
 	opts?: string[];
+
+	/** Display text per opt; when omitted the opt itself is shown. Must match opts.length. */
 	optLabels?: string[];
 	cols?: number;
 

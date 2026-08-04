@@ -3,7 +3,7 @@ import { isAbsolute as pathIsAbsolute, join as pathJoin, resolve as pathResolve 
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { Socket } from 'net';
-import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
+import { BrowserWindow, Menu, type MenuItem, type MenuItemConstructorOptions, app, clipboard, contentTracing, dialog, ipcMain, powerMonitor, protocol, session, shell, screen, type BrowserWindowConstructorOptions, type Display, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron';
 import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu } from './menu.ts';
 import { buildDiagnosticsReport } from './diagnostics-report.ts';
 import { applyCommandLineSwitches } from './switches.ts';
@@ -114,6 +114,12 @@ import {
 	shouldMigrateMatchmakerMapScope
 } from './user-preferences.ts';
 import { resolveGameplayWindowGeometry } from './window-geometry.ts';
+import {
+	buildDisplayOptions,
+	DISPLAY_PREFERENCE_AUTO,
+	selectGameplayDisplay,
+	type DisplayOption
+} from './display-selection.ts';
 import {
 	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
 	adaptiveValidationProfileIdentitiesEqual,
@@ -345,6 +351,9 @@ const settingsSkeleton = {
 	realName: '',
 	realClan: '',
 	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless
+	// 'auto' means the OS primary display, which is what every launch did before this preference
+	// existed. Any other value is a display key; see src/display-selection.ts.
+	display: DISPLAY_PREFERENCE_AUTO,
 	resourceSwapper: false,
 	theme: THEME_NONE,
 	clientSplash: true,
@@ -1355,7 +1364,9 @@ ipcMain.on('settingsUI_requests_userPrefs', event => {
 	if (!isTrustedGameIpcSender(event)) return;
 	ensureOptionalFeatureStorage();
 	const paths = { settingsPath, swapperPath, cssPath, filtersPath, configPath };
-	mainWindow.webContents.send('m_userPrefs_for_settingsUI', paths, userPrefs);
+	// The display list is enumerated per request rather than at startup, so opening settings after
+	// plugging a monitor in shows it. Electron's screen module is main-process only, hence IPC.
+	mainWindow.webContents.send('m_userPrefs_for_settingsUI', paths, userPrefs, listGameplayDisplayOptions());
 });
 
 // Preload requests the latest settings to feed into matchmaker.
@@ -1400,9 +1411,37 @@ function calibrationDataUrl(html: string): string {
 	return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-/** Keeps calibration and gameplay on the same primary-display surface and window mode. */
+/**
+ * The monitor this launch uses, from the `display` preference. Resolved per call rather than
+ * cached: the intro, the game window, and calibration are created at different moments, and a
+ * stale Display object would carry a stale rectangle if the user changed resolution in between.
+ * A preference naming a monitor that is not attached resolves to primary (src/display-selection.ts).
+ */
+function getGameplayDisplay(): { display: Display; isPrimary: boolean } {
+	const primary = screen.getPrimaryDisplay();
+	const resolution = selectGameplayDisplay(userPrefs.display, screen.getAllDisplays(), primary);
+	if (resolution.fellBack) {
+		console.log(`Selected display is not attached; opening on the primary display instead (${userPrefs.display}).`);
+	}
+	return { display: resolution.display, isPrimary: resolution.display.id === primary.id };
+}
+
+/** Dropdown entries for the `display` setting, labelled for a player rather than by Electron id. */
+function listGameplayDisplayOptions(): DisplayOption[] {
+	try {
+		return buildDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id, userPrefs.display);
+	} catch (error) {
+		console.warn('Failed to enumerate displays for the settings UI', error);
+		return buildDisplayOptions([], -1, userPrefs.display);
+	}
+}
+
+/** Keeps calibration and gameplay on the same display surface and window mode. */
 function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
-	return resolveGameplayWindowGeometry(userPrefs.fullscreen, screen.getPrimaryDisplay(), windowScale);
+	const { display, isPrimary } = getGameplayDisplay();
+	// Explicit placement only when the target is not primary: Electron's own centring already does
+	// the right thing there, and leaving it alone keeps the default launch byte-identical.
+	return resolveGameplayWindowGeometry(userPrefs.fullscreen, display, windowScale, !isPrimary);
 }
 
 const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
@@ -1488,7 +1527,9 @@ async function runCalibrationTrial(
 		}
 		trialWindow = mainWindow;
 		const activeTrialWindow = trialWindow;
-		const display = screen.getPrimaryDisplay();
+		// The refresh rate the trial page reports has to be the one the game will actually run
+		// against, so it follows the display preference rather than the primary display.
+		const { display } = getGameplayDisplay();
 		const trialUrl = calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg, {
 			attempt,
 			onBattery: powerMonitor.isOnBatteryPower(),
@@ -2341,7 +2382,7 @@ app.on('ready', async () => {
 		mainWindow.once('closed', cancelIntro);
 
 		try {
-			const introDisplay = screen.getPrimaryDisplay();
+			const { display: introDisplay } = getGameplayDisplay();
 			const introBounds = getIntroWindowBounds(introDisplay, userPrefs.fullscreen, windowScale);
 			introSequence = startIntroSequence({
 				assetsPath: $assets,

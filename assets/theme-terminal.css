@@ -1,0 +1,80 @@
+/*
+ * Terminal: a phosphor CRT.
+ *
+ * Pure black, square corners, monospace throughout and green text with a faint glow. The most
+ * opinionated of the six: it changes the shape of the UI, not just its colours. At full-game scope
+ * that means every corner in Krunker's menu squares off and the HUD frames become hairline green
+ * boxes over the game.
+ */
+
+:root {
+	--wok-bg: #000000;
+	--wok-surface: #060A06;
+	--wok-surface-raised: #0C120C;
+	--wok-border: #133019;
+	--wok-border-strong: #1F5C2E;
+
+	--wok-accent: #3BE07A;
+	--wok-accent-contrast: #001208;
+	--wok-accent-soft: rgba(59, 224, 122, .12);
+
+	--wok-text: #B8F5CD;
+	--wok-text-muted: #63B682;
+	--wok-text-faint: #3E7A55;
+	--wok-text-on-art: #D6FFE6;
+
+	--wok-danger: #FF5F56;
+	--wok-success: #3BE07A;
+
+	--wok-radius: 0;
+	--wok-radius-lg: 0;
+	--wok-shadow: 0 0 0 1px rgba(59, 224, 122, .18), 0 18px 40px rgba(0, 0, 0, .8);
+	--wok-shadow-soft: 0 0 0 1px rgba(59, 224, 122, .12);
+	--wok-ease: steps(4, end);
+	--wok-blur: none;
+
+	--wok-font: ui-monospace, 'Cascadia Code', 'Source Code Pro', Consolas, monospace;
+	--wok-font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', Consolas, monospace;
+	--wok-heading-transform: uppercase;
+	--wok-heading-spacing: .18em;
+
+	--wok-hud-bg: rgba(0, 0, 0, .78);
+	--wok-hud-bg-inner: rgba(12, 32, 18, .58);
+	--wok-hud-border: rgba(59, 224, 122, .42);
+	--wok-hud-text: #B8F5CD;
+
+	--wok-scrollbar-track: #000000;
+	--wok-scrollbar-thumb: #1F5C2E;
+
+	--wok-overlay-bg: rgba(0, 0, 0, .84);
+	--wok-overlay-border: rgba(59, 224, 122, .66);
+	--wok-overlay-text: #B8F5CD;
+}
+
+/*
+ * Scanlines over the section list only. A static gradient, never animated: this runs in the same
+ * renderer as the game and a moving full-panel background would cost frames for a joke.
+ */
+.Crankshaft-settings-pane {
+	background-image: repeating-linear-gradient(
+		180deg,
+		rgba(59, 224, 122, .035) 0px,
+		rgba(59, 224, 122, .035) 1px,
+		transparent 1px,
+		transparent 3px
+	);
+}
+
+.Crankshaft-settings .setting.heading .setting-title {
+	text-shadow: 0 0 10px rgba(59, 224, 122, .55);
+}
+
+.Crankshaft-settings-navitem.active {
+	text-shadow: 0 0 8px rgba(59, 224, 122, .45);
+}
+
+/* Prompt marker in front of the active section, the way a shell would show it. */
+.Crankshaft-settings-navitem.active::before {
+	content: '> ';
+	color: var(--wok-accent);
+}

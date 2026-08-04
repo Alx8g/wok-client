@@ -238,13 +238,21 @@ function createOverlay(): HTMLPreElement {
 	// alone; rewriting it would make the one diagnostic that proves the feature works agree with
 	// itself no matter what.
 	element.setAttribute(NO_REWRITE_ATTRIBUTE, '');
+	/*
+	 * Themeable through custom properties rather than a stylesheet: these are inline styles, so a
+	 * theme's rules could only reach them with !important. Every var() carries the stock value as
+	 * its fallback, which is what an unthemed client renders. fontFamily follows the font
+	 * shorthand deliberately, so a missing --wok-font-mono cannot invalidate the whole shorthand.
+	 */
 	Object.assign(element.style, {
-		background: 'rgba(8, 10, 14, 0.82)',
+		background: 'var(--wok-overlay-bg, rgba(8, 10, 14, 0.82))',
 		border: '1px solid rgba(251, 192, 45, 0.72)',
-		borderRadius: '6px',
-		color: '#FFFFFF',
+		borderColor: 'var(--wok-overlay-border, rgba(251, 192, 45, 0.72))',
+		borderRadius: 'var(--wok-radius, 6px)',
+		color: 'var(--wok-overlay-text, #FFFFFF)',
 		contain: 'content',
 		font: '600 12px/1.45 Consolas, monospace',
+		fontFamily: 'var(--wok-font-mono, Consolas, monospace)',
 		margin: '0',
 		padding: '8px 10px',
 		pointerEvents: 'none',

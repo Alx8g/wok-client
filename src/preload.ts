@@ -19,6 +19,7 @@ import { formatIdentityContext, formatIdentityProbe, probeIdentitySources } from
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
+import { resolveTheme } from './themes.ts';
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
 // Measures what a real Krunker frame issues so the calibration workload can be anchored to the
@@ -898,27 +899,78 @@ let matchmakerCSSInjected = false;
 let hideAdsCSSApplied = false;
 let menuTimerCSSApplied = false;
 let quickClassPickerCSSApplied = false;
-let customCSSElement: HTMLElement | undefined;
-let appliedCustomCSSName: string | undefined;
+let themeBaseElement: HTMLElement | undefined;
+let themeElement: HTMLElement | undefined;
+let appliedThemeSelection: string | undefined;
+let themeLoadGeneration = 0;
+const themeAssetCache = new Map<string, string>();
 
-/** Keep the hot-swap style element mounted and synchronized with the selected CSS file. */
-async function applyCustomCSSSwap(cssSwapper: string, cssPath: string): Promise<void> {
-	// Add the style element regardless because otherwise the hot-swap functionality doesn't work unless the page loaded with a CSS selected beforehand.
-	if (!customCSSElement) {
-		customCSSElement = createElement('style', { id: 'crankshaftCustomCSS' });
-		document.body.appendChild(customCSSElement);
-	}
-	if (appliedCustomCSSName === cssSwapper) return;
-	appliedCustomCSSName = cssSwapper;
-	if (cssSwapper === 'None') {
-		customCSSElement.textContent = '';
-		return;
-	}
+async function readThemeAsset(name: string): Promise<string> {
+	const cached = themeAssetCache.get(name);
+	if (cached !== undefined) return cached;
+	const css = await readFile(pathJoin($assets, name), { encoding: 'utf-8' });
+	themeAssetCache.set(name, css);
+	return css;
+}
+
+/**
+ * Mount the two theme style elements, shared layers first so a palette can override them. They go
+ * up even for 'None': without them already in the document, switching to a theme later would have
+ * nothing to write into, and live switching is the point.
+ *
+ * They are appended to <body> on purpose. Krunker's own stylesheets are in <head>, so at equal
+ * specificity these win on document order, which is what lets the game layer restyle the game
+ * without reaching for !important on every rule.
+ */
+function ensureThemeElements(): boolean {
+	if (themeBaseElement && themeElement) return true;
+	if (!document.body) return false;
+	themeBaseElement = createElement('style', { id: 'wokThemeBase' });
+	// Keeps the historical id: user CSS has always landed in this element.
+	themeElement = createElement('style', { id: 'crankshaftCustomCSS' });
+	document.body.append(themeBaseElement, themeElement);
+	return true;
+}
+
+/**
+ * Apply a theme selection to the live document. Exported so the settings UI, which runs in this
+ * same renderer, switches themes through exactly the path the boot and reload flows use.
+ *
+ * A bundled theme is the shared layers plus its palette; a user file is injected verbatim, with no
+ * layers, because those files were written against the stock look and are not ours to reinterpret.
+ * Anything unrecognised resolves to no theme rather than failing.
+ */
+export async function applyTheme(selection: string, cssPath: string): Promise<void> {
+	if (!ensureThemeElements()) return;
+	if (appliedThemeSelection === selection) return;
+	const generation = ++themeLoadGeneration;
+	appliedThemeSelection = selection;
+
+	const source = resolveTheme(selection);
+	let baseCSS = '';
+	let themeCSS = '';
 	try {
-		customCSSElement.textContent = await readFile(pathJoin(cssPath, `${cssSwapper}`), { encoding: 'utf-8' });
+		if (source.kind === 'bundled') {
+			// resolveTheme orders the assets so the palette is last; everything before it is a
+			// shared layer and goes into the element the palette can override.
+			const files = await Promise.all(source.assets.map(asset => readThemeAsset(asset)));
+			themeCSS = files.pop() ?? '';
+			baseCSS = files.join('\n');
+		} else if (source.kind === 'user') {
+			themeCSS = await readFile(pathJoin(cssPath, source.file), { encoding: 'utf-8' });
+		}
 	} catch (error) {
-		strippedConsole.error(`Failed to load the CSS swapper file ${cssSwapper}`, error);
+		strippedConsole.error(`Failed to load the theme ${selection}`, error);
+		// Fall through with empty CSS: a half-applied theme is worse than none, and leaving the
+		// previous one mounted would misreport which theme is active. Only forget the selection
+		// if no newer one has claimed it, so a failure here cannot undo a later success.
+		if (generation === themeLoadGeneration) appliedThemeSelection = undefined;
 	}
+
+	// A newer selection already won the race; its result must not be overwritten by this one.
+	if (generation !== themeLoadGeneration) return;
+	themeBaseElement.textContent = baseCSS;
+	themeElement.textContent = themeCSS;
 }
 
 let customIdentityTeardownRegistered = false;
@@ -955,7 +1007,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 	applyClientHotkeys(_userPrefs);
 	observeGameUsable();
 
-	const { matchmaker, hideAds, menuTimer, quickClassPicker, clientSplash, cssSwapper } = _userPrefs;
+	const { matchmaker, hideAds, menuTimer, quickClassPicker, clientSplash, theme } = _userPrefs;
 
 	if (!clientCSSInjected) {
 		clientCSSInjected = true;
@@ -989,7 +1041,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 
 	whenDOMReady(() => {
 		document.getElementById('hiddenClasses')?.classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
-		void applyCustomCSSSwap(`${cssSwapper}`, cssPath);
+		void applyTheme(`${theme}`, cssPath);
 		injectKeyframeFix();
 		startCustomIdentity(_userPrefs);
 	});

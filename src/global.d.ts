@@ -142,8 +142,12 @@ interface SettingItemGeneric {
 	refreshOnly?: boolean;
 }
 
-// sel has to have an opts with a string array
-interface SelectSettingDescItem extends SettingItemGeneric { type: 'sel', opts?: string[] }
+/**
+ * sel has to have an opts with a string array.
+ * optLabels, when present, must be the same length as opts: opts holds the values persisted in
+ * settings.json and optLabels the text shown for each, so a label can change without migrating.
+ */
+interface SelectSettingDescItem extends SettingItemGeneric { type: 'sel', opts?: string[], optLabels?: string[] }
 
 interface KeybindSettingDescItem extends SettingItemGeneric { type: 'keybind' }
 
@@ -177,6 +181,7 @@ interface RenderReadySetting extends SettingItemGeneric {
 
 	// for sel
 	opts?: string[];
+	optLabels?: string[];
 	cols?: number;
 
 	// for multisel

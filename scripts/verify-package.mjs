@@ -6,8 +6,17 @@ import {
 } from 'node:fs';
 import { join } from 'node:path';
 import { extractFile, listPackage } from '@electron/asar';
+import { BUNDLED_THEMES, THEME_LAYER_ASSETS, themeAssetName } from '../src/themes.ts';
+
+// Read from the registry rather than repeated by hand: adding a theme must not be able to ship a
+// picker entry whose stylesheet was left out of the package.
+const THEME_ASSETS = [
+	...THEME_LAYER_ASSETS.map(asset => `assets/${asset}`),
+	...BUNDLED_THEMES.map(theme => `assets/${themeAssetName(theme.id)}`)
+];
 
 const REQUIRED_ASSETS = new Set([
+	...THEME_ASSETS,
 	'assets/blockFilters.txt',
 	'assets/hideAds.css',
 	'assets/intro-long-1080.webm',

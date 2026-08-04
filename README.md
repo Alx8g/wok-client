@@ -23,7 +23,8 @@ WOK Client is an independent project. It is not affiliated with, endorsed by, or
 - Hardware-aware graphics selection with recovery and calibration safeguards
 - Optional Competitive mode with reversible Krunker setting changes
 - Performance diagnostics for FPS, frame pacing, graphics backend, and WebGL state
-- CSS swapper, menu timer, quick class picker, and match-result export
+- Bundled themes for the client's own UI, plus your own CSS files, switchable without a restart
+- Menu timer, quick class picker, and match-result export
 - Configurable matchmaker and competition-room helper
 - Optional Discord Rich Presence using an in-tree IPC client
 - Legacy resource swapping, ad controls, custom filters, matchmaker, and competition automation remain disabled by default
@@ -133,7 +134,7 @@ Crankshaft was built from earlier work in Gatoclient, idkr, and Gatoclient Lite.
 - [LukeTheDuke](https://github.com/LukeTheDuke240) and Gatoclient Lite
 - [bigjakk](https://github.com/bigjakk) for Electron build work and parallel work on [KCC](https://github.com/bigjakk/Krunker-Civilian-Client)
 - [AspectQuote](https://github.com/AspectQuote) for matchmaker and UI work
-- [Iona](https://github.com/eeonaa) for the CSS swapper
+- [Iona](https://github.com/eeonaa) for the CSS swapper the theme system grew out of
 - [wa/paintingofblue](https://github.com/hsyslm) for the original matchmaker
 - [Commander/asger-finding](https://github.com/asger-finding) for resource-swapper work
 - [Tae](https://github.com/whuuayu) for the original Crankshaft logo

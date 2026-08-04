@@ -1,0 +1,1085 @@
+/*
+ * WOK theme game layer.
+ *
+ * Injected after assets/theme-base.css and before a bundled theme's palette. Where the base layer
+ * maps WOK's own surfaces onto the variable contract in src/themes.ts, this file maps Krunker's:
+ * the menu and its tabs, buttons and inputs, the scoreboard, chat, the shop and inventory grids,
+ * popups and modals, the HUD chrome, and the scrollbars.
+ *
+ * Four rules this file lives by:
+ *
+ * 1. Every class and id here exists in tests/fixtures/krunker-css-inventory.json, generated from
+ *    the live stylesheets by scripts/fetch-krunker-css-inventory.mjs. tests/themes.test.ts checks
+ *    it, so a rename upstream fails a test instead of leaving a rule that quietly does nothing.
+ *    Element and pseudo-element selectors (html, td, ::-webkit-scrollbar) are not checked because
+ *    they are not Krunker's to rename.
+ *
+ * 2. Every value is var(--wok-*, <the stock value>). A palette that omits a variable still
+ *    renders, and the fallback is exactly what the client looks like with no theme selected.
+ *
+ * 3. Style, never remove. Nothing here hides an element, and nothing repaints something whose
+ *    colour is the information: team and health colours, the leaderboard's friend/enemy/self name
+ *    colours, killfeed text, rarity tags, the locked-item scrims, and the .buttonR/.buttonG/
+ *    .buttonP category borders are all left exactly as Krunker ships them. Ad hiding is a separate
+ *    off-by-default setting and does not live in a theme.
+ *
+ * 4. Gameplay pays nothing. Rules that touch elements which render while the player is shooting
+ *    (killfeed, weapon list, chat, scoreboard, ammo) only set colours, radii and an outline that
+ *    costs no layout. --wok-blur is applied exclusively to menu-only surfaces, so a translucent
+ *    theme cannot put a backdrop-filter in the frame budget.
+ *
+ * !important appears only where Krunker's own rule already used it. Without it the theme loses.
+ */
+
+/* --- Krunker's own design tokens ------------------------------------------------------------ */
+
+/*
+ * The highest-leverage rules in the file. Krunker's HUD panels are painted almost entirely from
+ * --div-black and --div-grey, and its newer component system from the token block in
+ * bundledStyles.css, so remapping those to the contract themes about forty surfaces at once with
+ * no extra selector matching at all.
+ */
+:root {
+	--div-black: var(--wok-hud-bg, rgba(20, 20, 20, .75));
+	--div-grey: var(--wok-hud-bg-inner, rgba(108, 108, 108, .40));
+	--div-shadow: var(--wok-shadow-soft, 0px 0px 3px 1px rgba(0, 0, 0, 0.75));
+
+	--yellow: var(--wok-accent, #fbc02d);
+	--red: var(--wok-danger, #ed4242);
+	--green: var(--wok-success, #b2f252);
+
+	--accept-color: var(--wok-success, #29c90d);
+	--accept-hover-color: var(--wok-success, #25b30c);
+	--danger-color: var(--wok-danger, #f92b2b);
+	--danger-hover-color: var(--wok-danger, #e02626);
+	--highlight-color: var(--wok-accent, #4a9eff);
+	--highlight-hover-color: var(--wok-accent, #3a85e0);
+
+	--card-bg-color: var(--wok-surface-raised, rgba(30, 40, 50, 0.4));
+	--dark-bg-color: var(--wok-surface, rgba(0, 0, 0, 0.2));
+	--border-subtle: 1px solid var(--wok-border, rgba(255, 255, 255, 0.05));
+
+	--border-radius-sm: var(--wok-radius, 6px);
+	--border-radius-md: var(--wok-radius, 8px);
+	--border-radius-lg: var(--wok-radius-lg, 20px);
+
+	--box-shadow-sm: var(--wok-shadow-soft, 0 2px 4px rgba(0, 0, 0, 0.1));
+	--box-shadow-md: var(--wok-shadow-soft, 0 4px 12px rgba(0, 0, 0, 0.15));
+	--box-shadow-lg: var(--wok-shadow, 0 10px 25px rgba(0, 0, 0, 0.3));
+}
+
+/* --- document and typography ---------------------------------------------------------------- */
+
+html,
+body {
+	background-color: var(--wok-bg, #222222);
+}
+
+/*
+ * Krunker sets its font on the universal selector, so a container rule would never reach a single
+ * element: every node already matches a font-family declaration directly. Matching that shape is
+ * the only way a theme can change the typeface at all. This sheet is injected into <body>, so at
+ * equal specificity it wins on document order.
+ */
+* {
+	font-family: var(--wok-font, 'GameFont');
+}
+
+/*
+ * Restated at class specificity so the rule above can never eat an icon glyph, whatever a palette
+ * puts in --wok-font. Same values the icon stylesheets set; this only reasserts them.
+ */
+.material-icons {
+	font-family: 'Material Icons';
+}
+
+.material-icons-outlined {
+	font-family: 'Material Icons Outlined';
+}
+
+.material-symbols-outlined {
+	font-family: 'Material Symbols Outlined';
+}
+
+a,
+a:active,
+a:visited {
+	color: var(--wok-accent, #2196F3);
+}
+
+/* --- scrollbars ----------------------------------------------------------------------------- */
+
+::-webkit-scrollbar-track {
+	background-color: var(--wok-scrollbar-track, #F5F5F5);
+	border-radius: var(--wok-radius, 10px);
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--wok-scrollbar-thumb, #868686);
+	border-radius: var(--wok-radius, 10px);
+}
+
+#chatList::-webkit-scrollbar-track {
+	background-color: var(--wok-scrollbar-track, rgba(0, 0, 0, 0.25));
+}
+
+/* The thumb colour comes from the rule above; chat only overrides the corner. */
+#chatList::-webkit-scrollbar-thumb {
+	border-radius: var(--wok-radius, 2px);
+}
+
+#storeList::-webkit-scrollbar-thumb {
+	border-radius: var(--wok-radius, 0px);
+}
+
+/* --- the menu window ------------------------------------------------------------------------ */
+
+/*
+ * Krunker ships the menu white and swaps in .dark at runtime, so both states are painted. The
+ * fallback in each rule is that state's own stock value, which is why they differ.
+ */
+#menuWindow {
+	backdrop-filter: var(--wok-blur, none);
+	background-color: var(--wok-surface, #fff);
+	border-radius: var(--wok-radius-lg, 6px);
+	box-shadow: var(--wok-shadow, 0px 9px 0px 0px #a6a6a6);
+	color: var(--wok-text, inherit);
+}
+
+#menuWindow.dark {
+	background-color: var(--wok-surface, #353535);
+	box-shadow: var(--wok-shadow, 2px 2px 8px rgba(0, 0, 0, 0.5));
+}
+
+/* Krunker's own rule at this exact specificity paints every div white; this only recolours it. */
+#menuWindow.dark div {
+	color: var(--wok-text, #fff);
+}
+
+/*
+ * The exception to the rule above. These labels sit on top of class portraits, map thumbnails and
+ * shop artwork, and Krunker bakes a near-black outline into them, so they have to stay light
+ * whatever colour the rest of the menu's text takes. Each one is white in stock Krunker, which is
+ * why the fallback is #fff. The '#menuWindow.dark' copies exist only to carry enough specificity
+ * to outrank the rule above; the unscoped copies cover the same labels outside the menu window.
+ */
+.selectorLabel,
+.optName,
+.className,
+.serverHostOp,
+.matchVoteMap,
+#menuWindow.dark .selectorLabel,
+#menuWindow.dark .optName,
+#menuWindow.dark .className,
+#menuWindow.dark .serverHostOp,
+#menuWindow.dark .matchVoteMap {
+	color: var(--wok-text-on-art, #fff);
+}
+
+.headerBar {
+	background-color: var(--wok-surface, rgba(0, 0, 0, 0.5));
+}
+
+.headerBar div {
+	color: var(--wok-text, white);
+}
+
+#menuKRCount,
+#menuJNKCount {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.6));
+}
+
+.fundsVal {
+	color: var(--wok-text-muted, rgba(255, 255, 255, .6));
+}
+
+#selectorContainer {
+	background-color: var(--wok-surface-raised, #5c5c5c);
+}
+
+.selectorItem {
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+.selectorItem:hover {
+	background-color: var(--wok-accent-soft, #9e9e9e);
+}
+
+/* --- menu tab strips ------------------------------------------------------------------------ */
+
+.bigMenTabs {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.68));
+	border-radius: var(--wok-radius, 5px);
+}
+
+.bigMenTab {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.7));
+}
+
+.bigMenTab:hover {
+	border-bottom-color: var(--wok-border-strong, rgba(255, 255, 255, 0.4));
+}
+
+.bigMenTabA {
+	border-bottom-color: var(--wok-accent, rgba(255, 255, 255, 0.9));
+}
+
+.bigMenTabA:hover {
+	border-bottom-color: var(--wok-accent, rgba(255, 255, 255, 1));
+}
+
+.menuTabsNew {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.3));
+	border-radius: var(--wok-radius, 5px);
+}
+
+.menuTabNew {
+	color: var(--wok-text-muted, #858585);
+}
+
+.menuTabNew:hover {
+	border-bottom-color: var(--wok-border-strong, rgba(0, 0, 0, 0.2));
+}
+
+.tabANew,
+.tabANew:hover {
+	border-bottom-color: var(--wok-accent, rgba(0, 0, 0, 0.7));
+}
+
+/*
+ * Krunker overrides its own light-mode tab colours with !important when the menu is dark, so these
+ * are the same three rules again at the specificity and weight it uses. Found by diffing the
+ * theme against the real stylesheets, not by reading the ones that looked relevant.
+ */
+.dark .menuTabNew {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.8)) !important;
+}
+
+.dark .menuTabNew:hover {
+	border-bottom-color: var(--wok-border-strong, rgba(255, 255, 255, 0.2)) !important;
+}
+
+.dark .tabANew,
+.dark .tabANew:hover {
+	border-bottom-color: var(--wok-accent, rgba(255, 255, 255, 0.7)) !important;
+}
+
+#tabHolder {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.3));
+	border-radius: var(--wok-radius, 4px);
+}
+
+.tabHeader {
+	color: var(--wok-text-muted, rgba(255, 255, 255, .75));
+}
+
+.tabHeader:hover {
+	border-bottom-color: var(--wok-border-strong, #fff);
+	color: var(--wok-text, #fff);
+}
+
+/* --- popups, modals and their headers ------------------------------------------------------- */
+
+/*
+ * #popupBack and #windowHolder.popupWin, the scrims behind a modal, are deliberately not themed.
+ * They are a dimming veil over live rendering, and a light theme painting them light would leave
+ * the modal with nothing to sit against.
+ */
+#popupContent {
+	backdrop-filter: var(--wok-blur, none);
+	background-color: var(--wok-surface, #353535);
+	border-radius: var(--wok-radius-lg, 10px);
+	box-shadow: var(--wok-shadow, 2px 2px 8px rgb(0 0 0 / 50%));
+	color: var(--wok-text, #fff);
+}
+
+#windowHeader {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.6));
+	letter-spacing: var(--wok-heading-spacing, normal);
+	text-transform: var(--wok-heading-transform, uppercase);
+}
+
+.defaultModal,
+.socialModal {
+	backdrop-filter: var(--wok-blur, none);
+	background-color: var(--wok-surface, #353535);
+	border-radius: var(--wok-radius-lg, 6px);
+	box-shadow: var(--wok-shadow, none);
+	color: var(--wok-text, #fff);
+}
+
+.pfpPop {
+	background-color: var(--wok-surface, #353535);
+	border-radius: var(--wok-radius-lg, 10px);
+	box-shadow: var(--wok-shadow, 2px 2px 8px rgb(0 0 0 / 50%));
+	color: var(--wok-text, #fff);
+}
+
+#itemViewPop,
+#itemPurcPop {
+	backdrop-filter: var(--wok-blur, none);
+	background-color: var(--wok-surface, rgba(156, 156, 156, 0.7));
+	border-radius: var(--wok-radius-lg, 5px);
+	box-shadow: var(--wok-shadow, none);
+	color: var(--wok-text, #fff);
+}
+
+#instructionsUpdate {
+	background-color: var(--wok-surface, #353535);
+	border-radius: var(--wok-radius-lg, 4px);
+	box-shadow: var(--wok-shadow, 2px 2px 8px rgb(0 0 0 / 50%));
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.8));
+}
+
+/* The sticky header a popup, the host menu and the drops list all share. */
+.popHeader,
+.dropsPopHeader,
+.hostHeader {
+	background-color: var(--wok-surface, #111111);
+	border-bottom-color: var(--wok-border-strong, #989898);
+	box-shadow: var(--wok-shadow-soft, 0px 10px 10px #00000052, 0px 0px 0px #000);
+	color: var(--wok-text, #fff);
+	letter-spacing: var(--wok-heading-spacing, normal);
+	text-transform: var(--wok-heading-transform, none);
+}
+
+.winSelH {
+	background: var(--wok-surface-raised, #767676);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, inherit);
+}
+
+.winClose {
+	border-radius: var(--wok-radius, 4px);
+}
+
+.tooltip {
+	background: var(--wok-surface-raised, #818181);
+	border-color: var(--wok-border-strong, #000000);
+	border-radius: var(--wok-radius, 3px);
+	color: var(--wok-accent, #ffc64a);
+}
+
+.tooltip2 {
+	background: var(--wok-surface, #121212);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, #ffffff);
+}
+
+/* --- the io-* component system -------------------------------------------------------------- */
+
+.io-popup-container {
+	backdrop-filter: var(--wok-blur, none);
+	background-color: var(--wok-surface, #242424);
+	border-radius: var(--wok-radius-lg, 4px);
+	box-shadow: var(--wok-shadow, 0 0 8px rgba(0, 0, 0, 0.7));
+	color: var(--wok-text, #fff);
+}
+
+.io-popup-container p {
+	color: var(--wok-text, #fff);
+}
+
+.io-popup-header {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.7));
+	color: var(--wok-text, #fff);
+	letter-spacing: var(--wok-heading-spacing, 0.5px);
+	text-transform: var(--wok-heading-transform, none);
+}
+
+.io-section-header {
+	color: var(--wok-text, #fff);
+	letter-spacing: var(--wok-heading-spacing, normal);
+	text-transform: var(--wok-heading-transform, none);
+}
+
+.io-section-header::after {
+	background: var(--wok-accent, #4a9eff);
+}
+
+.io-card {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.3));
+	border-color: var(--wok-border, #2f2f2f);
+	border-radius: var(--wok-radius, 4px);
+}
+
+.io-separator {
+	border-bottom-color: var(--wok-border, #2f2f2f);
+}
+
+.io-separator span {
+	background: var(--wok-surface, #242424);
+	color: var(--wok-text, #fff);
+}
+
+.io-message {
+	background-color: var(--wok-surface-raised, rgba(255, 255, 255, 0.1));
+	color: var(--wok-text-faint, #8e8e8e);
+}
+
+.io-info-text {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.7));
+}
+
+.io-button {
+	background-color: var(--wok-surface-raised, #363636);
+	border-color: var(--wok-border, #494949);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, #fff);
+}
+
+.io-button:hover {
+	background-color: var(--wok-accent, #4a4a4a);
+	color: var(--wok-accent-contrast, #fff);
+}
+
+.io-input-field {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.3));
+	border-color: var(--wok-border, #2f2f2f);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, #fff);
+}
+
+.io-input-field:focus {
+	border-color: var(--wok-accent, #4a9eff);
+}
+
+.io-input-field::placeholder {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.5));
+}
+
+/* --- buttons -------------------------------------------------------------------------------- */
+
+/*
+ * The category borders (.buttonR, .buttonG, .buttonP, .buttonB, .buttonO, .buttonPI) are left
+ * alone: they are how Krunker says what kind of action a button is. Only the neutral button is
+ * themed, and only its surface, radius and hover.
+ */
+.button {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.3));
+	border-color: var(--wok-border-strong, white);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, white);
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+/* Krunker marks the hover colours !important, so matching it is the only way to be seen. */
+.button:hover,
+.button:active {
+	border-color: var(--wok-accent, white) !important;
+	color: var(--wok-text, white) !important;
+}
+
+/*
+ * Krunker's blue action buttons. They are one affordance wearing seven class names, and the blue
+ * is decoration rather than meaning, so they all take the accent. The text colour is split across
+ * two rules only because Krunker ships two different stock values for it, and each fallback has to
+ * be the one its own selector actually had.
+ */
+#findGameBtn,
+#hostMenuBtn,
+.followBut,
+.hostPresetBtn,
+.hostToggle,
+.loadoutBtn,
+.settingsBtn {
+	background-color: var(--wok-accent, #2196F3);
+	border-radius: var(--wok-radius, 4px);
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+#findGameBtn,
+.followBut,
+.hostToggle {
+	color: var(--wok-accent-contrast, #fff);
+}
+
+.hostPresetBtn,
+.loadoutBtn,
+.settingsBtn {
+	color: var(--wok-accent-contrast, rgba(255, 255, 255, 0.7));
+}
+
+.followBut:hover,
+.hostPresetBtn:hover,
+.loadoutBtn:hover,
+.settingsBtn:hover {
+	color: var(--wok-accent-contrast, #fff);
+}
+
+/* Without this the button would rest on the accent and then jump back to Krunker's blue. */
+.followBut:hover {
+	background-color: var(--wok-accent, #29a0ff);
+}
+
+/*
+ * The same eight buttons again, and the only reason is specificity. '#menuWindow.dark div' paints
+ * every div in the menu, and it outranks a bare class or id, so without this the accent fill would
+ * carry --wok-text however dark the palette wanted the label. Verified against the real stylesheets
+ * in a harness, not reasoned about: white on a yellow button is 1.6:1.
+ */
+#menuWindow.dark #findGameBtn,
+#menuWindow.dark #hostMenuBtn,
+#menuWindow.dark .followBut,
+#menuWindow.dark .hostPresetBtn,
+#menuWindow.dark .hostToggle,
+#menuWindow.dark .loadoutBtn,
+#menuWindow.dark .settingsBtn,
+#menuWindow.dark .hostCBtn {
+	color: var(--wok-accent-contrast, #fff);
+}
+
+.hostCBtn {
+	background-color: var(--wok-accent, #4582d1);
+	border-color: var(--wok-border-strong, white);
+	border-radius: var(--wok-radius, 6px);
+	color: var(--wok-accent-contrast, #fff);
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+.quickJoin {
+	border-color: var(--wok-accent, #2196f3);
+	border-radius: var(--wok-radius, 5px);
+	color: var(--wok-text, #fff);
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+.codeBtn,
+.searchBtn {
+	border-radius: var(--wok-radius, 4px);
+}
+
+/* --- inputs, selects and toggles ------------------------------------------------------------ */
+
+/*
+ * Krunker's text fields are a set of near-identical rules with seven slightly different greys
+ * between them. The grouping below follows the variable each one should take, and the rules are
+ * split wherever the stock values differ, so that leaving a variable unset reproduces the exact
+ * grey that selector had rather than its neighbour's.
+ */
+.inputGrey,
+.formInput {
+	background: var(--wok-surface-raised, #eee);
+	border-radius: var(--wok-radius, 6px);
+	color: var(--wok-text, inherit);
+}
+
+.inputGrey2 {
+	background: var(--wok-surface-raised, #e3e3e3);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, inherit);
+}
+
+#loadoutSelect {
+	background: var(--wok-surface-raised, #eee);
+	border-radius: var(--wok-radius, 6px);
+	color: var(--wok-text, inherit);
+}
+
+.smlInput,
+.accountInput {
+	background-color: var(--wok-surface-raised, rgba(255, 255, 255, 0.25));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, rgba(255, 255, 255, 0.8));
+}
+
+#settSearch {
+	background-color: var(--wok-surface-raised, #e3e3e3);
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, inherit);
+}
+
+#serverSearch {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.5));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, #fff);
+}
+
+#plySearch {
+	background-color: var(--wok-surface-raised, rgba(255, 255, 255, .7));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, inherit);
+}
+
+#itemSearch {
+	background-color: var(--wok-surface-raised, rgba(255, 255, 255, .7));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, inherit);
+}
+
+.tSearch {
+	background-color: var(--wok-surface-raised, rgba(255, 255, 255, .6));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, inherit);
+}
+
+/*
+ * A hairline so a field still reads as a field. Krunker's inputs are borderless and rely on being
+ * much lighter than the panel behind them, which stops being true the moment a theme has only two
+ * surface levels to spend. An inset shadow rather than a border because these inputs are not all
+ * border-box and a real border would move the layout; transparent when unset, so an untouched
+ * client looks untouched.
+ */
+.inputGrey,
+.inputGrey2,
+.formInput,
+#loadoutSelect,
+.smlInput,
+.accountInput,
+#settSearch,
+#serverSearch,
+#plySearch,
+#itemSearch,
+.tSearch {
+	box-shadow: inset 0 0 0 1px var(--wok-border-strong, transparent);
+}
+
+.smlInput::placeholder {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.6));
+}
+
+#serverSearch::placeholder {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.5));
+}
+
+#chatInput::placeholder {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.7));
+}
+
+/*
+ * Dropdown lists. Krunker never styles <option>, so a dark theme leaves the closed select dark and
+ * the open list system-white; Field and FieldText are the system colours the browser would have
+ * used, which makes the fallback the untouched look rather than an invented grey.
+ */
+select.inputGrey2 option,
+#loadoutSelect option {
+	background: var(--wok-surface, Field);
+	color: var(--wok-text, FieldText);
+}
+
+.sliderVal {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.5));
+	border-color: var(--wok-border-strong, white) !important;
+	border-radius: var(--wok-radius, 6px);
+	color: var(--wok-text, #fff);
+}
+
+/*
+ * Only the on state of a toggle. The off state stays Krunker's grey: painting it with a surface
+ * colour makes it disappear into the panel on a light theme, and "on" is the only part of a toggle
+ * a palette has anything to say about.
+ */
+input:checked + .slider,
+input:checked + .slider2,
+input:checked + .sliderSml,
+input:checked + .advancedSlider {
+	background-color: var(--wok-accent, #2196F3);
+}
+
+.slider,
+.slider2 {
+	border-radius: var(--wok-radius, 6px);
+}
+
+.slider:before,
+.slider2:before {
+	background-color: var(--wok-accent-contrast, white);
+	border-radius: var(--wok-radius, 4px);
+}
+
+.sliderM {
+	background-color: var(--wok-surface-raised, #a8a8a8);
+	border-radius: var(--wok-radius, 4px);
+}
+
+.sliderM::-webkit-slider-thumb {
+	background: var(--wok-accent, #fff);
+	border-radius: var(--wok-radius, 2px);
+}
+
+.sliderM::-moz-range-thumb {
+	background: var(--wok-accent, #fff);
+	border-radius: var(--wok-radius, 2px);
+}
+
+.hostOpt {
+	border-color: var(--wok-border, #000000);
+	border-radius: var(--wok-radius, 4px);
+}
+
+.optCheck {
+	background-color: var(--wok-surface-raised, #868686);
+	border-radius: var(--wok-radius, 4px);
+}
+
+input:checked + .optCheck {
+	background-color: var(--wok-accent, #2196f3);
+}
+
+/* --- the settings screen -------------------------------------------------------------------- */
+
+#settingsTabLayout {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.12));
+	border-radius: var(--wok-radius, 6px);
+}
+
+.settingTab {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.68));
+	color: var(--wok-text-muted, inherit);
+}
+
+.settingTab:hover {
+	border-bottom-color: var(--wok-border-strong, rgba(255, 255, 255, 0.3));
+}
+
+.setHed,
+.setHedS,
+.contactsHeader {
+	background-color: var(--wok-surface-raised, rgb(80 80 80));
+	border-color: var(--wok-border, rgba(255, 255, 255, 0.3));
+	border-radius: var(--wok-radius, 0);
+	color: var(--wok-text, #fff);
+	letter-spacing: var(--wok-heading-spacing, normal);
+	text-transform: var(--wok-heading-transform, none);
+}
+
+.setHed:hover {
+	background-color: var(--wok-surface, rgb(70 70 70));
+}
+
+.setBodH {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.4));
+	border-radius: var(--wok-radius, 6px);
+}
+
+/* Krunker marks this colour !important, so the theme has to as well. */
+.settName,
+.settNameSmall {
+	border-bottom-color: var(--wok-border, rgba(255, 255, 255, 0.2));
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.6)) !important;
+}
+
+.settNameIn:hover {
+	background-color: var(--wok-accent-soft, rgba(0, 0, 0, 0.3)) !important;
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-text, rgba(255, 255, 255, 0.8)) !important;
+}
+
+.settText {
+	color: var(--wok-accent, #2196F3);
+}
+
+.setSugBox,
+.setSugBox2 {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.4));
+	border-color: var(--wok-border, rgba(255, 255, 255, 0.5));
+	border-radius: var(--wok-radius, 6px);
+	color: var(--wok-text, #fff);
+}
+
+.setSugBox:hover,
+.setSugBox2:hover {
+	border-color: var(--wok-accent, #fff);
+}
+
+/* --- tables, scoreboard and the end-of-match screen ------------------------------------------ */
+
+/*
+ * Row and header text only. Every player name in these tables carries a class that says whether
+ * they are you, a team-mate or an enemy, and those classes win on specificity, so the colours that
+ * mean something survive.
+ */
+th {
+	color: var(--wok-text, #fff);
+}
+
+td {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.7));
+}
+
+th,
+tr {
+	border-bottom-color: var(--wok-border, rgba(255, 255, 255, 0.1));
+}
+
+#endTable {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, .2));
+	border-radius: var(--wok-radius, 6px);
+}
+
+.pListTable {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, .4));
+	border-radius: var(--wok-radius, 6px);
+}
+
+.endCard {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, .5));
+	border-radius: var(--wok-radius, 6px);
+}
+
+.endTitle {
+	color: var(--wok-text, #fff);
+	letter-spacing: var(--wok-heading-spacing, normal);
+	text-transform: var(--wok-heading-transform, none);
+}
+
+#teamScores {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.3));
+	border-radius: var(--wok-radius, 6px);
+}
+
+.teamTotals {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.5));
+	border-radius: var(--wok-radius, 6px);
+}
+
+.teamTotalScore {
+	color: var(--wok-text, #fff);
+}
+
+/* --- the in-game leaderboard ---------------------------------------------------------------- */
+
+#leaderboardHolder {
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-hud-text, rgba(255, 255, 255, 0.7));
+	outline: 1px solid var(--wok-hud-border, transparent);
+	outline-offset: -1px;
+}
+
+#leaderContainer {
+	color: var(--wok-hud-text, #fff);
+}
+
+.centerLeaderContainer {
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-hud-text, #fff);
+	outline: 1px solid var(--wok-hud-border, transparent);
+	outline-offset: -1px;
+}
+
+.leaderCounter,
+.leaderScore,
+.newLeaderCounter,
+.newLeaderScore,
+.newLeaderTeamScore {
+	color: var(--wok-hud-text, rgba(255, 255, 255, 0.7));
+}
+
+.newLeaderTeam {
+	background-color: var(--wok-hud-bg, rgba(0, 0, 0, 0.2));
+	color: var(--wok-hud-text, #fff);
+}
+
+/* --- chat ----------------------------------------------------------------------------------- */
+
+#chatList {
+	background-color: var(--wok-hud-bg, rgba(0, 0, 0, .4));
+	border-radius: var(--wok-radius, 5px) var(--wok-radius, 5px) 0 0;
+}
+
+#chatInputHolder {
+	background-color: var(--wok-hud-bg, rgba(20, 20, 20, .75));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-hud-text, #fff);
+}
+
+#chatInput {
+	background-color: var(--wok-hud-bg-inner, rgba(0, 0, 0, .4));
+	border-color: var(--wok-hud-border, rgba(0, 0, 0, .1));
+	border-radius: var(--wok-radius, 4px);
+	color: var(--wok-hud-text, #fff);
+}
+
+#chatSwitch {
+	color: var(--wok-hud-text, #fff);
+}
+
+.chatItem {
+	color: var(--wok-hud-text, #fff);
+}
+
+/* --- HUD chrome ----------------------------------------------------------------------------- */
+
+/*
+ * Backgrounds and corners only, and only on the frames around information. Nothing here touches
+ * the crosshair, the hitmarker, the health bar's fill, killfeed or chat message text, the ammo
+ * count, or any element whose colour or presence tells the player something. The outlines cost no
+ * layout, and no rule in this block adds a filter, a blur or a shadow, because these elements
+ * repaint every frame the player is alive.
+ */
+.killfeedItem,
+.weapItem,
+.perkItem,
+.killStreakItem,
+.statIcon,
+#ammoHolder {
+	border-radius: var(--wok-radius, 4px);
+	outline: 1px solid var(--wok-hud-border, transparent);
+	outline-offset: -1px;
+}
+
+.weapItem {
+	color: var(--wok-hud-text, #fff);
+}
+
+.statIcon {
+	color: var(--wok-hud-text, rgba(255, 255, 255, .6));
+}
+
+#timerHolder.topLeftOld {
+	border-radius: var(--wok-radius, 4px);
+}
+
+/* --- the shop, inventory and card grids ----------------------------------------------------- */
+
+.storeHeader {
+	color: var(--wok-text, inherit);
+	letter-spacing: var(--wok-heading-spacing, normal);
+	text-transform: var(--wok-heading-transform, none);
+}
+
+.skinCard {
+	background-color: var(--wok-surface-raised, rgba(255, 255, 255, 0.45));
+	border-radius: var(--wok-radius, 5px);
+	color: var(--wok-text, #fff);
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+.skinCard:hover {
+	background-color: var(--wok-accent-soft, rgba(255, 255, 255, 0.35));
+}
+
+.shopCard,
+.classCard,
+.crftRcpeCrd,
+.bundleCrd,
+.streakCard {
+	border-radius: var(--wok-radius, 5px);
+}
+
+.classCard {
+	background-color: var(--wok-surface-raised, #b5b5b5);
+	box-shadow: var(--wok-shadow-soft, 0 0 0.5rem #000000);
+}
+
+.itemOwn {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.7));
+}
+
+.custContainer {
+	background-color: var(--wok-surface-raised, rgb(0, 0, 0, 25%));
+	border-color: var(--wok-border, rgb(255 255 255 / 40%));
+	border-radius: var(--wok-radius, 5px);
+}
+
+.mapListItem {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.7));
+	border-radius: var(--wok-radius, 4px);
+}
+
+.serverCard {
+	border-radius: var(--wok-radius, 6px);
+	transition-timing-function: var(--wok-ease, ease);
+}
+
+.serverCardInfo {
+	background: var(--wok-surface, #000000db);
+}
+
+.serverHeader {
+	background-color: var(--wok-surface, #333);
+}
+
+.serverHostOp {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.2));
+	border-color: var(--wok-border, rgba(0, 0, 0, 0.2));
+	border-radius: var(--wok-radius, 6px);
+}
+
+/* --- social --------------------------------------------------------------------------------- */
+
+#mailList {
+	color: var(--wok-text-muted, rgba(0, 0, 0, 0.5));
+}
+
+/* Krunker marks this background !important, so the theme has to as well. */
+.mailObj {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.4)) !important;
+	border-radius: var(--wok-radius, 6px);
+	color: var(--wok-text-muted, rgba(0, 0, 0, 0.5));
+}
+
+.mailFrom {
+	border-bottom-color: var(--wok-border, rgba(255, 255, 255, 0.5));
+	color: var(--wok-accent, #2196F3);
+}
+
+.mailSubj {
+	color: var(--wok-text-faint, rgba(255, 255, 255, 0.5));
+}
+
+/* --- match info, news and progress ---------------------------------------------------------- */
+
+#newsHolder {
+	background-color: var(--wok-surface, rgba(0, 0, 0, 0.5));
+	border-radius: var(--wok-radius, 4px);
+}
+
+.newsItem {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.7));
+}
+
+#matchInfoHolder {
+	border-bottom-color: var(--wok-border, #585858);
+}
+
+.matchVote {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.5));
+	border-color: var(--wok-border, #525252);
+	border-radius: var(--wok-radius, 4px);
+}
+
+.matchVoteTotal {
+	color: var(--wok-text-muted, rgba(255, 255, 255, 0.7));
+}
+
+/*
+ * The bars keep their two-stop gradient shape so that leaving --wok-accent unset reproduces
+ * Krunker's orange-to-yellow exactly, while setting it collapses the ramp to the theme's accent.
+ */
+.xpBar {
+	background-color: var(--wok-surface-raised, rgba(0, 0, 0, 0.6));
+	border-radius: var(--wok-radius, 4px);
+}
+
+.xpBarB {
+	background-image: linear-gradient(to right, var(--wok-accent, #FF6A0B), var(--wok-accent, #fbc02d));
+}
+
+.progressBar {
+	background: var(--wok-surface-raised, rgba(0, 0, 0, 0.9));
+	border-radius: var(--wok-radius, 3px);
+}
+
+.progressBarInner {
+	background-image: linear-gradient(to right, var(--wok-accent, #FF6A0B), var(--wok-accent, #fbc02d), 94%, var(--wok-accent-contrast, white));
+	border-radius: var(--wok-radius, 3px);
+}
+
+/* --- loading and pre-game screens ----------------------------------------------------------- */
+
+/* Shown once per launch, behind WOK's own splash. */
+#initLoader {
+	background-color: var(--wok-bg, #1c1c1c);
+}
+
+/*
+ * The click-to-play curtain keeps Krunker's dark backdrop. It is the last thing on screen before a
+ * round starts and it carries a map screenshot, so a light theme painting it would be a white
+ * flash into gameplay over an image the player is reading. The prompt on top takes the on-art
+ * colour for the same reason the class-card labels do.
+ */
+#instructions,
+#instructionsSubtitle {
+	color: var(--wok-text-on-art, rgba(255, 255, 255, 0.8));
+}

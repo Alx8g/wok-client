@@ -1,11 +1,10 @@
-import { join } from 'path';
 import { readdirSync } from 'fs';
-import { readFile } from 'fs/promises';
 import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
-import { styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { buildThemeOptions, normalizeThemeSelection } from './themes.ts';
 import {
 	MATCHMAKER_GAMEMODES,
 	MATCHMAKER_MAP_SCOPES,
@@ -44,18 +43,19 @@ const requestUserPrefs = () => { ipcRenderer.send('settingsUI_requests_userPrefs
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', requestUserPrefs, { once: true });
 else requestUserPrefs();
 
-// Swapper options are declared here so that TS knows they are the correct type for modifications under the m_userPrefs_for_settingUI message
-const cssSwapperOption: SelectSettingDescItem = {
-	title: 'CSS Swapper',
+// Theme options are declared here so that TS knows they are the correct type for modifications under the m_userPrefs_for_settingUI message
+const themeOption: SelectSettingDescItem = {
+	title: 'Theme',
 	type: 'sel',
-	desc: 'Load and swap between CSS files',
+	desc: 'Restyles the whole client: menus, HUD, scoreboard, chat and shop. Your own .css files appear here too.',
 	safety: 0,
-	cat: 1,
+	cat: 2,
 	instant: true,
 	opts: [],
+	optLabels: [],
 	button: {
 		icon: 'folder',
-		text: 'CSS',
+		text: 'Themes',
 		callback: e => openPath(e, paths.cssPath)
 	}
 }
@@ -76,8 +76,13 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 	settingsDesc.resourceSwapper.button = { icon: 'folder', text: 'Swapper', callback: e => openPath(e, paths.swapperPath) };
 	settingsDesc.customFilters.button = { icon: 'filter_list', text: 'Filters file', callback: e => openPath(e, paths.filtersPath) };
 
-	cssSwapperOption.opts = ['None', ...readdirSync(paths.cssPath).filter(path => path.endsWith('.css'))];
-	if (!cssSwapperOption.opts.includes(`${userPrefs.cssSwapper}`)) userPrefs.cssSwapper = 'None';
+	const userThemeFiles = readdirSync(paths.cssPath).filter(path => path.endsWith('.css'));
+	const themeOptions = buildThemeOptions(userThemeFiles);
+	themeOption.opts = themeOptions.values;
+	themeOption.optLabels = themeOptions.labels;
+	// A file the user deleted since last launch must not stay selected in a dropdown that no
+	// longer lists it, or the picker would show a value it cannot apply.
+	userPrefs.theme = normalizeThemeSelection(userPrefs.theme, userThemeFiles);
 	resolveSettingsReady();
 });
 
@@ -95,25 +100,13 @@ function openPath(e: MouseEvent, path: string) {
 	shell.openPath(path).catch(err => strippedConsole.error(err));
 }
 
-let customCssLoadGeneration = 0;
-
-async function applyCustomCssSelection(value: string) {
-	const generation = ++customCssLoadGeneration;
-	const cssElement = document.getElementById('crankshaftCustomCSS');
-	if (!cssElement) return;
-	if (value === 'None') {
-		cssElement.textContent = '';
-		return;
-	}
-
-	try {
-		const cssFile = await readFile(join(paths.cssPath, value), { encoding: 'utf-8' });
-		if (generation === customCssLoadGeneration && userPrefs.cssSwapper === value) {
-			cssElement.textContent = cssFile;
-		}
-	} catch (error) {
-		strippedConsole.error(`Failed to load custom CSS: ${value}`, error);
-	}
+/**
+ * Live theme switching. The settings UI shares a renderer with the injector, so it reuses the
+ * preload's applier rather than keeping a second copy of the mounting, caching and race handling.
+ */
+function applyThemeSelection(value: string) {
+	void applyTheme(value, paths.cssPath)
+		.catch(error => { strippedConsole.error(`Failed to apply the theme ${value}`, error); });
 }
 
 /**
@@ -150,7 +143,7 @@ const settingsDesc: SettingsDesc = {
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },
 
-	cssSwapper: cssSwapperOption,
+	theme: themeOption,
 	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation while the game loads.', safety: 0, cat: 2 },
 	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Sound for the launch animation.', safety: 0, cat: 2 },
 	clientSplash: { title: 'Splash Screen', type: 'bool', desc: 'WOK screen while Krunker loads.', safety: 0, cat: 2, refreshOnly: true },
@@ -380,14 +373,19 @@ class SettingElem {
 			case 'heading':
 				this.HTML = `<h1 class="setting-title">${sanitize(props.title)}</h1>`;
 				break;
-			case 'sel':
+			case 'sel': {
+				// Option values are persisted ids and labels are display text, so a theme can be
+				// renamed without invalidating anyone's settings.json. Both are always escaped:
+				// user theme filenames reach this string and settings render as trusted.
+				const optionLabels = props.optLabels ?? props.opts;
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
           			<select class="s-update inputGrey2">
-						${props.opts.map(opt => `<option value="${opt}">${opt}</option>`).join('')}
+						${props.opts.map((opt, i) => `<option value="${sanitizeString(opt)}">${sanitizeString(optionLabels[i] ?? opt)}</option>`).join('')}
 					</select>`;
 				this.updateKey = 'value';
 				this.updateMethod = 'onchange';
 				break;
+			}
 			case 'multisel': {
 				const hasValidDescriptions = Object.hasOwn(this.props, 'optDescriptions') && this.props.opts.length === this.props.optDescriptions.length;
 				if (Object.hasOwn(this.props, 'optDescriptions') && !hasValidDescriptions) throw new Error(`Setting '${this.props.key}' declared 'optDescriptions', but a different amount than 'opts'!`);
@@ -492,7 +490,7 @@ class SettingElem {
 				document.getElementById('hiddenClasses').classList.toggle('hiddenClasses-hideAds-bottomOffset', adsHidden);
 			}
 
-			if (this.props.key === 'cssSwapper') void applyCustomCssSelection(String(value));
+			if (this.props.key === 'theme') applyThemeSelection(String(value));
 
 			// Live-applies: the replacement engine runs in this renderer, so there is nothing to
 			// reload. Clearing the values puts the game's own text straight back.

@@ -51,7 +51,7 @@ test('detects parser-rejected obsolete settings for canonical rewrites', () => {
 
 test('rejects unsafe URLs, paths, ranges, and malformed keybinds', () => {
 	assert.deepEqual(parseUserPreferencePatch({
-		cssSwapper: '../outside.css',
+		theme: '../outside.css',
 		fullscreen: 'invalid',
 		graphicsBackend: 'swiftshader',
 		matchmakerKey: { alt: false, ctrl: false, key: 'F1;rm', shift: false },

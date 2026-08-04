@@ -1,0 +1,71 @@
+/*
+ * Paper: the light one.
+ *
+ * Warm off-white surfaces, dark ink text and a deep gold accent that keeps enough contrast to be
+ * read on a light background. The menu becomes a document laid over the game rather than another
+ * dark layer on top of it. Flat where Silk is glassy: no blur, no translucency, ink on stock.
+ *
+ * The HUD and the FPS overlay stay dark on purpose. They are the surfaces that sit over live
+ * gameplay instead of over a panel, and a bright block in the corner of a bright map is
+ * unreadable.
+ */
+
+:root {
+	--wok-bg: #EFEAE0;
+	--wok-surface: #FAF7F1;
+	--wok-surface-raised: #F1ECE2;
+	--wok-border: #D9D1C3;
+	--wok-border-strong: #B6AA95;
+
+	--wok-accent: #9A6B00;
+	--wok-accent-contrast: #FFFBF0;
+	--wok-accent-soft: rgba(154, 107, 0, .14);
+
+	--wok-text: #1B1712;
+	--wok-text-muted: #554C42;
+	--wok-text-faint: #7E7466;
+	--wok-text-on-art: #FFFBF2;
+
+	--wok-danger: #B3261E;
+	--wok-success: #2E7D32;
+
+	--wok-radius: 6px;
+	--wok-radius-lg: 10px;
+	--wok-shadow: 0 16px 40px rgba(60, 48, 26, .28);
+	--wok-shadow-soft: 0 1px 4px rgba(60, 48, 26, .16);
+	--wok-ease: cubic-bezier(.25, .8, .25, 1);
+	--wok-blur: none;
+
+	--wok-font: Inter, ui-sans-serif, system-ui, sans-serif;
+	--wok-font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--wok-heading-transform: uppercase;
+	--wok-heading-spacing: .10em;
+
+	--wok-hud-bg: rgba(24, 20, 14, .74);
+	--wok-hud-bg-inner: rgba(86, 76, 60, .46);
+	--wok-hud-border: rgba(154, 107, 0, .40);
+	--wok-hud-text: rgba(251, 246, 234, .92);
+
+	--wok-scrollbar-track: #E4DED2;
+	--wok-scrollbar-thumb: #B6AA95;
+
+	--wok-overlay-bg: rgba(20, 17, 12, .82);
+	--wok-overlay-border: rgba(154, 107, 0, .80);
+	--wok-overlay-text: #FBF6EA;
+}
+
+/*
+ * The safety icons are tuned for a dark panel and wash out on paper. Darkening rather than
+ * recolouring: the yellow, orange and red ladder still reads as a ladder, and this is the only
+ * theme that needs it, which is why it lives here and not in the base layer.
+ */
+.Crankshaft-settings .setting.safety-2 .desc-icon,
+.Crankshaft-settings .setting.safety-3 .desc-icon,
+.Crankshaft-settings .setting.safety-4 .desc-icon {
+	filter: brightness(.78) saturate(1.15);
+}
+
+/* The loading handoff stays dark: it covers the whole window before any panel exists. */
+.crankshaft-loading-background {
+	background-color: #0A0A0A;
+}

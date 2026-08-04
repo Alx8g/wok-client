@@ -190,3 +190,17 @@ test('merges what the user configured with what the game reported', () => {
 		{ clans: [], names: [] }
 	);
 });
+
+test('placeholder names are never taken for the player, so discovery keeps looking', () => {
+	// Field evidence: Krunker reports 'Guest' before the account session exists. Discovery stops
+	// on its first hit, so latching onto the placeholder meant the real name was never seen and
+	// the custom identity replaced a name the player never had.
+	assert.equal(isPlausibleRealName('Guest'), false);
+	assert.equal(isPlausibleRealName('guest'), false);
+	assert.equal(isPlausibleRealName('Player'), false);
+	assert.equal(isPlausibleRealName('lamboiigoni'), true);
+	// Only the exact placeholder is rejected; a real account may legitimately contain the word.
+	assert.equal(isPlausibleRealName('Guest123'), true);
+	assert.equal(readGameActivityName(() => ({ user: 'Guest' })), '');
+	assert.equal(readGameActivityName(() => ({ user: 'lamboiigoni' })), 'lamboiigoni');
+});

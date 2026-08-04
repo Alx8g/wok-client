@@ -133,8 +133,22 @@ export function formatCustomIdentityLabel(identity: Readonly<CustomIdentity>): s
 const PLAUSIBLE_REAL_NAME = /^[^\s<>"'&]{1,32}$/u;
 
 /** True for something that could be an account name Krunker prints in its UI. */
+/**
+ * Names Krunker reports before an account session exists. Latching onto one of these is worse
+ * than finding nothing: discovery stops on its first hit, so a placeholder captured during
+ * start-up would be treated as the player's name for the whole session - which is exactly what
+ * happened, with 'Guest' recorded seconds before the real account name became available.
+ */
+const PLACEHOLDER_REAL_NAMES = new Set(['guest', 'player', 'unknown', 'anonymous']);
+
+export function isPlaceholderRealName(value: string): boolean {
+	return PLACEHOLDER_REAL_NAMES.has(value.trim().toLowerCase());
+}
+
 export function isPlausibleRealName(value: unknown): value is string {
-	return typeof value === 'string' && PLAUSIBLE_REAL_NAME.test(value);
+	return typeof value === 'string'
+		&& PLAUSIBLE_REAL_NAME.test(value)
+		&& !isPlaceholderRealName(value);
 }
 
 /**

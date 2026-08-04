@@ -96,8 +96,9 @@ if (process.env.WOK_FIND_IDENTITY) {
 			}
 		});
 		ipcRenderer.send('wok_identity_probe', formatIdentityProbe(hits));
-		if (hits.length === 0) {
-			// Report what the sources hold so an absent value can be told from an unpopulated one.
+		{
+			// Always report what the sources hold: knowing the shape of the account object matters
+			// even when a hit is found, because that shape is what detection has to read.
 			const activity = typeof window.getGameActivity === 'function' ? window.getGameActivity() : undefined;
 			const storageKeys: string[] = [];
 			try {
@@ -117,8 +118,9 @@ if (process.env.WOK_FIND_IDENTITY) {
 			}));
 		}
 	};
-	window.setTimeout(runIdentityProbe, 15_000);
-	window.setTimeout(runIdentityProbe, 40_000);
+	// Sample early and often: earlier runs closed the client before a late sample could fire, and
+	// the account object may only populate once the menu is live.
+	for (const delay of [3_000, 8_000, 15_000, 25_000, 45_000]) window.setTimeout(runIdentityProbe, delay);
 }
 
 // Diagnostic-only gameplay frame log. Inert unless WOK_FPS_LOG is set in the environment.

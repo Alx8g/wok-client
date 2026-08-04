@@ -856,6 +856,17 @@ if (process.env.WOK_FIND_IDENTITY) {
 		if (!isTrustedGameIpcSender(event)) return;
 		if (typeof text !== 'string' || text.length > 100_000) return;
 		console.log(text);
+		// Also append to a file: a probe whose findings only reach stdout is lost the moment the
+		// client is closed, which is exactly when a short diagnostic session ends.
+		try {
+			const probePath = pathJoin(configPath, 'identity-probe.log');
+			writeFileSync(probePath, `${new Date().toISOString()}
+${text}
+
+`, { encoding: 'utf-8', flag: 'a' });
+		} catch (error) {
+			console.error('Failed to append the identity probe log', error);
+		}
 	});
 }
 

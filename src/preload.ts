@@ -795,7 +795,19 @@ function patchSettings(_userPrefs: UserPrefs) {
 			return selectedTab === allTabsCount;
 		}
 
+		/**
+		 * Krunker labels the tab that hosts our settings "Client". Rename it in place so the
+		 * client is called what it is called everywhere else. The tab list is rebuilt by the game
+		 * on every settings render, so this reapplies each time rather than running once.
+		 */
+		function renameClientTab() {
+			for (const tab of document.querySelectorAll('#settingsTabs .tab, #settHolder .tab, .settingTab')) {
+				if (tab.textContent?.trim() === 'Client') tab.textContent = 'WOK';
+			}
+		}
+
 		function safeRenderSettings() {
+			renameClientTab();
 			if (isClientTab()) renderSettings();
 		}
 

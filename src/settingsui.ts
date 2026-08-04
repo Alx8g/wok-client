@@ -4,7 +4,7 @@ import { readFile } from 'fs/promises';
 import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
-import { UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
+import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
 import { styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
 import {
 	MATCHMAKER_GAMEMODES,
@@ -125,53 +125,50 @@ async function applyCustomCssSelection(value: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	headingPerformance: { title: 'Performance', type: 'heading', safety: 0, cat: 0 },
-	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: "Finds the fastest graphics settings for YOUR PC and turns down Krunker's visual extras for more FPS. It measures a few options and keeps the best one. Your Krunker settings are saved first and put back if you turn this off.", safety: 0, cat: 0 },
-	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'Shows FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
-	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto unless you know what you are doing. Competitive Mode sets this to whichever option measured fastest on your PC.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
-	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render frames as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
-	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen is best for playing - windowed modes add an extra desktop compositing step that costs frame pacing.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
+	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Measures your PC and applies the fastest graphics profile, plus lower in-game visuals for more FPS. Your Krunker settings are restored if you turn it off.', safety: 0, cat: 0 },
+	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
+	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
+	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto. Competitive Mode picks whichever measured fastest here.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
+	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
 
-	headingExtras: { title: 'Extras', type: 'heading', safety: 0, cat: 0 },
-	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 0 },
-	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status. No effect if Rich Presence is off.', safety: 0, cat: 0, instant: true },
-	saveMatchResultJSONButton: { title: 'Copy Match Results', type: 'bool', desc: 'Adds a button at the end of a match that copies the scoreboard.', safety: 0, cat: 0, refreshOnly: true },
-
-	headingLegacy: { title: 'Legacy (off by default)', type: 'heading', safety: 0, cat: 0 },
-	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has its own mod support - prefer that. May conflict with current game rules.', safety: 3, cat: 0 },
-	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks advertisements. May conflict with current game rules. Restart required.', safety: 4, cat: 0, opts: ['off', 'hide', 'block'] },
-	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Lets your own rules modify or cancel game requests. May conflict with current game rules. Restart required.', safety: 4, cat: 0 },
+	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
+	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
+	saveMatchResultJSONButton: { title: 'Copy Match Results', type: 'bool', desc: 'Adds a button that copies the scoreboard at match end.', safety: 0, cat: 1, refreshOnly: true },
+	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
+	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
+	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },
 
 	cssSwapper: cssSwapperOption,
-	menuTimer: { title: 'Menu Timer', type: 'bool', safety: 0, cat: 1, instant: true },
-	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', safety: 0, cat: 1, instant: true },
-	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK identity animation over your desktop while the game loads. Takes effect on the next launch.', safety: 0, cat: 1 },
-	introAudio: { title: 'Launch Animation Sound', type: 'bool', desc: 'Plays the launch sting. Has no effect if Launch Animation is off. Takes effect on the next launch.', safety: 0, cat: 1 },
-	clientSplash: { title: 'Client Splash Screen', type: 'bool', safety: 0, cat: 1, refreshOnly: true },
-	immersiveSplash: { title: 'Immersive Splash Screen', type: 'bool', desc: 'Adds a background that covers the Krunker loading skeleton. Has no effect if Client Splash Screen is off.', safety: 0, cat: 1, refreshOnly: true },
-	immersiveSplashBackgroundColor: { title: 'Immersive Splash Screen BG Color', desc: 'Changes the color of the immersive splash screen background. Has no effect if Immersive Splash Screen is off.', safety: 0, cat: 1, refreshOnly: true, type: 'color'},
-	regionTimezones: { title: 'Region Picker Timezones', type: 'bool', desc: 'Adds local time to all region pickers', safety: 0, cat: 1, refreshOnly: true },
+	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation while the game loads.', safety: 0, cat: 2 },
+	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Sound for the launch animation.', safety: 0, cat: 2 },
+	clientSplash: { title: 'Splash Screen', type: 'bool', desc: 'WOK screen while Krunker loads.', safety: 0, cat: 2, refreshOnly: true },
+	immersiveSplash: { title: 'Full-Screen Splash', type: 'bool', desc: 'Covers the Krunker loading screen behind it.', safety: 0, cat: 2, refreshOnly: true },
+	immersiveSplashBackgroundColor: { title: 'Splash Colour', type: 'color', desc: 'Background colour for the full-screen splash.', safety: 0, cat: 2, refreshOnly: true },
 
-	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: "Disabled by default. Selects servers but does not automate gameplay; unofficial matchmaking may conflict with current service rules.", safety: 2, cat: 2, refreshOnly: true },
-	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Disabled by default. Allows confirmed WOK links to fill and create private competition rooms. Webhook secrets must be pasted manually; unofficial automation may conflict with current service rules.', safety: 4, cat: 2, refreshOnly: true },
-	matchmakerKey: { title: 'Matchmaker Hotkey', type: 'keybind', desc: 'Change the hotkey for the matchmaker', safety: 0, cat: 2, refreshOnly: true },
-	matchmaker_openServerWindow: { title: 'Open Server Window On Cancel', type: 'bool', safety: 0, cat: 2, instant: true },
-	matchmaker_regions: { title: 'Whitelisted regions', type: 'multisel', desc: '', safety: 0, cat: 2, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
-	matchmaker_gamemodes: { title: 'Whitelisted gamemodes', type: 'multisel', desc: '', safety: 0, cat: 2, opts: MATCHMAKER_GAMEMODES, cols: 4, instant: true },
-	matchmaker_mapScope: { title: 'Map scope', type: 'sel', desc: 'Official uses WOK\'s reviewed rotation list. Selected uses the map choices below. All includes community maps.', safety: 0, cat: 2, opts: MATCHMAKER_MAP_SCOPES, instant: true },
-	matchmaker_maps: { title: 'Selected maps', type: 'multisel', desc: 'Used only when Map scope is selected.', safety: 0, cat: 2, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
-	matchmaker_minRemainingTime: { title: 'Minimum remaining seconds', type: 'num', min: 0, max: 480, safety: 0, cat: 2, instant: true },
-	matchmaker_minPlayers: { title: 'Minimum players in Lobby', type: 'num', min: 0, max: 7, safety: 0, cat: 2, instant: true },
-	matchmaker_maxPlayers: { title: 'Maximum players in Lobby', type: 'num', min: 0, max: 7, safety: 0, cat: 2, instant: true, desc: 'if you set the criteria too strictly, matchmaker won\'t find anything' },
-	matchmakerAcceptKey: { title: 'Matchmaker Accept Hotkey', type: 'keybind', desc: 'Change the hotkey that accepts a game from the custom matchmaker.', safety: 0, cat: 2, instant: true },
-	matchmakerCancelKey: { title: 'Matchmaker Cancel Hotkey', type: 'keybind', desc: 'Change the hotkey that rejects a game from the custom matchmaker.', safety: 0, cat: 2, instant: true },
+	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: 'Finds lobbies matching your filters. Unofficial matchmaking may conflict with game rules.', safety: 2, cat: 3, refreshOnly: true },
+	matchmakerKey: { title: 'Search Hotkey', type: 'keybind', desc: 'Starts a search.', safety: 0, cat: 3, refreshOnly: true },
+	matchmakerAcceptKey: { title: 'Accept Hotkey', type: 'keybind', desc: 'Joins the found lobby.', safety: 0, cat: 3, instant: true },
+	matchmakerCancelKey: { title: 'Cancel Hotkey', type: 'keybind', desc: 'Rejects the found lobby.', safety: 0, cat: 3, instant: true },
+	matchmaker_regions: { title: 'Regions', type: 'multisel', desc: 'Leave empty for any region.', safety: 0, cat: 3, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
+	matchmaker_gamemodes: { title: 'Gamemodes', type: 'multisel', desc: 'Leave empty for any mode.', safety: 0, cat: 3, opts: MATCHMAKER_GAMEMODES, cols: 4, instant: true },
+	matchmaker_mapScope: { title: 'Map Scope', type: 'sel', desc: 'Which maps to accept.', safety: 0, cat: 3, opts: MATCHMAKER_MAP_SCOPES, instant: true },
+	matchmaker_maps: { title: 'Maps', type: 'multisel', desc: 'Used only when Map Scope is set to selected.', safety: 0, cat: 3, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
+	matchmaker_minPlayers: { title: 'Minimum Players', type: 'num', min: 0, max: 7, safety: 0, cat: 3, instant: true },
+	matchmaker_maxPlayers: { title: 'Maximum Players', type: 'num', min: 0, max: 7, desc: 'Strict filters may find nothing.', safety: 0, cat: 3, instant: true },
+	matchmaker_minRemainingTime: { title: 'Minimum Time Left', type: 'num', min: 0, max: 480, desc: 'Seconds remaining in the match.', safety: 0, cat: 3, instant: true },
+	matchmaker_openServerWindow: { title: 'Open Servers On Cancel', type: 'bool', safety: 0, cat: 3, instant: true },
 
-	overrideURL: { title: 'Override URL', desc: 'Advanced testing override. Only HTTPS URLs on krunker.io or its subdomains are accepted.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 3 },
-	alwaysWaitForDevTools: { title: 'Always wait for DevTools', desc: 'WOK Client uses an alternative method to open DevTools in a new window if they take too long. This disables that. Might cause DevTools to not work', type: 'bool', safety: 3, cat: 3 },
-	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On dual-GPU systems (most gaming laptops), asks Chromium to run on the discrete GPU instead of the power-saving one. If diagnostics still report integrated graphics, set the preference for WOK Client in your OS graphics settings. Takes effect on the next launch.', safety: 1, cat: 3 },
-	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Chromium already GPU-rasterizes by default. Enabling this only forces rasterization where Chromium disabled it for driver safety, and Krunker WebGL never used this path. Leave off.', safety: 3, cat: 3 },
-	safeFlags_disableBackgrounding: { title: 'Disable background optimizations', type: 'bool', desc: 'When tabbed out, keep the game running as if you were tabbed in. Uses more resources, but avoids catch-up', safety: 2, cat: 3 },
-	experimentalFlags_experimental: { title: 'Unsupported Experimental Flags', type: 'bool', desc: 'Linux only: native GPU memory buffers. Has no effect on Windows or macOS. May reduce stability; no Krunker performance benefit has been proven.', safety: 4, cat: 3 }
+	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On laptops with two GPUs, uses the fast one. If diagnostics still show integrated graphics, set it for WOK in your OS graphics settings too.', safety: 1, cat: 4 },
+	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Uses more power, avoids catch-up when you return.', safety: 2, cat: 4 },
+	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Only forces it where your driver disabled it for safety. Leave off.', safety: 3, cat: 4 },
+	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Linux only. No proven benefit; may reduce stability.', safety: 4, cat: 4 },
+	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Disables the fallback that opens DevTools in a separate window.', safety: 3, cat: 4 },
+	overrideURL: { title: 'Override URL', desc: 'Testing only. HTTPS krunker.io addresses only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4 },
+
+	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has official mod support; prefer that. May conflict with game rules.', safety: 3, cat: 5 },
+	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks ads. May conflict with game rules. Restart required.', safety: 4, cat: 5, opts: ['off', 'hide', 'block'] },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Your own rules can change or cancel game requests. May conflict with game rules. Restart required.', safety: 4, cat: 5 },
+	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. May conflict with game rules.', safety: 4, cat: 5, refreshOnly: true }
 };
 
 /** index-based safety descriptions. goes in title attribute */
@@ -185,11 +182,17 @@ const safetyDesc = [
 
 /** index-based category names. n = name, c = class */
 const categoryNames: CategoryName[] = [
-	{ name: 'WOK', cat: 'mainSettings' },
-	{ name: 'Visual Settings', cat: 'styleSettings' },
+	{ name: 'Performance', cat: 'mainSettings' },
+	{ name: 'Game', cat: 'gameSettings' },
+	{ name: 'Visuals', cat: 'styleSettings' },
 	{ name: 'Matchmaker', cat: 'matchmakerSettings' },
-	{ name: 'Advanced Settings', cat: 'advSettings' }
+	{ name: 'Advanced', cat: 'advSettings' },
+	{ name: 'Legacy', cat: 'legacySettings' },
+	{ name: 'About', cat: 'aboutSettings' }
 ];
+
+/** About holds links and file shortcuts rather than settings, so the renderer must mount it explicitly. */
+const ABOUT_CATEGORY_INDEX = categoryNames.length - 1;
 
 const pendingSettingsUpdates: Record<string, UserPrefs[keyof UserPrefs]> = {};
 let settingsUpdateFrame: number | undefined;
@@ -862,15 +865,18 @@ export function renderSettings() {
 		ensureCategory(setting.cat ?? 0).appendChild(settingElement.elem);
 	}
 
-	const mainCategory = ensureCategory(0);
+	// Links and file shortcuts live in About: they are reference material, not things anyone
+	// came into settings to change, so they must not sit above the settings people did come for.
+	const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
 	const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
 	supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
-	supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft upstream', _ => shell.openExternal(UPSTREAM_REPO_URL)));
+	supportHolder.appendChild(skeleton.settingButton('code', 'WOK on GitHub', _ => shell.openExternal(REPO_URL)));
+	supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft (upstream)', _ => shell.openExternal(UPSTREAM_REPO_URL)));
 
 	const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
 	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
-	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK Client folder', e => openPath(e, paths.configPath)));
-	mainCategory.prepend(buttonsHolder, supportHolder);
+	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
+	aboutCategory.append(supportHolder, buttonsHolder);
 
 	showCategory(categorySections.has(activeSettingsCategory) ? activeSettingsCategory : [...categorySections.keys()][0] ?? 0);
 

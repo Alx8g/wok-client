@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+	createEntitySimulation,
 	createWorkload,
 	createWorkloadSpec,
 	createWorkloadSpin,
@@ -22,6 +23,7 @@ import {
 	BENCHMARK_GPU_QUERY_POOL_SIZE,
 	BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
 	BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+	BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL,
 	BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
 	BENCHMARK_GPU_SAMPLE_MIN_MS,
 	BENCHMARK_LONG_FRAME_MS,
@@ -112,29 +114,38 @@ function renderFrames(seed: number, frameCount: number): { digest: string; drawC
 	return { digest: commandStreamDigest(recording.calls), drawCalls: workload.drawCallsPerFrame, perFrame };
 }
 
-test('workload v2 constants match the frozen design table', () => {
-	assert.equal(WORKLOAD_VERSION, 2);
-	assert.equal(WORKLOAD_DRAWS_PER_FRAME, 1_000);
-	// GPU lane: the WORKLOAD_VERSION 1 freeze, carried unchanged.
-	assert.equal(WORKLOAD_CONSTANTS.opaqueDraws, 240);
-	assert.equal(WORKLOAD_CONSTANTS.transparentDraws, 44);
-	assert.equal(WORKLOAD_CONSTANTS.uiDraws, 16);
+test('workload v3 constants match the frozen design table', () => {
+	assert.equal(WORKLOAD_VERSION, 3);
+	// Batched-engine draw budget, not a draw-call stress test: v2's 1,000 draws/frame cost 3x the
+	// real frame budget in GPU time on the reference machine and ranked the backends backwards.
+	assert.equal(WORKLOAD_DRAWS_PER_FRAME, 100);
+	assert.equal(WORKLOAD_CONSTANTS.opaqueDraws, 50);
+	assert.equal(WORKLOAD_CONSTANTS.transparentDraws, 14);
+	assert.equal(WORKLOAD_CONSTANTS.uiDraws, 10);
+	assert.equal(WORKLOAD_CONSTANTS.programSwitchInterval, 12);
+	// GPU-lane resources: the WORKLOAD_VERSION 1 freeze, carried unchanged.
 	assert.equal(WORKLOAD_CONSTANTS.sceneTextureCount, 8);
 	assert.equal(WORKLOAD_CONSTANTS.sceneTextureSize, 256);
 	assert.equal(WORKLOAD_CONSTANTS.atlasTextureSize, 1_024);
 	assert.equal(WORKLOAD_CONSTANTS.heightfieldSize, 64);
-	assert.equal(WORKLOAD_CONSTANTS.jsSpinIterations, 2_560_000);
-	assert.equal(WORKLOAD_CONSTANTS.warmupMinMs, 900);
-	assert.equal(WORKLOAD_CONSTANTS.warmupMaxMs, 2_000);
+	// Warmup reaches steady state: below this, a backend's one-time pipeline-state creation and
+	// the GPU's clock ramp land inside the measured window (v3-iterations.md, sweep D).
+	assert.equal(WORKLOAD_CONSTANTS.warmupMinMs, 3_000);
+	assert.equal(WORKLOAD_CONSTANTS.warmupMaxMs, 5_000);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleFrames, 30);
 	assert.equal(WORKLOAD_CONSTANTS.warmupSettleRatio, 3);
-	// Submission lane: the v2 freeze (findings §5 — many small draws, dense churn, streaming).
-	assert.equal(WORKLOAD_CONSTANTS.submissionDraws, 700);
-	assert.equal(WORKLOAD_CONSTANTS.submissionProgramSwitchInterval, 4);
-	assert.equal(WORKLOAD_CONSTANTS.submissionTextureBindInterval, 2);
-	assert.equal(WORKLOAD_CONSTANTS.submissionBlendToggleInterval, 16);
+	// Main-thread lane: the v3 addition. Fixed iteration counts, never a time budget.
+	assert.equal(WORKLOAD_CONSTANTS.entityCount, 12_288);
+	assert.equal(WORKLOAD_CONSTANTS.entitySubsteps, 4);
+	assert.equal(WORKLOAD_CONSTANTS.entityNeighborChecks, 24_576);
+	assert.equal(WORKLOAD_CONSTANTS.jsSpinIterations, 160_000);
+	// Sprite/state-churn lane: material-batch churn intervals, not v2's every-2/every-4 torture test.
+	assert.equal(WORKLOAD_CONSTANTS.submissionDraws, 26);
+	assert.equal(WORKLOAD_CONSTANTS.submissionProgramSwitchInterval, 6);
+	assert.equal(WORKLOAD_CONSTANTS.submissionTextureBindInterval, 4);
+	assert.equal(WORKLOAD_CONSTANTS.submissionBlendToggleInterval, 8);
 	assert.equal(WORKLOAD_CONSTANTS.streamChunkBytes, 4_096);
-	assert.equal(WORKLOAD_CONSTANTS.streamChunksPerFrame, 16);
+	assert.equal(WORKLOAD_CONSTANTS.streamChunksPerFrame, 8);
 	assert.equal(WORKLOAD_SHADER_SOURCES.length, 10);
 	assert.deepEqual(WORKLOAD_SHADER_SOURCES.map(shader => shader.name), [
 		'lit-textured',
@@ -194,20 +205,30 @@ test('per-frame command stream matches the design lane shape', () => {
 	const { drawCalls, perFrame } = renderFrames(WORKLOAD_SEED, 2);
 	assert.equal(drawCalls, WORKLOAD_DRAWS_PER_FRAME);
 
-	const laneProgramSwitches = WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionProgramSwitchInterval;
-	const laneTextureBinds = WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionTextureBindInterval;
+	const laneProgramSwitches = Math.ceil(WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionProgramSwitchInterval);
+	const laneTextureBinds = Math.ceil(WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionTextureBindInterval);
 	for (const frame of perFrame) {
 		const count = (method: string) => frame.filter(call => call.method === method).length;
 		assert.equal(count('drawElements') + count('drawArrays'), WORKLOAD_DRAWS_PER_FRAME);
-		// All ten programs are exercised. The GPU lane batches coarsely (<= 60 switches, the v1
-		// band); the submission lane adds its tuned churn on top.
+		// Every one of the ten programs is exercised each frame, and the switching happens at
+		// material-batch granularity: the scene lane switches once per programSwitchInterval
+		// opaque draws plus once per pass boundary, and the sprite lane adds its churn on top.
+		const programsUsed = new Set(frame.filter(call => call.method === 'useProgram').map(call => String(call.args[0])));
+		assert.equal(programsUsed.size, WORKLOAD_SHADER_SOURCES.length, `expected every program to be used, got ${programsUsed.size}`);
+		// Scene-lane switches: one per programSwitchInterval opaque draws, plus at most a handful
+		// of pass boundaries (skybox, heightfield, transparent, fullscreen, post, UI).
+		const sceneProgramSwitches = Math.ceil((WORKLOAD_CONSTANTS.opaqueDraws - 2) / WORKLOAD_CONSTANTS.programSwitchInterval);
 		const programSwitches = count('useProgram');
-		assert.ok(programSwitches >= 10 + laneProgramSwitches, `expected lane program churn, got ${programSwitches}`);
-		assert.ok(programSwitches <= 60 + laneProgramSwitches, `program switches out of band: ${programSwitches}`);
-		// GPU-lane texture binds land in the measured ~64/frame band; the lane adds one bind per
-		// submissionTextureBindInterval draws.
+		assert.ok(programSwitches >= sceneProgramSwitches + laneProgramSwitches, `expected lane program churn, got ${programSwitches}`);
+		assert.ok(programSwitches <= sceneProgramSwitches + laneProgramSwitches + 12, `program switches out of band: ${programSwitches}`);
+		// Scene-lane texture binds: one per textureBindInterval opaque draws plus the pass
+		// boundaries; the sprite lane adds one per submissionTextureBindInterval draws.
+		const sceneTextureBinds = Math.ceil((WORKLOAD_CONSTANTS.opaqueDraws - 2) / WORKLOAD_CONSTANTS.textureBindInterval);
 		const textureBinds = frame.filter(call => call.method === 'bindTexture').length;
-		assert.ok(textureBinds >= 48 + laneTextureBinds && textureBinds <= 90 + laneTextureBinds, `texture binds out of band: ${textureBinds}`);
+		assert.ok(
+			textureBinds >= sceneTextureBinds + laneTextureBinds && textureBinds <= sceneTextureBinds + laneTextureBinds + 12,
+			`texture binds out of band: ${textureBinds}`
+		);
 		// Blend and depth-mask state toggles happen (blend on/off + UI, depth-mask off/on, plus
 		// the submission lane's blend toggling).
 		assert.ok(count('depthMask') >= 2);
@@ -218,18 +239,18 @@ test('per-frame command stream matches the design lane shape', () => {
 	}
 });
 
-test('the v2 submission lane streams vertex data and churns state at the tuned intervals', () => {
+test('the v3 sprite lane streams vertex data and churns state at the tuned intervals', () => {
 	const { perFrame } = renderFrames(WORKLOAD_SEED, 2);
 
 	for (const frame of perFrame) {
 		const count = (method: string) => frame.filter(call => call.method === method).length;
 		// Per-frame bufferSubData streaming: exactly one upload per chunk, covering the buffer.
 		assert.equal(count('bufferSubData'), WORKLOAD_CONSTANTS.streamChunksPerFrame);
-		// drawArrays covers the fullscreen layers (3), the UI quads, and every submission draw.
+		// drawArrays covers the fullscreen layers (3), the UI quads, and every sprite draw.
 		assert.equal(count('drawArrays'), 3 + WORKLOAD_CONSTANTS.uiDraws + WORKLOAD_CONSTANTS.submissionDraws);
 		// Blend enable/disable alternates between lane blocks: real blend-state churn, not a
 		// single set-and-forget (about one toggle per two blocks, both directions exercised).
-		const laneBlocks = WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionBlendToggleInterval;
+		const laneBlocks = Math.ceil(WORKLOAD_CONSTANTS.submissionDraws / WORKLOAD_CONSTANTS.submissionBlendToggleInterval);
 		assert.ok(count('enable') + count('disable') >= laneBlocks - 2, `expected lane blend toggling, got ${count('enable')}e/${count('disable')}d`);
 		assert.ok(count('blendFunc') >= laneBlocks / 2, `expected lane blend-func flips, got ${count('blendFunc')}`);
 	}
@@ -265,6 +286,7 @@ test('serialized modules evaluate as plain JavaScript exactly as the trial page 
 		BENCHMARK_GPU_QUERY_POOL_SIZE,
 		BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG,
 		BENCHMARK_GPU_QUEUE_FLAG_RATIO,
+		BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL,
 		BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO,
 		BENCHMARK_GPU_SAMPLE_MIN_MS,
 		BENCHMARK_LONG_FRAME_MS,
@@ -274,10 +296,12 @@ test('serialized modules evaluate as plain JavaScript exactly as the trial page 
 		${Object.entries(constants).map(([name, value]) => `const ${name} = ${JSON.stringify(value)};`).join('\n')}
 		const mulberry32 = ${mulberry32.toString()};
 		const createWorkload = ${createWorkload.toString()};
+		const createEntitySimulation = ${createEntitySimulation.toString()};
 		const createWorkloadSpin = ${createWorkloadSpin.toString()};
 		const runBenchmarkTrial = ${runBenchmarkTrial.toString()};
-		return { createWorkload, createWorkloadSpin, mulberry32, runBenchmarkTrial };`;
+		return { createEntitySimulation, createWorkload, createWorkloadSpin, mulberry32, runBenchmarkTrial };`;
 	const evaluated = new Function(script)() as {
+		createEntitySimulation: typeof createEntitySimulation;
 		createWorkload: typeof createWorkload;
 		createWorkloadSpin: typeof createWorkloadSpin;
 		mulberry32: typeof mulberry32;
@@ -286,6 +310,9 @@ test('serialized modules evaluate as plain JavaScript exactly as the trial page 
 
 	assert.equal(evaluated.mulberry32(123)(), mulberry32(123)());
 	assert.equal(evaluated.createWorkloadSpin(WORKLOAD_SEED, 500)(), createWorkloadSpin(WORKLOAD_SEED, 500)());
+	const serializedSimulation = evaluated.createEntitySimulation(WORKLOAD_SEED, 64, 2, 128);
+	const moduleSimulation = createEntitySimulation(WORKLOAD_SEED, 64, 2, 128);
+	for (let frame = 0; frame < 3; frame++) assert.equal(serializedSimulation(), moduleSimulation());
 
 	const moduleRender = renderFrames(WORKLOAD_SEED, 2);
 	const recording = createRecordingGl();
@@ -322,4 +349,38 @@ test('the fixed-iteration spin is deterministic and stable across instances', ()
 	assert.equal(first(), second());
 	assert.equal(first(), second());
 	assert.notEqual(createWorkloadSpin(WORKLOAD_SEED, 1_000)(), createWorkloadSpin(WORKLOAD_SEED + 1, 1_000)());
+});
+
+test('the main-thread entity lane is deterministic, seeded, and fixed in iteration count', () => {
+	const first = createEntitySimulation(WORKLOAD_SEED, 256, 2, 512);
+	const second = createEntitySimulation(WORKLOAD_SEED, 256, 2, 512);
+	for (let frame = 0; frame < 8; frame++) assert.equal(first(), second());
+	assert.notEqual(
+		createEntitySimulation(WORKLOAD_SEED, 256, 2, 512)(),
+		createEntitySimulation(WORKLOAD_SEED + 1, 256, 2, 512)()
+	);
+
+	// Machine-independent work: the lane is sized by constants, never by a wall-clock budget, so
+	// a faster machine finishes the same iterations sooner instead of running more of them.
+	const source = String(createEntitySimulation);
+	assert.doesNotMatch(source, /performance\s*\.\s*now/u);
+	assert.doesNotMatch(source, /Date\s*\.\s*now/u);
+	assert.doesNotMatch(source, /new\s+Date/u);
+	assert.doesNotMatch(source, /while\s*\(/u);
+
+	// Allocation-free after construction: the per-frame body must not build objects, or the lane
+	// would measure garbage collection instead of entity math.
+	const perFrameBody = source.slice(source.indexOf('return () => {'));
+	assert.doesNotMatch(perFrameBody, /new\s+[A-Z]/u);
+	assert.doesNotMatch(perFrameBody, /\.push\(/u);
+});
+
+test('the entity lane stays in normal float range over a long trial', () => {
+	const simulate = createEntitySimulation(WORKLOAD_SEED, 512, 3, 1_024);
+	// A 2.8 s trial at 250 fps is ~700 frames; drift into denormals or infinities would make the
+	// lane's cost machine-dependent and its results incomparable.
+	let accumulator = 0;
+	for (let frame = 0; frame < 800; frame++) accumulator += simulate();
+	assert.ok(Number.isFinite(accumulator), 'entity lane accumulator must stay finite');
+	assert.ok(accumulator !== 0, 'entity lane must produce work the caller can sink');
 });

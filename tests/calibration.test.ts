@@ -260,12 +260,12 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 });
 
 test('v4 signatures stamp the current benchmark and workload versions', () => {
-	// Benchmark 4 = depth-6 fence pacing; workload 2 = the submission lane. Both bumps
-	// invalidate every earlier verdict through the signature.
+	// Benchmark 4 = depth-6 fence pacing; workload 3 = the right-sized render lane plus the
+	// main-thread entity lane. Both bumps invalidate every earlier verdict through the signature.
 	assert.equal(CALIBRATION_VERSION, 4);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
-	assert.equal(WORKLOAD_VERSION, 2);
+	assert.equal(WORKLOAD_VERSION, 3);
 });
 
 test('treats app version as informational while relevant signature fields invalidate', () => {
@@ -416,16 +416,22 @@ test('trial page embeds the workload and completion-honest measurement modules',
 
 	// The unit-tested modules are serialized into the page, so page and tests cannot drift.
 	assert.match(page, /const createWorkload = /);
+	assert.match(page, /const createEntitySimulation = /);
 	assert.match(page, /const createWorkloadSpin = /);
 	assert.match(page, /const runBenchmarkTrial = /);
-	assert.match(page, /"jsSpinIterations":2560000/);
-	// v2 constants travel with the page: the submission lane inside WORKLOAD_SPEC and the
-	// depth-6 pacing constants through the embedded-constant block.
-	assert.match(page, /"submissionDraws":700/);
-	assert.match(page, /"streamChunksPerFrame":16/);
+	assert.match(page, /"jsSpinIterations":160000/);
+	// v3 constants travel with the page: the main-thread entity lane and the right-sized render
+	// lane inside WORKLOAD_SPEC, the depth-6 pacing through the embedded-constant block.
+	assert.match(page, /"entityCount":12288/);
+	assert.match(page, /"entitySubsteps":4/);
+	assert.match(page, /"entityNeighborChecks":24576/);
+	assert.match(page, /"submissionDraws":26/);
+	assert.match(page, /"streamChunksPerFrame":8/);
 	assert.match(page, /const BENCHMARK_FENCE_QUEUE_DEPTH = 6;/);
 	assert.match(page, /const BENCHMARK_FENCE_RING_SIZE = 7;/);
 	assert.match(page, /bufferSubData/);
+	// The entity lane must run inside the measured frame, before submission.
+	assert.match(page, /spin: \(\) => \{ spinSink \+= simulateEntities\(\) \+ spin\(\); return spinSink; \}/);
 	assert.match(page, /EXT_disjoint_timer_query_webgl2/);
 	assert.match(page, /fenceSync/);
 	assert.match(page, /"desynchronized":false/);

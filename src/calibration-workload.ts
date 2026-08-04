@@ -1,28 +1,51 @@
 /**
- * Calibration workload v2 (design §1 + findings §5): a deterministic, self-contained scene with
- * two lanes. The GPU lane (v1, carried unchanged) is shaped like the measured Krunker menu frame
- * — draw-call count, state changes, texture binds, overdraw, JS spin, DOM overlay handled by the
- * page. The submission lane (new in v2) is CPU/submission-bound: many small screen-space draws
- * with per-draw uniform uploads, dense texture/program/blend churn, and per-frame bufferSubData
- * vertex streaming. It exists because the fence-artifact investigation proved the GPU lane alone
- * cannot rank backends whose advantage is API-thread/driver submission relief (D3D11on12's
- * batched deferred context): with pacing fully fixed, v1 still ranked default above d3d11on12 on
- * the reference machine while real gameplay runs ~2x faster on d3d11on12
- * (.working/fence-artifact-rootcause/findings.md §3, §5).
+ * Calibration workload v3: a deterministic, self-contained model of a *game frame*, with three
+ * lanes that run in the order the game runs them — main-thread simulation, then render
+ * submission, then present.
  *
- * The command stream is a pure function of (seed, frameIndex): no wall-clock reads happen
- * anywhere in the command path, so every trial replays the identical stream frame-for-frame.
+ * 1. Entity lane (new in v3, main thread, runs BEFORE any GL call): fixed-iteration
+ *    vector/matrix integration over a typed-array entity pool.
+ * 2. Render lane: a Krunker-plausible draw budget — the v1/v2 scene shape (overdraw, texture
+ *    binds, program switches, blended passes, DOM overlay handled by the page) at a right-sized
+ *    draw count, plus the v2 sprite/state-churn variety at game-like churn intervals and
+ *    per-frame `bufferSubData` vertex streaming.
+ * 3. Present: the page's canvas + composited DOM overlay, unchanged since v1.
  *
- * The page generator embeds `mulberry32`, `createWorkload`, and `createWorkloadSpin` by function
- * serialization, so those functions must stay self-contained: they may reference each other by
- * name but must not capture any other module-level binding.
+ * Why v3 exists. Workload v2 was a 1,000-draw-per-frame stress test. On the Iris Xe reference
+ * machine that cost 12.75 ms of GPU time per frame on d3d11on12 against 2.22 ms on default, and
+ * ranked default 2.8x above d3d11on12 — while the same machine measurably runs real Krunker at
+ * 250 fps on d3d11on12 against 150 fps on default (.working/simulator-v2-acceptance/results.md).
+ * Real Krunker at 250 fps has a ~4 ms TOTAL frame budget, so v2 was several times heavier than
+ * the game it claims to predict and its draw count over-weighted per-draw D3D11->D3D12
+ * translation cost, burying the submission-side difference the game actually experiences. v3
+ * fixes the workload SHAPE: the render lane is cut to a game-plausible draw budget with
+ * game-plausible state-change intervals, and the missing main-thread lane is added, because a
+ * frame in which the main thread is idle cannot show an advantage that consists of getting off
+ * the main thread sooner.
+ *
+ * The command stream is a pure function of (seed, frameIndex) and the entity lane is a pure
+ * function of (seed, call count): no wall-clock reads happen anywhere in either path, and the
+ * entity lane's iteration counts are fixed constants rather than a time budget, so a faster
+ * machine finishes the identical work sooner instead of doing more of it. Every trial replays
+ * the identical stream frame-for-frame.
+ *
+ * The page generator embeds `mulberry32`, `createWorkload`, `createWorkloadSpin`, and
+ * `createEntitySimulation` by function serialization, so those functions must stay
+ * self-contained: they may reference each other by name but must not capture any other
+ * module-level binding.
  */
 
-export const WORKLOAD_VERSION = 2;
+export const WORKLOAD_VERSION = 3;
 export const WORKLOAD_SEED = 0x574f4b31;
 
 export interface CalibrationWorkloadConstants {
 	atlasTextureSize: number;
+	/** Entities in the main-thread pool; sets the lane's working-set size as well as its cost. */
+	entityCount: number;
+	/** Fixed-count proximity pair tests per frame (scattered indices: the lane's cache-miss share). */
+	entityNeighborChecks: number;
+	/** Integration substeps per frame; the whole pool is integrated once per substep. */
+	entitySubsteps: number;
 	heightfieldSize: number;
 	jsSpinIterations: number;
 	meshVariants: number;
@@ -53,46 +76,81 @@ export interface CalibrationWorkloadConstants {
 	warmupSettleRatio: number;
 }
 
-// Frozen as WORKLOAD_VERSION 2 (design §1.4 discipline: any re-tune bumps WORKLOAD_VERSION).
+// Frozen as WORKLOAD_VERSION 3 (design §1.4 discipline: any re-tune bumps WORKLOAD_VERSION).
 //
-// GPU-lane constants are the WORKLOAD_VERSION 1 freeze, carried unchanged. v1 tuning on the Iris
-// Xe reference machine (WOK_CALIBRATION_TUNING=1 + WOK_TRACE_MS harness, 3 consecutive runs):
-// renderer-main busy 4.17/4.21/4.34 ms (gate 4-6), script 2.81/2.84/2.93 ms (menu lane 2.68 ms),
-// GPU-main busy 3.66/3.72/3.81 ms (gate 3-5). Record: .working/perf-round2/quiet-session.md.
+// The v3 budget is set by the frame the benchmark claims to predict, not by what a synthetic
+// scene can be made to cost. Reference machine (Iris Xe 0x46A6), real Krunker, in-game rAF
+// overlay: 250 fps on d3d11on12 and 150 fps on default, i.e. a 4-6.7 ms total frame budget with
+// the main thread and the render submission both inside it. Every lane below is sized against
+// that budget; the tuning history that produced these numbers, run by run with the resulting
+// acceptance tables, is .working/simulator-v2-acceptance/v3-iterations.md.
 //
-// Submission-lane constants (v2) target the findings §5 lane: several hundred to ~1.5k small
-// draws total per frame with heavier per-draw state churn and per-frame bufferSubData traffic.
-// 700 sprite draws + the 300-draw GPU lane land at 1,000 draws/frame; texture binds every 2 and
-// program switches every 4 lane draws push state translation (input layouts, sampler/blend
-// state, root signatures on D3D11on12) well past the GPU lane's coarse batching; 16 x 4 KiB
-// bufferSubData chunks per frame (64 KiB) stream vertex data the lane draws actually consume,
-// exercising the rename/versioning path. Sprites cover a few pixels each, so the lane's GPU cost
-// is negligible by construction and its evidence lands in frame intervals and cpuSubmitP50/P95.
-// Reference-machine acceptance for this freeze (v2 must rank d3d11on12:uncapped above
-// default:uncapped, matching real gameplay): .working/simulator-v2-acceptance/ — RUN.md is the
-// procedure, results.md the recorded evidence once the run has executed on an idle GPU.
+// Render lane: 100 draws/frame, a batched-engine budget rather than a draw-call stress test.
+// v2's 1,000 draws/frame measured 12.75 ms of GPU time per frame on d3d11on12 (2.22 ms on
+// default) — 3x the whole real frame budget — and that is why v2 ranked the backends backwards.
+// The measured draw-count response on the reference machine (v3-iterations.md, 8 blocks) is
+// monotonic: d3d11on12's score relative to default runs 1.13 at 9 draws, ~1.01 at 30-100,
+// 0.91-0.96 at 160, 0.83 at 300, 0.48 at 560. d3d11on12 pays ~10-15 us per draw call where native
+// D3D11 pays 2-3 us, so draw count alone decides the ranking, and any count that is not
+// game-plausible decides it wrongly. 100 is plausible for a merged-geometry low-poly FPS and puts
+// GPU time at 2.2 ms (d3d11on12) / 1.4 ms (default) against the game's 4-6.7 ms frame budget.
+// The scene keeps the v1 shape (skybox, heightfield, depth-staggered opaque field, blended pass,
+// fullscreen layers, UI atlas) and the v2 sprite lane's state-change variety at material-batch
+// intervals; 8 x 4 KiB bufferSubData chunks per frame keep the vertex-streaming
+// rename/versioning path that real particle and HUD geometry exercises.
+//
+// Entity lane: ~0.8 ms per frame on this machine, a meaningful share of a 4-6.7 ms budget.
+// entityCount 12,288 gives a ~1.3 MiB working set (positions/velocities/orientations/matrices),
+// so the pass has real memory traffic and its scattered proximity queries miss cache the way a
+// game's spatial lookups do. Sized deliberately rather than maximised: the measurements found
+// that *increasing* main-thread contention moves the ranking AGAINST d3d11on12 on this machine
+// (sweep B: 0.96 -> 0.80 at 160 draws, 1.01 -> 0.79 at 80), because heavy main-thread work
+// regularises default's frame delivery while d3d11on12's stays uneven. The lane is here for frame
+// realism, not because it is the mechanism that ranks the backends. jsSpinIterations stays as the
+// unstructured-script stand-in (netcode, bookkeeping) at a fraction of the v1/v2 count.
+//
+// Warmup 3,000/5,000 ms, up from v1/v2's 900/2,000. Measurement hygiene, applied symmetrically:
+// at the shorter warmup, d3d11on12's per-trial scores swung up to 40% (101.88 vs 142.85 on
+// identical work) while default's held within a few percent, and the spread collapsed once the
+// warmup reached steady state. A trial that has not reached steady state measures the GPU's clock
+// ramp and the backend's one-time pipeline-state creation, not its throughput.
+//
+// GPU-lane resource constants (texture sizes/counts, mesh variants, heightfield size) are the
+// WORKLOAD_VERSION 1 freeze, carried unchanged. v1 tuning on the Iris Xe reference machine
+// (WOK_CALIBRATION_TUNING=1 + WOK_TRACE_MS harness, 3 consecutive runs): renderer-main busy
+// 4.17/4.21/4.34 ms (gate 4-6), script 2.81/2.84/2.93 ms (menu lane 2.68 ms), GPU-main busy
+// 3.66/3.72/3.81 ms (gate 3-5). Record: .working/perf-round2/quiet-session.md.
+//
+// Reference-machine acceptance for this freeze: .working/simulator-v2-acceptance/ — RUN.md is the
+// procedure, results.md the recorded evidence, v3-iterations.md the full tuning history including
+// the reproducibility limits of the harness. READ v3-iterations.md BEFORE RE-TUNING: the margin
+// between the two backends at a game-plausible draw count is smaller than this harness's
+// block-to-block noise, so a single passing or failing run is not evidence on its own.
 export const WORKLOAD_CONSTANTS: CalibrationWorkloadConstants = {
 	atlasTextureSize: 1_024,
+	entityCount: 12_288,
+	entityNeighborChecks: 24_576,
+	entitySubsteps: 4,
 	heightfieldSize: 64,
-	jsSpinIterations: 2_560_000,
+	jsSpinIterations: 160_000,
 	meshVariants: 30,
-	opaqueDraws: 240,
+	opaqueDraws: 50,
 	prismMaxSides: 17,
 	prismMinSides: 4,
-	programSwitchInterval: 40,
+	programSwitchInterval: 12,
 	sceneTextureCount: 8,
 	sceneTextureSize: 256,
 	streamChunkBytes: 4_096,
-	streamChunksPerFrame: 16,
-	submissionBlendToggleInterval: 16,
-	submissionDraws: 700,
-	submissionProgramSwitchInterval: 4,
-	submissionTextureBindInterval: 2,
+	streamChunksPerFrame: 8,
+	submissionBlendToggleInterval: 8,
+	submissionDraws: 26,
+	submissionProgramSwitchInterval: 6,
+	submissionTextureBindInterval: 4,
 	textureBindInterval: 4,
-	transparentDraws: 44,
-	uiDraws: 16,
-	warmupMaxMs: 2_000,
-	warmupMinMs: 900,
+	transparentDraws: 14,
+	uiDraws: 10,
+	warmupMaxMs: 5_000,
+	warmupMinMs: 3_000,
 	warmupSettleFrames: 30,
 	warmupSettleRatio: 3
 };
@@ -274,9 +332,193 @@ export function mulberry32(seed: number): () => number {
 }
 
 /**
- * Fixed-iteration JS spin (design §1.2): stands in for game-script main-thread work. A fixed
- * iteration count (not fixed wall-time) keeps work identical across candidates while faster
- * CPUs finish sooner. Returns an accumulator so callers can sink it against dead-code elimination.
+ * Main-thread entity lane (v3). Models the half of a game frame the render lanes cannot see:
+ * game logic competing with render submission for the main thread. Each call integrates a
+ * typed-array entity pool (structure-of-arrays, allocated once at construction), rebuilds a model
+ * matrix per entity from its quaternion, and runs a fixed number of scattered proximity queries —
+ * the vector/matrix arithmetic and the cache behaviour of an entity update, without the
+ * allocation churn that would turn the lane into a GC benchmark.
+ *
+ * This lane exists because D3D11on12's plausible real advantage is moving driver work off the
+ * thread the game logic needs (its batched context records cheaply on the calling thread and
+ * replays on a worker). That advantage is structurally invisible in a frame whose main thread is
+ * otherwise idle, which is what workload v2 measured.
+ *
+ * Determinism and comparability:
+ * - Iteration counts are fixed constants, never a time budget, so a faster machine finishes the
+ *   same work sooner rather than doing more of it, and trials stay comparable.
+ * - Initial state derives only from `seed`; the per-call work is identical regardless of the
+ *   evolved state, so trials of different lengths still cost the same per frame.
+ * - Positions wrap inside a fixed box and vertical motion bounces elastically, so no value drifts
+ *   into denormal or infinite range where arithmetic cost would become machine-dependent.
+ * - No wall-clock is read and nothing is allocated after construction.
+ *
+ * Returns an accumulator so callers can sink it against dead-code elimination.
+ */
+export function createEntitySimulation(seed: number, entityCount: number, substeps: number, neighborChecks: number): () => number {
+	const random = mulberry32((seed ^ 0x454e5449) >>> 0);
+	const BOUND = 60;
+	const CEILING = 26;
+	const GRAVITY = 24;
+	const STEP = 1 / 180;
+	const positions = new Float32Array(entityCount * 3);
+	const velocities = new Float32Array(entityCount * 3);
+	const orientations = new Float32Array(entityCount * 4);
+	const spins = new Float32Array(entityCount * 3);
+	const turnCos = new Float32Array(entityCount);
+	const turnSin = new Float32Array(entityCount);
+	const radii = new Float32Array(entityCount);
+	const matrices = new Float32Array(entityCount * 16);
+	const contacts = new Int32Array(entityCount);
+	const pairA = new Int32Array(neighborChecks);
+	const pairB = new Int32Array(neighborChecks);
+
+	for (let index = 0; index < entityCount; index++) {
+		positions[index * 3] = (random() - 0.5) * 2 * BOUND;
+		positions[index * 3 + 1] = random() * CEILING;
+		positions[index * 3 + 2] = (random() - 0.5) * 2 * BOUND;
+		velocities[index * 3] = (random() - 0.5) * 24;
+		velocities[index * 3 + 1] = (random() - 0.5) * 16;
+		velocities[index * 3 + 2] = (random() - 0.5) * 24;
+		// Unit quaternion: the matrix rebuild below assumes normalization, which the integration
+		// step restores every frame.
+		orientations[index * 4 + 3] = 1;
+		spins[index * 3] = (random() - 0.5) * 3;
+		spins[index * 3 + 1] = (random() - 0.5) * 3;
+		spins[index * 3 + 2] = (random() - 0.5) * 3;
+		const turn = (random() - 0.5) * 0.05;
+		turnCos[index] = Math.cos(turn);
+		turnSin[index] = Math.sin(turn);
+		radii[index] = 0.5 + random() * 1.5;
+	}
+	// Proximity pairs are scattered rather than adjacent so the query pass walks the pool the way
+	// a spatial lookup does instead of streaming it linearly.
+	for (let pair = 0; pair < neighborChecks; pair++) {
+		pairA[pair] = Math.floor(random() * entityCount);
+		pairB[pair] = Math.floor(random() * entityCount);
+	}
+
+	return () => {
+		for (let step = 0; step < substeps; step++) {
+			for (let index = 0; index < entityCount; index++) {
+				const base = index * 3;
+				const cos = turnCos[index];
+				const sin = turnSin[index];
+				const velocityX = velocities[base];
+				const velocityZ = velocities[base + 2];
+				// Steering is a rotation, not a scaling, so speeds neither decay to denormals nor
+				// run away over a long trial.
+				const turnedX = velocityX * cos - velocityZ * sin;
+				const turnedZ = velocityX * sin + velocityZ * cos;
+				let velocityY = velocities[base + 1] - GRAVITY * STEP;
+				let x = positions[base] + turnedX * STEP;
+				let y = positions[base + 1] + velocityY * STEP;
+				let z = positions[base + 2] + turnedZ * STEP;
+				if (y < 0) {
+					y = -y;
+					velocityY = -velocityY;
+				} else if (y > CEILING) {
+					y = 2 * CEILING - y;
+					velocityY = -velocityY;
+				}
+				if (x > BOUND) x -= 2 * BOUND;
+				else if (x < -BOUND) x += 2 * BOUND;
+				if (z > BOUND) z -= 2 * BOUND;
+				else if (z < -BOUND) z += 2 * BOUND;
+				positions[base] = x;
+				positions[base + 1] = y;
+				positions[base + 2] = z;
+				velocities[base] = turnedX;
+				velocities[base + 1] = velocityY;
+				velocities[base + 2] = turnedZ;
+			}
+		}
+
+		let accumulator = 0;
+		for (let index = 0; index < entityCount; index++) {
+			const base = index * 3;
+			const quaternionBase = index * 4;
+			// Quaternion integration q += 0.5 * step * omega * q, then renormalize.
+			const spinX = spins[base];
+			const spinY = spins[base + 1];
+			const spinZ = spins[base + 2];
+			let qx = orientations[quaternionBase];
+			let qy = orientations[quaternionBase + 1];
+			let qz = orientations[quaternionBase + 2];
+			let qw = orientations[quaternionBase + 3];
+			const half = 0.5 * STEP;
+			const deltaX = half * (spinX * qw + spinY * qz - spinZ * qy);
+			const deltaY = half * (spinY * qw + spinZ * qx - spinX * qz);
+			const deltaZ = half * (spinZ * qw + spinX * qy - spinY * qx);
+			const deltaW = half * (-spinX * qx - spinY * qy - spinZ * qz);
+			qx += deltaX;
+			qy += deltaY;
+			qz += deltaZ;
+			qw += deltaW;
+			const inverseLength = 1 / Math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
+			qx *= inverseLength;
+			qy *= inverseLength;
+			qz *= inverseLength;
+			qw *= inverseLength;
+			orientations[quaternionBase] = qx;
+			orientations[quaternionBase + 1] = qy;
+			orientations[quaternionBase + 2] = qz;
+			orientations[quaternionBase + 3] = qw;
+
+			// Model matrix from the rotation and the integrated position (column-major, as uploaded).
+			const scale = radii[index];
+			const xx = qx * qx;
+			const yy = qy * qy;
+			const zz = qz * qz;
+			const xy = qx * qy;
+			const xz = qx * qz;
+			const yz = qy * qz;
+			const wx = qw * qx;
+			const wy = qw * qy;
+			const wz = qw * qz;
+			const matrixBase = index * 16;
+			matrices[matrixBase] = (1 - 2 * (yy + zz)) * scale;
+			matrices[matrixBase + 1] = 2 * (xy + wz) * scale;
+			matrices[matrixBase + 2] = 2 * (xz - wy) * scale;
+			matrices[matrixBase + 3] = 0;
+			matrices[matrixBase + 4] = 2 * (xy - wz) * scale;
+			matrices[matrixBase + 5] = (1 - 2 * (xx + zz)) * scale;
+			matrices[matrixBase + 6] = 2 * (yz + wx) * scale;
+			matrices[matrixBase + 7] = 0;
+			matrices[matrixBase + 8] = 2 * (xz + wy) * scale;
+			matrices[matrixBase + 9] = 2 * (yz - wx) * scale;
+			matrices[matrixBase + 10] = (1 - 2 * (xx + yy)) * scale;
+			matrices[matrixBase + 11] = 0;
+			matrices[matrixBase + 12] = positions[base];
+			matrices[matrixBase + 13] = positions[base + 1];
+			matrices[matrixBase + 14] = positions[base + 2];
+			matrices[matrixBase + 15] = 1;
+			accumulator += matrices[matrixBase] + matrices[matrixBase + 12];
+			contacts[index] = 0;
+		}
+
+		for (let pair = 0; pair < neighborChecks; pair++) {
+			const left = pairA[pair] * 3;
+			const right = pairB[pair] * 3;
+			const deltaX = positions[left] - positions[right];
+			const deltaY = positions[left + 1] - positions[right + 1];
+			const deltaZ = positions[left + 2] - positions[right + 2];
+			const distanceSquared = deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+			const reach = radii[pairA[pair]] + radii[pairB[pair]];
+			if (distanceSquared < reach * reach) {
+				contacts[pairA[pair]]++;
+				accumulator += 1;
+			}
+		}
+		return accumulator;
+	};
+}
+
+/**
+ * Fixed-iteration JS spin (design §1.2): stands in for the unstructured remainder of game-script
+ * main-thread work, alongside the entity lane above. A fixed iteration count (not fixed
+ * wall-time) keeps work identical across candidates while faster CPUs finish sooner. Returns an
+ * accumulator so callers can sink it against dead-code elimination.
  */
 export function createWorkloadSpin(seed: number, iterations: number): () => number {
 	let state = seed >>> 0;
@@ -647,10 +889,12 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 	}
 	const transparentDraws: TransparentDrawSpec[] = [];
 	const fullscreenLayerCount = 3;
+	// Blend modes batch in blocks so the pass changes state like a scene graph, not per draw. The
+	// block scales with the pass so both blend modes are always exercised at any tuned draw count.
+	const transparentBlendBlock = Math.max(2, Math.floor((constants.transparentDraws - fullscreenLayerCount) / 3));
 	for (let index = 0; index < constants.transparentDraws - fullscreenLayerCount; index++) {
 		transparentDraws.push({
-			// Blend modes and textures batch in blocks so the pass changes state like a scene graph, not per draw.
-			additive: Math.floor(index / 11) % 2 === 1,
+			additive: Math.floor(index / transparentBlendBlock) % 2 === 1,
 			fullscreen: false,
 			phase: random() * Math.PI * 2,
 			positionX: (random() - 0.5) * 70,
@@ -680,7 +924,7 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 		});
 	}
 
-	// Submission lane (v2): a dynamic stream buffer rewritten every frame via bufferSubData and
+	// Sprite lane vertex stream: a dynamic buffer rewritten every frame via bufferSubData and
 	// consumed by the lane's draws, so the upload is real work (buffer rename/versioning), not a
 	// dead store. Layout matches the static meshes (position3 normal3 uv2): six vertices per
 	// screen-space unit quad, placed and scaled per draw through the model matrix.
@@ -925,12 +1169,14 @@ export function createWorkload(gl: WorkloadGl, spec: WorkloadSpec, viewportWidth
 		gl.uniform4f(info.uniforms.tint, 0.03, 0.03, 0.05, 0.35);
 		gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-		// Submission lane (v2, findings §5): the CPU/submission-bound axis the GPU lane holds
-		// constant. Each sprite covers a few pixels, so by construction the lane's cost is API
-		// calls — per-draw matrix + tint uniform uploads, texture binds, program switches, blend
-		// toggles — landing on the renderer thread, the command-buffer service, and the driver or
-		// translation layer. Its evidence reaches the score through frame intervals and shows up
-		// diagnostically in cpuSubmitP50/P95.
+		// Sprite/state-churn lane: the HUD, tracer, and particle traffic of a game frame. Each
+		// sprite covers a few pixels, so by construction its cost is API calls — per-draw matrix
+		// and tint uniform uploads, texture binds, program switches, blend toggles — landing on
+		// the renderer thread, the command-buffer service, and the driver or translation layer.
+		// v3 keeps this variety at game-like churn intervals (v2's every-2/every-4 churn made it a
+		// translation-layer torture test rather than a model of a batched-by-material frame). Its
+		// evidence reaches the score through frame intervals and shows up diagnostically in
+		// cpuSubmitP50/P95.
 		gl.disable(gl.DEPTH_TEST);
 		// Per-frame vertex streaming: rewrite the head of every chunk (frame-index-derived jitter
 		// the draws below actually consume), then re-upload the chunk in place.

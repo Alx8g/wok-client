@@ -4,12 +4,19 @@ import { join as pathJoin, resolve as pathResolve } from 'path';
 import { ipcRenderer, webFrame } from 'electron';
 import { createElement, hiddenClassesImages, toggleSettingCSS, keyboardEventMatchesCustomSetting } from './utils.ts';
 import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
-import { GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
+import { describeGameUsability, formatGameUsabilitySnapshot, GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
 import { installDrawCallCensus } from './draw-call-stats.ts';
 import { startGameplayFpsLog } from './gameplay-fps-log.ts';
+import {
+	describeError,
+	formatLoadingDeadlineEvent,
+	formatLoadingOverrunMessage,
+	SPLASH_REVEAL_DEADLINE_MS,
+	startLoadingDeadline
+} from './loading-deadline.ts';
 import { probeMenuStructure } from './menu-dom-probe.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
-import { mountWeaponParticleLoader } from './weapon-particle-loader.ts';
+import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
 // Measures what a real Krunker frame issues so the calibration workload can be anchored to the
@@ -409,7 +416,7 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 		}, copyCooldownMS);
 	}
 
-	document.getElementById('endMidHolder').appendChild(buttonElement);
+	document.getElementById('endMidHolder')?.appendChild(buttonElement);
 });
 
 ipcRenderer.once('initDiscordRPC', () => {
@@ -568,8 +575,99 @@ function observeGameUsable(): void {
 	gameUsableObservationStarted = true;
 	observeGameUsability({
 		document,
+		onError: error => {
+			readinessErrors += 1;
+			lastReadinessError = describeError(error);
+			strippedConsole.error('Krunker readiness check failed', error);
+		},
 		onUsable: reportGameUsable
 	});
+}
+
+let readinessErrors = 0;
+let lastReadinessError: string | undefined;
+
+/**
+ * Stuck-load diagnostics.
+ *
+ * A load that never completes is close to impossible to reproduce on demand, so the one line that
+ * matters - the overrun, with the state of everything the readiness predicate reads - is always
+ * emitted and forwarded to the main process, where WOK's other diagnostics are read. The rest of
+ * the trace follows the established env gate and stays off by default.
+ */
+const splashLogEnabled = Boolean(process.env.WOK_SPLASH_LOG);
+
+/** Origin and path only: enough to tell the game apart from an error, login or challenge page. */
+function describeLocation(): string {
+	try {
+		const url = new URL(location.href);
+		return `${url.origin}${url.pathname}`;
+	} catch {
+		return 'unknown';
+	}
+}
+
+function sendLoadingDiagnostic(line: string, always = false): void {
+	if (!always && !splashLogEnabled) return;
+	strippedConsole.log(`[wok-load] ${line}`);
+	try {
+		ipcRenderer.send('wok_loading_diag', line.slice(0, 2_000));
+	} catch (error) {
+		strippedConsole.error('Failed to forward a loading diagnostic', error);
+	}
+}
+
+/** Remove an element without ever throwing; hiding it is the fallback when removal fails. */
+function forceElementGone(element: Element): void {
+	try {
+		element.remove();
+		return;
+	} catch (error) {
+		strippedConsole.error('Failed to remove a WOK overlay element', error);
+	}
+	try {
+		const style = (element as HTMLElement).style;
+		style.setProperty('display', 'none', 'important');
+		style.setProperty('opacity', '0', 'important');
+		style.setProperty('pointer-events', 'none', 'important');
+	} catch (error) {
+		strippedConsole.error('Failed to hide a WOK overlay element', error);
+	}
+}
+
+/**
+ * Non-blocking notice shown when a load overruns the deadline. The splash is already gone by the
+ * time this appears, so the notice must never take the page back: only its own card accepts
+ * pointer events, and it retires itself as soon as the game does become usable.
+ */
+function showLoadingOverrunNotice(elapsedMs: number): () => void {
+	try {
+		if (!document.body) return () => {};
+
+		const notice = createElement('div', { class: 'wok-loading-notice' });
+		notice.setAttribute('role', 'status');
+		const card = createElement('div', { class: 'wok-loading-notice-card' });
+		card.appendChild(createElement('span', {
+			class: 'wok-loading-notice-text',
+			text: formatLoadingOverrunMessage(elapsedMs)
+		}));
+		const dismiss = createElement('button', {
+			class: 'wok-loading-notice-dismiss',
+			text: 'Dismiss',
+			type: 'button'
+		});
+		const remove = () => { forceElementGone(notice); };
+		dismiss.addEventListener('click', remove);
+		card.appendChild(dismiss);
+		notice.appendChild(card);
+		document.body.appendChild(notice);
+		return remove;
+	} catch (error) {
+		// The page is already revealed by this point; failing to explain it is not worth an
+		// exception on the way out.
+		strippedConsole.error('Failed to show the WOK loading notice', error);
+		return () => {};
+	}
 }
 
 let splashMountAttempted = false;
@@ -599,6 +697,9 @@ async function mountClientSplash(
 		);
 		return;
 	}
+	// Reading the assets and waiting for #uiBase can outlast a fast launch. Mounting a splash the
+	// signal would immediately clear only costs a flash and a pointless canvas.
+	if (gameUsableSignal.hasReported || !document.body) return;
 
 	const splashBackground = createElement(
 		'div',
@@ -634,21 +735,70 @@ async function mountClientSplash(
 	 * early, stable parser milestone without inheriting that transform.
 	 */
 	document.body.appendChild(splashBackground);
-	const weaponParticles = await mountWeaponParticleLoader(
-		weaponLoaderHost
-	);
 
+	let weaponParticles: WeaponParticleLoader | undefined;
 	let splashCleared = false;
-	let removeGameUsableListener: () => void = () => {};
-	const clearSplash = () => {
+	const clearSplash = (): void => {
 		if (splashCleared) return;
 		splashCleared = true;
 		sendPerfMark('splash-cleared');
-		weaponParticles.destroy();
-		splashBackground.remove();
-		removeGameUsableListener();
+		try {
+			weaponParticles?.destroy();
+		} catch (error) {
+			strippedConsole.error('Failed to stop the WOK loading animation', error);
+		}
+		forceElementGone(splashBackground);
 	};
-	removeGameUsableListener = onGameUsable(clearSplash);
+
+	/*
+	 * The deadline is armed before anything that can fail, and before the weapon loader is even
+	 * built. Nothing after this point - a throwing loader, a readiness signal that never arrives,
+	 * markup that changed under the predicate, an error, login or ban screen behind the splash -
+	 * can leave this element covering the page: the wait is bounded and every outcome removes it.
+	 */
+	let retireOverrunNotice: () => void = () => {};
+	const deadline = startLoadingDeadline({
+		deadlineMs: SPLASH_REVEAL_DEADLINE_MS,
+		now: () => performance.now(),
+		onDiagnostic: event => {
+			sendLoadingDiagnostic(formatLoadingDeadlineEvent('splash', event));
+		},
+		onFailsafe: error => {
+			strippedConsole.error('WOK splash teardown failed; forcing it off the page', error);
+			forceElementGone(splashBackground);
+		},
+		onLateReady: elapsedMs => {
+			retireOverrunNotice();
+			sendLoadingDiagnostic(`splash late-ready elapsed=${Math.round(elapsedMs)}ms`, true);
+		},
+		onResolve: resolution => {
+			clearSplash();
+			if (resolution.outcome !== 'overrun') return;
+			// Recorded before the notice is built: the record of why a launch got stuck is the part
+			// that must survive, even if drawing the explanation fails.
+			sendLoadingDiagnostic(
+				`splash overrun elapsed=${Math.round(resolution.elapsedMs)}ms `
+				+ `readinessErrors=${readinessErrors} lastError=${lastReadinessError ?? 'none'} `
+				+ `url=${describeLocation()} ${formatGameUsabilitySnapshot(describeGameUsability(document))}`,
+				true
+			);
+			// Then say what happened, in the page, where the user is looking.
+			retireOverrunNotice = showLoadingOverrunNotice(resolution.elapsedMs);
+		},
+		subscribe: onGameUsable
+	});
+	window.addEventListener('beforeunload', () => { deadline.dispose(); }, { once: true });
+
+	try {
+		weaponParticles = await mountWeaponParticleLoader(weaponLoaderHost);
+		// Readiness can arrive while the loader is being built; destroy it rather than leaving an
+		// animation running against a detached element.
+		if (splashCleared) weaponParticles.destroy();
+	} catch (error) {
+		// The static final frame is a perfectly good loading screen on its own, so a failed
+		// animation is not a reason to drop the presentation - or to keep it past the deadline.
+		strippedConsole.error('Failed to start the WOK loading animation', error);
+	}
 }
 
 let clientCSSInjected = false;
@@ -834,29 +984,48 @@ function patchSettings(_userPrefs: UserPrefs) {
 		const searchHook = settingsWindow.searchList.bind(settingsWindow);
 		let searchRenderTimer: number | undefined;
 
+		/*
+		 * These four functions belong to Krunker and are called from Krunker's own code, including
+		 * during startup. An exception thrown from our additions therefore lands in the middle of
+		 * the game's call stack and can stop it reaching a playable state - which used to mean the
+		 * client's loading screen never came down. Every override calls through first, then runs
+		 * WOK's work inside this guard, so the worst case is that one client extra is missing.
+		 */
+		const runHookExtras = (label: string, extras: () => void) => {
+			try {
+				extras();
+			} catch (error) {
+				strippedConsole.error(`WOK Client ${label} hook failed`, error);
+			}
+		};
+
 		window.showWindow = (...args: unknown[]) => {
 			const result = showWindowHook(...args);
 
-			if (args[0] === 1) {
-				if (settingsWindow.settingType === 'basic') settingsWindow.toggleType({ checked: true });
-				const advSliderElem: HTMLInputElement = document.querySelector('.advancedSwitch input#typeBtn');
-				advSliderElem.disabled = true;
-				advSliderElem.nextElementSibling.setAttribute('title', 'WOK Client auto-enables advanced settings mode');
-
-				// We check the search query here because krunker reloads the search each time the settings page is closed/reopened, causing any client settings to be erased
-				const searchQuery = (document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? "";
-				if (isClientTab() || searchQuery.length > 0) renderSettings();
-			}
-
-			if (args[0] === 4) {
-				// This makes the model viewer link open in a new window. Krunker doesn't currently have it set to target _blank for some reason.
-				const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find((elem: Element) => {
-					if (elem instanceof HTMLElement) {
-						elem.innerText === "Model Viewer"
+			runHookExtras('showWindow', () => {
+				if (args[0] === 1) {
+					if (settingsWindow.settingType === 'basic') settingsWindow.toggleType({ checked: true });
+					const advSliderElem = document.querySelector<HTMLInputElement>('.advancedSwitch input#typeBtn');
+					if (advSliderElem) {
+						advSliderElem.disabled = true;
+						advSliderElem.nextElementSibling?.setAttribute('title', 'WOK Client auto-enables advanced settings mode');
 					}
-				});
-				if (modelViewerElement) modelViewerElement.setAttribute('target', '_blank');
-			}
+
+					// We check the search query here because krunker reloads the search each time the settings page is closed/reopened, causing any client settings to be erased
+					const searchQuery = (document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? "";
+					if (isClientTab() || searchQuery.length > 0) renderSettings();
+				}
+
+				if (args[0] === 4) {
+					// This makes the model viewer link open in a new window. Krunker doesn't currently have it set to target _blank for some reason.
+					const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find((elem: Element) => {
+						if (elem instanceof HTMLElement) {
+							elem.innerText === "Model Viewer"
+						}
+					});
+					if (modelViewerElement) modelViewerElement.setAttribute('target', '_blank');
+				}
+			});
 
 			return result;
 		};
@@ -864,9 +1033,11 @@ function patchSettings(_userPrefs: UserPrefs) {
 		// whenever we change tabs, if it's client tab, run renderSettings, otherwise remove our class
 		settingsWindow.changeTab = (...args: unknown[]) => {
 			const result = changeTabHook(...args);
-			selectedTab = settingsWindow.tabIndex;
 
-			safeRenderSettings();
+			runHookExtras('changeTab', () => {
+				selectedTab = settingsWindow.tabIndex;
+				safeRenderSettings();
+			});
 
 			return result;
 		};
@@ -875,14 +1046,22 @@ function patchSettings(_userPrefs: UserPrefs) {
 			const result: string = getSettingsHook(...args);
 			if (!_userPrefs.regionTimezones) return result;
 
-			if (result.includes('window.setSetting("defaultRegion"') && result.match(regionOptionsRegex).length > 0) {
-				const optionsHTML = result.match(regionOptionsRegex)[0];
+			let patched = result;
+			runHookExtras('getSettings', () => {
+				// Krunker's markup is not ours to rely on: a missing region <select> means no match
+				// at all, and reading .length off that null used to throw straight into the game.
+				const regionOptionMatches = typeof result === 'string' && result.includes('window.setSetting("defaultRegion"')
+					? result.match(regionOptionsRegex)
+					: null;
+				if (!regionOptionMatches || regionOptionMatches.length === 0) return;
+
+				const optionsHTML = regionOptionMatches[0];
 				const optionElements = [...createElement('div', { innerHTML: optionsHTML }).children] as HTMLOptionElement[];
 
 				for (let i = 0; i < optionElements.length; i++) {
 					const opt = optionElements[i];
 					// bad hack to fix it getting added multiple times (don't know why..)
-					if (opt.textContent.includes("[")) continue;
+					if ((opt.textContent ?? '').includes("[")) continue;
 					try {
 						opt.textContent += ` ${getTimezoneByRegionKey('id', opt.value)}`;
 					} catch (_error) {
@@ -894,25 +1073,26 @@ function patchSettings(_userPrefs: UserPrefs) {
 				const tempHolder = document.createElement('div');
 				optionElements.forEach(opt => tempHolder.appendChild(opt));
 
-				const patchedHTML = tempHolder.innerHTML;
-				return result.replace(optionsHTML, patchedHTML);
-			}
+				patched = result.replace(optionsHTML, tempHolder.innerHTML);
+			});
 
-			return result;
+			return patched;
 		};
 
 		settingsWindow.searchList = (...args: unknown[]) => {
 			// biome-ignore lint/suspicious/noExplicitAny: hook code, expected to be hacky
 			const result: any = searchHook(...args); // Do normal krunker settings search things
-			if (searchRenderTimer !== undefined) window.clearTimeout(searchRenderTimer);
-			searchRenderTimer = window.setTimeout(() => {
-				searchRenderTimer = undefined;
-				renderSettings();
-			}, 75);
+			runHookExtras('searchList', () => {
+				if (searchRenderTimer !== undefined) window.clearTimeout(searchRenderTimer);
+				searchRenderTimer = window.setTimeout(() => {
+					searchRenderTimer = undefined;
+					renderSettings();
+				}, 75);
+			});
 			return result;
 		}
 
-		safeRenderSettings();
+		runHookExtras('initial render', safeRenderSettings);
 	}
 	const waitForWindow0: TimerHandler = () => {
 		if (
@@ -927,7 +1107,11 @@ function patchSettings(_userPrefs: UserPrefs) {
 			stopWaiting();
 			window.removeEventListener('beforeunload', stopWaitingOnUnload);
 			strippedConsole.log('hooking settings');
-			hookSettings();
+			try {
+				hookSettings();
+			} catch (error) {
+				strippedConsole.error('Failed to hook the Krunker settings window', error);
+			}
 		}
 	}
 	interval = window.setInterval(waitForWindow0, 250);

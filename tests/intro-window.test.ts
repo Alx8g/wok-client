@@ -59,10 +59,19 @@ class FakeWebContents extends EventEmitter {
 }
 
 class FakeIntroWindow extends EventEmitter {
-	public readonly webContents = new FakeWebContents();
+	/** Reachable after destruction so a test can prove late events are inert. */
+	public readonly contents = new FakeWebContents();
 	public alwaysOnTop?: [boolean, string];
 	public destroyed = false;
 	public hiddenCount = 0;
+	/** Electron throws when a hidden window is hidden again after an internal teardown race. */
+	public hideThrows = false;
+
+	/** Electron throws from the members of a destroyed window, including this getter. */
+	public get webContents(): FakeWebContents {
+		if (this.destroyed) throw new Error('Object has been destroyed');
+		return this.contents;
+	}
 	public load?: {
 		options: { query: Record<string, string> };
 		path: string;
@@ -82,6 +91,7 @@ class FakeIntroWindow extends EventEmitter {
 	}
 
 	public hide(): void {
+		if (this.hideThrows) throw new Error('Object has been destroyed');
 		this.hiddenCount += 1;
 		this.visible = false;
 	}
@@ -292,7 +302,7 @@ test('intro startup, playback, visual handoff and audio-tail completion run once
 	assert.equal(harness.scheduler.size, 0);
 
 	harness.sequence.cancel();
-	harness.introWindow.webContents.emit('media-paused');
+	harness.introWindow.contents.emit('media-paused');
 	assert.deepEqual(harness.callbackOrder, [
 		'reveal',
 		'visual-end',
@@ -335,6 +345,37 @@ test('closing or cancelling the intro completes all callbacks exactly once', () 
 		'finished'
 	]);
 	assert.equal(cancelled.introWindow.destroyed, true);
+});
+
+test('a window operation that throws mid-sequence cannot strand the handoff', () => {
+	// Nothing about the intro window is worth trapping the user behind: an always-on-top window
+	// that never hands over is the same dead client as a splash that never comes down.
+	const hideFailure = createSequenceHarness();
+	hideFailure.introWindow.emit('ready-to-show');
+	hideFailure.introWindow.webContents.emit('media-started-playing');
+	hideFailure.introWindow.hideThrows = true;
+	hideFailure.scheduler.runDelay(1_450);
+	hideFailure.scheduler.runDelay(3_000);
+	assert.deepEqual(hideFailure.callbackOrder, ['reveal', 'visual-end']);
+	hideFailure.scheduler.runDelay(4_250);
+	assert.deepEqual(hideFailure.callbackOrder, [
+		'reveal',
+		'visual-end',
+		'finished'
+	]);
+	assert.equal(hideFailure.introWindow.destroyed, true);
+
+	// A window destroyed under the sequence (crashed renderer, closed window) makes every member
+	// throw, including the webContents getter the cleanup path reads.
+	const destroyedEarly = createSequenceHarness();
+	destroyedEarly.introWindow.emit('ready-to-show');
+	destroyedEarly.introWindow.destroy();
+	assert.deepEqual(destroyedEarly.callbackOrder, [
+		'reveal',
+		'visual-end',
+		'finished'
+	]);
+	assert.equal(destroyedEarly.scheduler.size, 0);
 });
 
 test('game readiness stays behind the intro then receives focus at the visual handoff', () => {

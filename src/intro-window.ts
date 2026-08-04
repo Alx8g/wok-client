@@ -242,6 +242,23 @@ export function startIntroSequence(options: IntroSequenceOptions): IntroSequence
 			console.error(`Launch intro ${label} callback failed`, error);
 		}
 	};
+	/*
+	 * Every touch of the Electron window goes through this.
+	 *
+	 * An intro window that has already gone away throws from ordinary members - reading
+	 * `webContents` on a destroyed window is the common one - and this sequence is what reveals the
+	 * game. An exception halfway through the handoff used to skip the reveal entirely and leave an
+	 * always-on-top window over a game window that was never shown, which is the intro's version of
+	 * the stuck loading screen. The window operations are the optional part here; the callbacks
+	 * are not.
+	 */
+	const safely = (label: string, action: () => void) => {
+		try {
+			action();
+		} catch (error) {
+			console.error(`Launch intro ${label} failed`, error);
+		}
+	};
 
 	let introWindow: BrowserWindow;
 	try {
@@ -330,7 +347,9 @@ export function startIntroSequence(options: IntroSequenceOptions): IntroSequence
 		if (visualEnded) return;
 		runReveal();
 		visualEnded = true;
-		if (!introWindow.isDestroyed() && introWindow.isVisible()) introWindow.hide();
+		safely('hide', () => {
+			if (!introWindow.isDestroyed() && introWindow.isVisible()) introWindow.hide();
+		});
 		runCallback(onVisualEnd, 'visual-end');
 	};
 
@@ -340,10 +359,14 @@ export function startIntroSequence(options: IntroSequenceOptions): IntroSequence
 	const finish = () => {
 		if (finished) return;
 		finished = true;
-		clearTimers();
-		introWindow.webContents.removeListener('media-paused', onMediaPaused);
+		safely('timer cleanup', clearTimers);
+		safely('listener cleanup', () => {
+			introWindow.webContents.removeListener('media-paused', onMediaPaused);
+		});
 		runVisualEnd();
-		if (!introWindow.isDestroyed()) introWindow.destroy();
+		safely('destroy', () => {
+			if (!introWindow.isDestroyed()) introWindow.destroy();
+		});
 		runCallback(onFinished, 'finished');
 	};
 
@@ -355,7 +378,9 @@ export function startIntroSequence(options: IntroSequenceOptions): IntroSequence
 
 	introWindow.webContents.once('media-started-playing', () => {
 		mediaStarted = true;
-		scheduler.clear(mediaStartTimeout);
+		safely('media-start timer', () => {
+			scheduler.clear(mediaStartTimeout);
+		});
 		timers.delete(mediaStartTimeout);
 		// Anchor the sequence to real playback rather than to page load, so a slow first-frame
 		// decode shifts the whole timeline instead of truncating the animation.
@@ -376,14 +401,21 @@ export function startIntroSequence(options: IntroSequenceOptions): IntroSequence
 	introWindow.on('closed', finish);
 
 	introWindow.once('ready-to-show', () => {
-		if (introWindow.isDestroyed()) return;
-		// showInactive, never show: the game window must keep the focus it will need.
-		introWindow.showInactive();
+		safely('show', () => {
+			if (introWindow.isDestroyed()) return;
+			// showInactive, never show: the game window must keep the focus it will need.
+			introWindow.showInactive();
+		});
 	});
 
-	introWindow.loadFile(pathJoin(assetsPath, 'intro.html'), {
-		query: { source, asset: timing.asset, visualMs: String(timing.visualMs) }
-	}).catch(finish);
+	try {
+		introWindow.loadFile(pathJoin(assetsPath, 'intro.html'), {
+			query: { source, asset: timing.asset, visualMs: String(timing.visualMs) }
+		}).catch(finish);
+	} catch (error) {
+		console.error('Launch intro failed to load its asset', error);
+		finish();
+	}
 
 	return { cancel: finish };
 }

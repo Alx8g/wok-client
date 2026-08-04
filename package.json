@@ -5,10 +5,11 @@
 	"private": true,
 	"description": "Hardware-adaptive, performance-focused Krunker desktop client based on Crankshaft",
 	"main": "./bundle/main.mjs",
+	"desktopName": "wok-client.desktop",
 	"type": "module",
 	"scripts": {
 		"postinstall": "node scripts/install-electron.mjs",
-		"start": "node scripts/bundle.mjs && electron-forge start -- --ozone-platform=x11",
+		"start": "node scripts/bundle.mjs && node scripts/start-electron.mjs",
 		"make": "node scripts/bundle.mjs && node scripts/verify-bundle.mjs && electron-forge make",
 		"bundle": "node scripts/bundle.mjs",
 		"bundle:verify": "node scripts/bundle.mjs && node scripts/verify-bundle.mjs",

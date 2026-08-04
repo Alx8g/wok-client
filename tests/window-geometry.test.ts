@@ -43,6 +43,7 @@ test('borderless is a plain frameless window covering the display bounds, with n
 		fullscreenable: false,
 		height: 1440,
 		resizable: false,
+		roundedCorners: false,
 		width: 2560,
 		x: 0,
 		y: 0
@@ -51,6 +52,15 @@ test('borderless is a plain frameless window covering the display bounds, with n
 	// reimplementation must never reintroduce it, silently or otherwise.
 	assert.equal('kiosk' in geometry, false);
 	assert.equal('center' in geometry, false);
+});
+
+test('borderless opts out of the Linux rounded-corner default so the screen corners stay square', () => {
+	// Electron 43 turned roundedCorners on by default for frameless windows on Linux. A window the
+	// size of the display would then have the compositor round off the corners of the game itself.
+	assert.equal(resolveGameplayWindowGeometry('borderless', display, WINDOW_SCALE).roundedCorners, false);
+	for (const mode of ['windowed', 'maximized', 'fullscreen']) {
+		assert.equal('roundedCorners' in resolveGameplayWindowGeometry(mode, display, WINDOW_SCALE), false);
+	}
 });
 
 test('borderless follows the display origin, not an assumed 0,0', () => {

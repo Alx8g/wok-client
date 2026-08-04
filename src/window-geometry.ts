@@ -20,6 +20,10 @@ export type GameplayDisplay = Pick<Display, 'bounds' | 'size'>;
  * without explicit coordinates a chosen secondary monitor is silently ignored. Placement stays
  * opt-in rather than unconditional so the default (primary) path keeps the exact centring Electron
  * has always done for it, work area and all.
+ *
+ * `roundedCorners: false` is load-bearing on Linux: Electron 43 made frameless windows default to
+ * rounded corners wherever the desktop supports client-side decorations, which on a window sized to
+ * the whole display means the compositor rounds off the four screen corners of the game.
  */
 export function resolveGameplayWindowGeometry(
 	mode: string,
@@ -34,7 +38,10 @@ export function resolveGameplayWindowGeometry(
 			fullscreenable: false,
 			height: display.bounds.height,
 			resizable: false,
+			roundedCorners: false,
 			width: display.bounds.width,
+			// Wayland does not let clients place their own windows, so x/y are honoured on Windows,
+			// macOS and X11 and ignored by the compositor on Wayland.
 			x: display.bounds.x,
 			y: display.bounds.y
 		};

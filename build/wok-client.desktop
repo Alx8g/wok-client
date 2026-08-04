@@ -1,0 +1,15 @@
+[Desktop Entry]
+Version=1.5
+Type=Application
+Name=WOK Client
+GenericName=Krunker Client
+Comment=Hardware-adaptive, performance-focused Krunker desktop client
+Exec=wok-client %U
+Icon=wok-client
+Terminal=false
+StartupNotify=true
+StartupWMClass=wok-client
+Categories=Game;ActionGame;
+Keywords=krunker;fps;shooter;wok;
+MimeType=x-scheme-handler/wok;x-scheme-handler/crankshaft;
+X-AppImage-Name=wok-client

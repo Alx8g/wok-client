@@ -2,12 +2,17 @@ import { app } from 'electron';
 import type { FramePolicy } from './calibration.ts';
 import { computeCommandLineSwitches } from './command-line-switches.ts';
 import type { AppliedGraphicsBackend } from './graphics-profile.ts';
+import { describeLinuxDisplaySession } from './linux-session.ts';
 
 /** applies command line switches to the app based on the passed userprefs */
 export function applyCommandLineSwitches(userPrefs: UserPrefs, graphicsBackend: AppliedGraphicsBackend, framePolicy?: FramePolicy) {
 
-	// works as a cli flag, but not w/ appendSwitch. why.
-	// app.commandLine.appendSwitch("ozone-platform", "x11")
+	// The ozone platform is deliberately absent here. Chromium resolves it in
+	// PreEarlyInitialization, before this file is even loaded, which is why appendSwitch never
+	// worked for it. The launcher (the packaged wok-client wrapper, or scripts/start-electron.mjs)
+	// passes it as argv; see src/linux-session.ts.
+	const displaySession = describeLinuxDisplaySession(process.platform, process.argv, process.env);
+	if (displaySession) console.log(displaySession);
 
 	for (const commandLineSwitch of computeCommandLineSwitches(userPrefs, graphicsBackend, framePolicy)) {
 		if (commandLineSwitch.value === undefined) app.commandLine.appendSwitch(commandLineSwitch.name);

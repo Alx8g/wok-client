@@ -4,6 +4,7 @@ import { MakerDMG } from "@electron-forge/maker-dmg";
 import { MakerNSIS } from "./MakerNSIS.ts";
 import { copyFileSync, existsSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { renderLinuxLauncherScript } from './src/linux-session.ts';
 import { verifyPackagedApplication } from './scripts/verify-package.mjs';
 import { BUNDLED_THEMES, THEME_LAYER_ASSETS, themeAssetName } from './src/themes.ts';
 
@@ -113,11 +114,22 @@ export default {
         new MakerAppImage({
             options: {
                 bin: "wok-client",
-                categories: ["Game"],
                 icon: "./build/icon.png",
-                mimeType: ["x-scheme-handler/wok", "x-scheme-handler/crankshaft"]
-            },
-            
+                name: "wok-client",
+                // The maker writes its desktop entry to `${productName}.desktop` and names the
+                // AppImage from it too, so the Forge app name ("WOK Client") produced a
+                // "WOK Client.desktop" that is invalid under the desktop-entry file-naming spec and
+                // can never match the `wok-client` XDG app id Electron reports (package.json
+                // `desktopName`). Naming it after the executable fixes icon and window matching on
+                // both Wayland (app_id) and X11 (WM_CLASS), and drops the space from the released
+                // artifact name.
+                productName: "wok-client",
+                // Supplying the entry keeps the human-readable Name and adds StartupWMClass, which
+                // the generated one cannot express once productName is the file name. It also owns
+                // Categories, MimeType and Keywords now: the maker ignores those options whenever
+                // desktopFile is set.
+                desktopFile: "./build/wok-client.desktop"
+            }
         }),
         new MakerDMG({
             icon: "./build/icon.icns",
@@ -141,16 +153,16 @@ export default {
                 if (platform === "linux" || platform === "win32") pruneChromiumLocales(buildPath);
                 if (platform === "linux") {
                     const exeName = config.packagerConfig.executableName;
+                    if (!exeName) throw new Error("packagerConfig.executableName is required to build the Linux launcher.");
                     const realBin = join(buildPath, `${exeName}.bin`);
                     const wrapper = join(buildPath, exeName);
 
                     renameSync(wrapper, realBin);
 
-                    writeFileSync(
-                        wrapper,
-                        `#!/bin/sh\nDIR="$(dirname "$(readlink -f "$0")")"\nexec "$DIR/${exeName}.bin" --ozone-platform=x11 "$@"\n`,
-                        { mode: 0o755 }
-                    );
+                    // Chromium picks its ozone platform before any application code runs, so the
+                    // session detection has to happen in this launcher. Generated from
+                    // src/linux-session.ts so the shipped shell and the tested resolver agree.
+                    writeFileSync(wrapper, renderLinuxLauncherScript(exeName), { mode: 0o755 });
                 }
 
                 const verification = verifyPackagedApplication({

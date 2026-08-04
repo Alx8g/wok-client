@@ -38,6 +38,16 @@ export {
 } from './matchmaker-data.ts';
 
 const MATCHMAKER_REQUEST_TIMEOUT_MS = 10_000;
+/**
+ * The searching state has to be visible long enough to read.
+ *
+ * A search with warm filters and a cached ping resolves in a few hundred milliseconds, so the
+ * searching view was being replaced before the user could see it had appeared at all - the
+ * feedback existed but nobody could perceive it. Holding the result briefly costs nothing a
+ * player notices and is the difference between "it searched" and "something flashed".
+ */
+const MATCHMAKER_MINIMUM_SEARCH_VISIBLE_MS = 750;
+
 const MATCHMAKER_GAME_LIST_URL = 'https://matchmaker.krunker.io/game-list';
 /** How long the "Search Cancelled" confirmation stays up before it clears itself. */
 const MATCHMAKER_CANCELLED_POPUP_MS = 1_400;
@@ -307,6 +317,24 @@ function showMatchmakerNoGamesPopup(criteria: IMatchmakerCriteria) {
 	showMatchmakerPopup(matchmakerNoGamesView(criteria, hotkeyLabels, openServerWindow));
 }
 
+/**
+ * Waits out the remainder of the minimum searching window. Aborts immediately if the search was
+ * superseded, so a rapid re-search is never delayed by the previous one's floor.
+ */
+function holdSearchingViewUntilReadable(shownAt: number, request: AbortController): Promise<void> {
+	const remaining = MATCHMAKER_MINIMUM_SEARCH_VISIBLE_MS - (Date.now() - shownAt);
+	if (remaining <= 0 || request.signal.aborted) return Promise.resolve();
+	return new Promise<void>(resolve => {
+		const finish = () => {
+			window.clearTimeout(timer);
+			request.signal.removeEventListener('abort', finish);
+			resolve();
+		};
+		const timer = window.setTimeout(finish, remaining);
+		request.signal.addEventListener('abort', finish, { once: true });
+	});
+}
+
 function showMatchmakerSearchingPopup(criteria: IMatchmakerCriteria): boolean {
 	popupElement.style.backgroundImage = '';
 	if (!showMatchmakerPopup(matchmakerSearchingView(criteria, hotkeyLabels))) return false;
@@ -413,6 +441,7 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		abortActiveMatchmakerSearch();
 		return;
 	}
+	const searchingShownAt = Date.now();
 
 	let timedOut = false;
 	const timeoutHandle = window.setTimeout(() => {
@@ -461,6 +490,8 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			rankedCandidates,
 			freshCandidates
 		);
+		await holdSearchingViewUntilReadable(searchingShownAt, request);
+		assertCurrentMatchmakerRequest(request);
 		if (selectedGame) showMatchmakerLobbyPopup(selectedGame, matchmakerRegionLatency(latencies, selectedGame.region));
 		else showMatchmakerNoGamesPopup(criteria);
 	} catch (error) {

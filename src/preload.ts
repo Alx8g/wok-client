@@ -924,6 +924,11 @@ let customIdentityTeardownRegistered = false;
  * live-applies through the same module, an unset identity starts nothing at all, and the unload
  * hook disconnects the observer and hands the game's own text back.
  */
+function traceStartup(message: string) {
+	if (!process.env.WOK_FIND_IDENTITY) return;
+	ipcRenderer.send('wok_identity_probe', `[wok-identity] startup: ${message}`);
+}
+
 function startCustomIdentity(_userPrefs: UserPrefs) {
 	if (process.env.WOK_FIND_IDENTITY) {
 		setCustomIdentityDiagnostic(message => { ipcRenderer.send('wok_identity_probe', `[wok-identity] ${message}`); });
@@ -956,6 +961,7 @@ function injectKeyframeFix() {
  * idempotent per document and later calls reconcile preference changes (reload flow).
  */
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
+	traceStartup(`applyClientVisuals entered; readyState=${document.readyState} body=${document.body ? 'present' : 'null'}`);
 	applyClientHotkeys(_userPrefs);
 	observeGameUsable();
 
@@ -995,10 +1001,13 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 		// Each step is isolated: these are independent features, and one throwing must not silently
 		// cancel the ones queued behind it. That is exactly how the custom identity stopped
 		// starting - a null document.body in injectKeyframeFix took the rest of the callback with it.
+		traceStartup('whenDOMReady callback running');
 		const step = (name: string, run: () => void) => {
 			try {
 				run();
+				traceStartup(`step '${name}' ok`);
 			} catch (error) {
+				traceStartup(`step '${name}' FAILED: ${String(error)}`);
 				strippedConsole.error(`WOK Client step '${name}' failed`, error);
 			}
 		};

@@ -18,7 +18,7 @@ import { probeMenuStructure } from './menu-dom-probe.ts';
 import { formatIdentityContext, formatIdentityProbe, probeIdentitySources } from './identity-source-probe.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
-import { applyCustomIdentity, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
+import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
 import { resolveTheme } from './themes.ts';
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
@@ -925,6 +925,9 @@ let customIdentityTeardownRegistered = false;
  * hook disconnects the observer and hands the game's own text back.
  */
 function startCustomIdentity(_userPrefs: UserPrefs) {
+	if (process.env.WOK_FIND_IDENTITY) {
+		setCustomIdentityDiagnostic(message => { ipcRenderer.send('wok_identity_probe', `[wok-identity] ${message}`); });
+	}
 	applyCustomIdentity(_userPrefs);
 	if (customIdentityTeardownRegistered) return;
 	customIdentityTeardownRegistered = true;

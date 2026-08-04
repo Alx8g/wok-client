@@ -115,6 +115,8 @@ export function startRealIdentityDiscovery(options: RealIdentityDiscoveryOptions
 /** The ambient pieces of the renderer the runtime needs, injected so tests can supply their own. */
 export interface CustomIdentityEnvironment {
 	clearTimer(handle: number): void;
+	/** Optional diagnostic sink; set only when the identity probe is enabled. */
+	onDiagnostic?(message: string): void;
 	createObserver(callback: (records: readonly IdentityMutationRecord[]) => void): {
 		disconnect(): void;
 		observe(target: IdentityRewriteNode, options?: unknown): void;
@@ -141,6 +143,7 @@ function ambientEnvironment(): CustomIdentityEnvironment | undefined {
 		getGameActivity: () => (typeof window.getGameActivity === 'function'
 			? () => window.getGameActivity()
 			: undefined),
+		...(diagnosticSink ? { onDiagnostic: diagnosticSink } : {}),
 		root: () => document.body as unknown as IdentityRewriteNode,
 		// One frame of batching. Replacements land before the next paint, so nothing is ever seen
 		// with the real name on it, and a burst of mutations still costs a single walk.
@@ -155,6 +158,13 @@ let engine: IdentityRewriteEngine | undefined;
 let stopDiscovery: (() => void) | undefined;
 let currentIdentity: CustomIdentity = EMPTY_CUSTOM_IDENTITY;
 let configuredReal: CustomIdentity = EMPTY_CUSTOM_IDENTITY;
+/** Set only while the identity probe is enabled, so normal sessions carry no diagnostic cost. */
+let diagnosticSink: ((message: string) => void) | undefined;
+
+export function setCustomIdentityDiagnostic(sink: (message: string) => void): void {
+	diagnosticSink = sink;
+}
+
 let discoveredName = '';
 let discoveredClan = '';
 let currentLabel = '';
@@ -270,10 +280,16 @@ function ensureDiscovery(): void {
 	// Nothing to search for and nothing to show: do not start polling at all.
 	if (currentIdentity.name === '' && currentIdentity.clan === '') return;
 
+	env.onDiagnostic?.(`discovery starting; custom name=${JSON.stringify(currentIdentity.name)} clan=${JSON.stringify(currentIdentity.clan)}`);
 	stopDiscovery = startRealIdentityDiscovery({
 		clearTimer: handle => { env.clearTimer(handle); },
-		getGameActivity: () => env.getGameActivity(),
+		getGameActivity: () => {
+			const activity = env.getGameActivity();
+			env.onDiagnostic?.(`poll: getGameActivity resolved to ${typeof activity}`);
+			return activity;
+		},
 		onName: name => {
+			env.onDiagnostic?.(`discovered real name ${JSON.stringify(name)}`);
 			if (name === discoveredName) return;
 			discoveredName = name;
 			reconcile();

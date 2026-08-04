@@ -102,7 +102,7 @@ interface TrialDriverOptions {
 	config?: Partial<BenchmarkTrialConfig>;
 	ext?: BenchmarkTimerQueryExt | null;
 	fake?: FakeGl;
-	frameIntervalMs?: number;
+	frameIntervalMs?: number | ((tickIndex: number) => number);
 	onTick?: (api: TrialDriverApi) => void;
 }
 
@@ -136,7 +136,7 @@ async function driveTrial(options: TrialDriverOptions = {}): Promise<{ fake: Fak
 	let tickIndex = 0;
 	while (frameQueue.length > 0 && tickIndex < 10_000) {
 		const callback = frameQueue.shift();
-		currentTime += interval;
+		currentTime += typeof interval === 'function' ? interval(tickIndex) : interval;
 		fake.currentTick = tickIndex;
 		options.onTick?.({
 			contaminate: reason => contaminate?.(reason),
@@ -324,7 +324,7 @@ test('warmup timer lateness cannot contaminate the first measured sampler callba
 	assert.equal(result.eventLoopWorstMs, 0);
 });
 
-test('severe event-loop lateness during measurement rejects the trial', async () => {
+test('timer starvation without a severe frame gap remains diagnostic evidence', async () => {
 	const { result } = await driveTrial({
 		onTick: api => {
 			if (api.tickIndex === 25) api.fireSampler();
@@ -332,9 +332,108 @@ test('severe event-loop lateness during measurement rejects the trial', async ()
 		}
 	});
 
+	assert.equal(result.rejected, false);
+	assert.deepEqual(result.rejectionReasons, []);
+	assert.ok(result.eventLoopWorstMs >= 100);
+	assert.ok(result.worstFrameTimeMs < 100);
+});
+
+test('GPU fence stalls cannot corroborate timer starvation while animation callbacks stay regular', async () => {
+	const stalledFrame = 12;
+	const pollsRequired = 7;
+	const { result } = await driveTrial({
+		fake: createFakeGl({
+			statusPollsRequired: frameIndex => (
+				frameIndex === stalledFrame ? pollsRequired : 1
+			)
+		}),
+		onTick: api => {
+			if (api.tickIndex === 25) api.fireSampler();
+			if (api.tickIndex === 33) api.fireSampler();
+		}
+	});
+
+	assert.ok(result.eventLoopWorstMs >= 100);
+	assert.ok(result.worstFrameTimeMs >= 100, 'the fence stall must stretch submitted-frame evidence');
+	assert.equal(result.stalledTicks, pollsRequired - 1);
+	assert.equal(result.rejected, false);
+	assert.deepEqual(result.rejectionReasons, []);
+});
+
+test('severe event-loop lateness corroborated by a severe frame gap rejects the trial', async () => {
+	const { result } = await driveTrial({
+		config: {
+			benchmarkMs: 600,
+			minSamples: 2,
+			warmupSettleFrames: 1
+		},
+		frameIntervalMs: 120,
+		onTick: api => {
+			if (api.tickIndex === 4 || api.tickIndex === 5) api.fireSampler();
+		}
+	});
+
 	assert.equal(result.rejected, true);
 	assert.deepEqual(result.rejectionReasons, ['severe-event-loop-disturbance']);
 	assert.ok(result.eventLoopWorstMs >= 100);
+	assert.ok(result.worstFrameTimeMs >= 100);
+});
+
+test('an exact-threshold callback gap corroborates severe timer starvation', async () => {
+	const { result } = await driveTrial({
+		frameIntervalMs: tickIndex => (tickIndex === 25 ? 100 : 20),
+		onTick: api => {
+			if (api.tickIndex === 18 || api.tickIndex === 25) api.fireSampler();
+		}
+	});
+
+	assert.ok(result.eventLoopWorstMs >= 100);
+	assert.ok(result.worstFrameTimeMs >= 100);
+	assert.equal(result.rejected, true);
+	assert.ok(result.rejectionReasons.includes('severe-event-loop-disturbance'));
+});
+
+test('sub-threshold timer lateness does not reject an exact-threshold callback gap', async () => {
+	const { result } = await driveTrial({
+		frameIntervalMs: tickIndex => (tickIndex === 25 ? 100 : 20),
+		onTick: api => {
+			if (api.tickIndex === 24 || api.tickIndex === 25) api.fireSampler();
+		}
+	});
+
+	assert.ok(result.eventLoopWorstMs < 100);
+	assert.ok(result.worstFrameTimeMs >= 100);
+	assert.equal(result.rejected, false);
+	assert.deepEqual(result.rejectionReasons, []);
+});
+
+test('callback intervals just below the severe threshold do not corroborate timer starvation', async () => {
+	const { result } = await driveTrial({
+		frameIntervalMs: tickIndex => (tickIndex === 25 ? 99.9 : 16.7),
+		onTick: api => {
+			if (api.tickIndex === 18 || api.tickIndex === 25) api.fireSampler();
+		}
+	});
+
+	assert.ok(result.eventLoopWorstMs >= 100);
+	assert.ok(result.worstFrameTimeMs < 100);
+	assert.equal(result.rejected, false);
+	assert.deepEqual(result.rejectionReasons, []);
+});
+
+test('callback gaps of one second or longer corroborate severe timer starvation', async () => {
+	for (const callbackGapMs of [1_000, 1_200]) {
+		const { result } = await driveTrial({
+			frameIntervalMs: tickIndex => (tickIndex === 25 ? callbackGapMs : 16.7),
+			onTick: api => {
+				if (api.tickIndex === 24 || api.tickIndex === 25) api.fireSampler();
+			}
+		});
+
+		assert.ok(result.eventLoopWorstMs >= 100, `${callbackGapMs} ms timer evidence`);
+		assert.equal(result.rejected, true, `${callbackGapMs} ms callback gap must reject`);
+		assert.ok(result.rejectionReasons.includes('severe-event-loop-disturbance'));
+	}
 });
 
 test('too few submitted frames reject the trial as insufficient-samples', async () => {

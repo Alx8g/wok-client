@@ -262,14 +262,31 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'uncapped');
 });
 
-test('v4 signatures stamp the current benchmark and workload versions', () => {
-	// Benchmark 4 = depth-6 fence pacing; workload 4 = the render lane rebuilt to the measured
-	// Krunker census (23 draws / 17 program switches / 20 texture binds per frame) plus the
-	// main-thread entity lane. Both bumps invalidate every earlier verdict through the signature.
-	assert.equal(CALIBRATION_VERSION, 4);
+test('v5 signatures stamp the current benchmark and workload versions', () => {
+	// Benchmark 5 adds independent animation-callback corroboration to the depth-6 fence pacing
+	// policy; workload 4 remains the measured Krunker render and main-thread entity lanes.
+	assert.equal(CALIBRATION_VERSION, 5);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
 	assert.equal(WORKLOAD_VERSION, 4);
+});
+
+test('completed v4 evidence stays active but becomes stale under the v5 benchmark policy', () => {
+	const candidates = createWindowsCandidates();
+	const versionFourSignature = signatureWith({ benchmarkVersion: 4 });
+	let completed = startRunWithOrder(
+		prepareCalibrationState(undefined, versionFourSignature, candidates, true),
+		candidates[0].id
+	);
+	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
+	completed = completeCalibration(finalizeCalibration(completed), true);
+
+	const prepared = prepareCalibrationState(completed, signature, candidates, true);
+	assert.equal(prepared.signatureStale, true);
+	assert.equal(prepared.status, 'complete');
+	assert.equal(prepared.signature.benchmarkVersion, 4);
+	assert.equal(prepared.activeSelection?.candidate.id, completed.activeSelection?.candidate.id);
+	assert.equal(calibrationResumeRequired(prepared), false);
 });
 
 test('treats app version as informational while relevant signature fields invalidate', () => {
@@ -559,13 +576,22 @@ test('retry orchestration fails closed when the retry-count transition cannot pe
 	assert.equal(state.rejectedAttempts.length, 1);
 });
 
-test('trial page renders retry messaging only for a second attempt', () => {
+test('trial page renders the prior rejection reason only for a second attempt', () => {
 	const candidate = createWindowsCandidates()[0];
 	const firstAttempt = buildCalibrationTrialPage(candidate, 1, 2, '<svg></svg>');
-	const retryAttempt = buildCalibrationTrialPage(candidate, 1, 2, '<svg></svg>', { attempt: 2 });
+	const retryAttempt = buildCalibrationTrialPage(candidate, 1, 2, '<svg></svg>', {
+		attempt: 2,
+		previousEventLoopWorstMs: 115.6,
+		previousRejectionReasons: ['severe-event-loop-disturbance', 'power-state-changed']
+	});
 
 	assert.doesNotMatch(firstAttempt, /class="pill retry"/);
+	assert.doesNotMatch(firstAttempt, /115\.6 ms timer delay/);
 	assert.match(retryAttempt, /class="pill retry"/);
+	assert.match(
+		retryAttempt,
+		/severe event-loop disturbance \(115\.6 ms timer delay\), AC\/battery power changed/
+	);
 	assert.match(retryAttempt, /running again/);
 	assert.match(retryAttempt, /warning visible/);
 });

@@ -115,6 +115,66 @@ node scripts/generate-installer-art.mjs --check
 
 Edit a brand vector, rerun the generator, and commit the bitmaps. `pnpm test` fails when the committed bitmaps no longer match the generator output, and the maker regenerates them if a checkout is missing them.
 
+## Linux: Wayland and X11
+
+WOK Client picks its display server at launch. If the session looks like Wayland it runs as a
+native Wayland application; otherwise it runs on X11, which inside a Wayland session means
+XWayland. The session is Wayland when `WAYLAND_DISPLAY` is set, or when `XDG_SESSION_TYPE` is
+exactly `wayland`.
+
+This is a deliberate change from earlier versions, which always passed `--ozone-platform=x11`.
+Electron has defaulted to native Wayland since Electron 38; WOK ships Electron 44, so the forced
+X11 was an override of the framework's own default. XWayland adds a composition and pacing layer,
+is upscaled by the compositor on fractional-scaling desktops, and is the path affected by
+[mutter#3765](https://gitlab.gnome.org/GNOME/mutter/-/issues/3765), where the pointer escapes a
+window that has locked it. Native Wayland avoids all three.
+
+Detecting `WAYLAND_DISPLAY` is what WOK adds over Electron's own detection, which reads only
+`XDG_SESSION_TYPE`. Sessions started from a TTY, from some display managers, or inside some
+containers leave that variable unset and would otherwise silently fall back to X11.
+
+To override, set `WOK_OZONE_PLATFORM` before launching:
+
+| Value | Effect |
+| --- | --- |
+| `wayland` | Force native Wayland |
+| `x11` | Force X11, which is XWayland inside a Wayland session |
+| `auto` | Pass no flag and let Electron choose |
+
+```sh
+WOK_OZONE_PLATFORM=x11 ./wok-client-x64.AppImage
+```
+
+The value is matched exactly, in lower case. Anything else is ignored with a message on standard
+error and the session detection runs as usual, so a typo cannot leave the client unable to start.
+
+An environment variable rather than a setting, because Chromium resolves the display server before
+any of the client's own code runs, so a stored preference cannot be read in time.
+
+The client prints the display server it ended up on at startup, which is the first thing to check
+in a bug report. If pointer lock, window placement, or fullscreen misbehave on your desktop,
+`WOK_OZONE_PLATFORM=x11` restores the previous behaviour; please report what broke.
+
+Some Wayland behaviour is set by the compositor, not by the client, and differs from X11: the
+compositor decides where windows are placed, so borderless mode cannot position itself on a chosen
+monitor, and requests to raise or focus a window are advisory. Input-method (IME) support uses
+`text-input-v3`; `--enable-wayland-ime` can be appended if your input method needs the older path.
+
+### Not yet verified on a Linux desktop
+
+Linux packages are built and source-validated in CI but have not had a gameplay smoke test. If you
+run WOK on Linux, these are the things worth checking, in order:
+
+1. **Pointer lock.** Click into a match and turn continuously in one direction. The cursor must
+   stay captured and must not hit an invisible edge or reappear over another window. Press Escape
+   and confirm it releases, then click back in and confirm it recaptures. Check it windowed,
+   fullscreen and borderless, and on a fractionally scaled display if you have one.
+2. Fullscreen and borderless actually cover the monitor, with square corners and no gap.
+3. The window carries the WOK icon in the dock, the window switcher, and the window itself.
+4. `wok://` and `crankshaft://` links open the client, and F7 or Ctrl+F7 round-trips a game link.
+5. Multi-monitor and mixed-DPI setups: the client opens on the expected display and is not blurry.
+6. The launch animation window appears above the game and hands over without leaving a stray window.
+
 ## macOS quarantine
 
 Locally built or unsigned applications may be quarantined by macOS. Review the source and build provenance before clearing quarantine. If appropriate for your own build:

@@ -39,6 +39,13 @@
 - Reimplemented borderless mode as a plain frameless full-screen window and restored the option on Windows.
 - Graphics failures on a manually selected backend are now recorded and surfaced instead of being silently ignored.
 
+### Linux
+- The client now runs natively on Wayland when it is launched in a Wayland session, instead of always being forced through XWayland. XWayland added a second composition and pacing layer, blurred the picture on fractional-scaling desktops, and is the path affected by the compositor bug that lets the mouse escape a locked window when fractional scaling is on. The session is detected from `WAYLAND_DISPLAY` and `XDG_SESSION_TYPE`, and X11 remains the fallback when neither says Wayland.
+- Set `WOK_OZONE_PLATFORM=x11` to go back to XWayland, `WOK_OZONE_PLATFORM=wayland` to force native Wayland, or `WOK_OZONE_PLATFORM=auto` to let Electron decide. The client prints which display server it ended up on at startup.
+- Borderless mode no longer has its screen corners rounded off by the desktop.
+- Fixed the AppImage shipping a desktop entry named `WOK Client.desktop`, which is not a legal desktop-entry file name and could never be matched to the running window. The entry is now `wok-client.desktop` with a matching startup class and application id, so GNOME, KDE and friends show the WOK icon in the dock and the window switcher, and the `wok://` and `crankshaft://` links keep working. The released AppImage is now `wok-client-x64.AppImage`, with no space in the file name.
+- `pnpm start` no longer forces X11, including on Windows and macOS where the switch never meant anything.
+
 ## WOK Client 1.1.0-rc.3 (2026-08-03)
 
 ### WOK fixes

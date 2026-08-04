@@ -15,6 +15,7 @@ import {
 	startLoadingDeadline
 } from './loading-deadline.ts';
 import { probeMenuStructure } from './menu-dom-probe.ts';
+import { formatIdentityProbe, probeIdentitySources } from './identity-source-probe.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
@@ -51,6 +52,52 @@ if (process.env.WOK_DUMP_DOM) {
 	};
 	window.setTimeout(runProbe, 12_000);
 	window.setTimeout(runProbe, 30_000);
+}
+
+// Diagnostic-only hunt for where Krunker keeps the local player's name. Inert unless
+// WOK_FIND_IDENTITY is set. Automatic detection failed on a real account, so rather than guess
+// another source this searches for a name the user has already supplied and reports every hit.
+if (process.env.WOK_FIND_IDENTITY) {
+	const runIdentityProbe = () => {
+		const needle = process.env.WOK_FIND_IDENTITY ?? '';
+		const hits = probeIdentitySources({
+			needle,
+			readActivity: () => (typeof window.getGameActivity === 'function' ? window.getGameActivity() : undefined),
+			readGlobals: () => {
+				const globals: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(window)) {
+					if (/^(webkit|on|CSS|HTML|SVG|Audio|Media|RTC|IDB|WebGL|Speech|Performance)/u.test(key)) continue;
+					try {
+						const value = (window as unknown as Record<string, unknown>)[key];
+						if (value && (typeof value === 'object' || typeof value === 'string')) globals[key] = value;
+					} catch (_error) { /* a throwing getter is skipped */ }
+				}
+				return globals;
+			},
+			readStorage: () => {
+				const entries: Record<string, string> = {};
+				try {
+					for (let index = 0; index < localStorage.length; index++) {
+						const key = localStorage.key(index);
+						if (key) entries[key] = localStorage.getItem(key) ?? '';
+					}
+				} catch (_error) { /* storage may be unavailable */ }
+				return entries;
+			},
+			searchDom: value => {
+				const found: { location: string; sample: string }[] = [];
+				for (const element of document.querySelectorAll('[id]')) {
+					const text = (element.textContent ?? '').trim();
+					if (text.includes(value) && text.length < 400) found.push({ location: `#${element.id}`, sample: text });
+					if (found.length >= 12) break;
+				}
+				return found;
+			}
+		});
+		ipcRenderer.send('wok_identity_probe', formatIdentityProbe(hits));
+	};
+	window.setTimeout(runIdentityProbe, 15_000);
+	window.setTimeout(runIdentityProbe, 40_000);
 }
 
 // Diagnostic-only gameplay frame log. Inert unless WOK_FPS_LOG is set in the environment.

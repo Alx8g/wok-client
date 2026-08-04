@@ -810,6 +810,15 @@ ipcMain.on('wok_loading_diag', (event, line: unknown) => {
 	console.log(`[wok-load] ${line}`);
 });
 
+// Diagnostic-only identity-source hunt (WOK_FIND_IDENTITY).
+if (process.env.WOK_FIND_IDENTITY) {
+	ipcMain.on('wok_identity_probe', (event, text: unknown) => {
+		if (!isTrustedGameIpcSender(event)) return;
+		if (typeof text !== 'string' || text.length > 100_000) return;
+		console.log(text);
+	});
+}
+
 // Diagnostic-only Krunker menu probe (WOK_DUMP_DOM). Prints the real markup of a menu region.
 if (process.env.WOK_DUMP_DOM) {
 	ipcMain.on('wok_dom_probe', (event, text: unknown) => {

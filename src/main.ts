@@ -10,6 +10,7 @@ import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
 import { runBeforeDeadline } from './absolute-deadline.ts';
 import { createIntroGameWindowHandoff, getIntroWindowBounds, selectIntroSource, startIntroSequence, type IntroSequence } from './intro-window.ts';
+import { startLoadingDeadline, WINDOW_REVEAL_DEADLINE_MS } from './loading-deadline.ts';
 import {
 	createStartupProfile,
 	estimateProcessStartWallClockMs,
@@ -788,6 +789,20 @@ function isTrustedGameIpcSender(event: IpcMainEvent | IpcMainInvokeEvent): boole
 	if (event.senderFrame !== mainWindow.webContents.mainFrame) return false;
 	return parseKrunkerUrl(event.senderFrame.url, true) !== undefined;
 }
+
+/*
+ * Stuck-load diagnostics from the renderer's splash deadline.
+ *
+ * A launch that never becomes usable cannot be reproduced on demand, so the renderer always sends
+ * the overrun summary - what the readiness predicate could see at the deadline, and which page it
+ * was looking at - and sends the rest of the trace only under WOK_SPLASH_LOG. Printing it here puts
+ * it alongside the other WOK diagnostics rather than in a DevTools console nobody had open.
+ */
+ipcMain.on('wok_loading_diag', (event, line: unknown) => {
+	if (!isTrustedGameIpcSender(event)) return;
+	if (typeof line !== 'string' || line.length === 0 || line.length > 2_000) return;
+	console.log(`[wok-load] ${line}`);
+});
 
 // Diagnostic-only Krunker menu probe (WOK_DUMP_DOM). Prints the real markup of a menu region.
 if (process.env.WOK_DUMP_DOM) {
@@ -2037,6 +2052,16 @@ app.on('ready', async () => {
 		introHandoff.handleReadyToShow();
 	});
 
+	// Telling "the renderer never reported readiness" apart from "readiness arrived but the window
+	// stayed hidden" is the whole diagnosis of a stuck launch, so record the first signal here too.
+	let gameUsableReportedAt: number | undefined;
+	const noteGameUsable = (event: IpcMainEvent) => {
+		if (!isTrustedGameIpcSender(event) || gameUsableReportedAt !== undefined) return;
+		gameUsableReportedAt = Date.now();
+	};
+	ipcMain.on('wok_game_usable', noteGameUsable);
+	mainWindow.once('closed', () => { ipcMain.removeListener('wok_game_usable', noteGameUsable); });
+
 	const GRAPHICS_STABILITY_CONFIRMATION_MS = 30_000;
 	const graphicsStability = createGraphicsStabilityConfirmation({
 		delayMs: GRAPHICS_STABILITY_CONFIRMATION_MS,
@@ -2307,6 +2332,52 @@ app.on('ready', async () => {
 			introHandoff.revealForUse();
 		}
 	}
+
+	/*
+	 * Last line of defence for the launch itself.
+	 *
+	 * The game window is created hidden and is revealed by the intro or by ready-to-show. A renderer
+	 * that never paints - a hung lookup, a wedged GPU process, a navigation that neither finishes nor
+	 * fails - produces neither, and the renderer-side splash deadline cannot help because it lives in
+	 * that renderer. This shows the window anyway. It sits after the intro's own ceiling, so a
+	 * healthy launch has always resolved long before it can fire.
+	 */
+	const revealDeadline = startLoadingDeadline({
+		deadlineMs: WINDOW_REVEAL_DEADLINE_MS,
+		now: () => Date.now(),
+		onFailsafe: error => {
+			console.error('Forced game window reveal failed', error);
+			introHandoff.revealForUse();
+		},
+		onResolve: resolution => {
+			if (resolution.outcome !== 'overrun' || mainWindow.isDestroyed()) return;
+			const readiness = gameUsableReportedAt === undefined
+				? 'never'
+				: `after ${Math.round(gameUsableReportedAt - processStartWallClockMs)}ms`;
+			if (mainWindow.isVisible()) {
+				// Visible but not usable: the renderer owns this one, and has already said so.
+				console.log(`[wok-load] window visible-but-not-usable elapsed=${Math.round(resolution.elapsedMs)}ms gameUsable=${readiness}`);
+				return;
+			}
+			console.log(`[wok-load] window never-shown elapsed=${Math.round(resolution.elapsedMs)}ms gameUsable=${readiness}; showing it anyway`);
+			cancelActiveIntro?.();
+			introHandoff.revealForUse();
+		},
+		subscribe: listener => {
+			// Already visible: whatever revealed it got there first.
+			if (!mainWindow.isDestroyed() && mainWindow.isVisible()) {
+				listener();
+				return () => {};
+			}
+			const onShown = () => { listener(); };
+			mainWindow.once('show', onShown);
+			return () => {
+				if (!mainWindow.isDestroyed()) mainWindow.removeListener('show', onShown);
+			};
+		}
+	});
+	app.once('before-quit', revealDeadline.dispose);
+	mainWindow.once('closed', revealDeadline.dispose);
 
 	try {
 		await gameNavigation;

@@ -1,5 +1,14 @@
 ## WOK Client 1.1.0-rc.4 (2026-08-04)
 
+### Loading and startup
+- Fixed the client getting stuck on its own loading screen forever when Krunker never reported itself ready. The loading screen now has a 20-second ceiling: after that the client shows the real page, whatever state it is in, and says plainly that loading is taking longer than expected. Krunker's own loading screen, an error, or a login prompt is visible and clickable instead of hidden behind an opaque splash.
+- The notice disappears by itself if the game does finish loading afterwards, and can be dismissed.
+- The loading screen is now removed even when the loading animation, Krunker's markup, or the teardown itself fails, instead of being left mounted with nothing able to take it down.
+- The launch animation can no longer keep an always-on-top window over a game window that was never shown if one of its window operations fails partway through the handoff.
+- Added a main-process backstop that shows the game window if nothing else has after 25 seconds, covering a renderer that never paints at all.
+- Client additions to Krunker's own settings functions no longer throw into the game's code when its markup changes, which could stall the load they were called from.
+- A load that overruns now records what the readiness check could see at the time, so a stuck launch can be diagnosed afterwards instead of only reproduced. Set `WOK_SPLASH_LOG=1` for the full trace.
+
 ### Graphics calibration
 - Rebuilt the calibration benchmark after it was found to rank backends the opposite way real gameplay does. Its frame pacing could stall on itself on some drivers, its GPU timing queries taxed the very backend they measured, and its workload rendered a 1,000-draw stress scene when a real Krunker frame issues about 23 draws. The benchmark now renders a measured game frame and reproducibly selects the profile that is genuinely faster.
 - Trials whose numbers came from the benchmark's own pacing rather than the graphics backend are now marked as non-comparable evidence, kept out of every comparison, and shown as such on the results page instead of appearing as a real measurement.

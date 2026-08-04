@@ -51,3 +51,55 @@ html {
 	height: 100%;
 	width: 100%;
 }
+
+/*
+ * Shown only when the load overruns the client's deadline and the splash was taken away without
+ * the game ever reporting itself ready. The container must not take the page back: pointer events
+ * are re-enabled on the card alone, so everything the splash was covering stays clickable.
+ */
+.wok-loading-notice {
+	bottom: 0;
+	left: 0;
+	padding: 16px;
+	pointer-events: none;
+	position: fixed;
+	z-index: 2147483001;
+}
+
+.wok-loading-notice-card {
+	align-items: center;
+	background: rgba(10, 10, 10, 0.94);
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	border-radius: 6px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55);
+	box-sizing: border-box;
+	color: #f2f2f2;
+	display: flex;
+	font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif;
+	font-size: 14px;
+	gap: 14px;
+	line-height: 1.45;
+	max-width: 480px;
+	padding: 12px 14px;
+	pointer-events: auto;
+	text-align: left;
+}
+
+.wok-loading-notice-text {
+	flex: 1 1 auto;
+}
+
+.wok-loading-notice-dismiss {
+	background: rgba(255, 255, 255, 0.12);
+	border: 1px solid rgba(255, 255, 255, 0.24);
+	border-radius: 4px;
+	color: inherit;
+	cursor: pointer;
+	flex: 0 0 auto;
+	font: inherit;
+	padding: 6px 12px;
+}
+
+.wok-loading-notice-dismiss:hover {
+	background: rgba(255, 255, 255, 0.2);
+}

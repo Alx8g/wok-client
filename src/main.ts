@@ -789,6 +789,15 @@ function isTrustedGameIpcSender(event: IpcMainEvent | IpcMainInvokeEvent): boole
 	return parseKrunkerUrl(event.senderFrame.url, true) !== undefined;
 }
 
+// Diagnostic-only Krunker menu probe (WOK_DUMP_DOM). Prints the real markup of a menu region.
+if (process.env.WOK_DUMP_DOM) {
+	ipcMain.on('wok_dom_probe', (event, text: unknown) => {
+		if (!isTrustedGameIpcSender(event)) return;
+		if (typeof text !== 'string' || text.length > 200_000) return;
+		console.log(text);
+	});
+}
+
 // Diagnostic-only gameplay frame log (WOK_FPS_LOG). Emits one line per sampled window so a
 // backend A/B can be played uninterrupted; reading the overlay by hand perturbs the tail.
 if (process.env.WOK_FPS_LOG) {

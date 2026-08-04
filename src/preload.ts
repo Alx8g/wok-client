@@ -7,6 +7,7 @@ import { APP_PROTOCOL, LEGACY_APP_PROTOCOL, WEBSITE_URL } from './branding.ts';
 import { GameUsabilitySignal, observeGameUsability } from './game-usability.ts';
 import { installDrawCallCensus } from './draw-call-stats.ts';
 import { startGameplayFpsLog } from './gameplay-fps-log.ts';
+import { probeMenuStructure } from './menu-dom-probe.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader } from './weapon-particle-loader.ts';
 
@@ -26,6 +27,22 @@ if (process.env.WOK_DRAW_STATS) {
 			target: glPrototype
 		});
 	}
+}
+
+// Diagnostic-only Krunker menu probe. Inert unless WOK_DUMP_DOM is set in the environment.
+// Prints the real markup of a menu region so client features can be written against it instead
+// of against guessed selectors.
+if (process.env.WOK_DUMP_DOM) {
+	const keywords = (process.env.WOK_DUMP_DOM_KEYWORDS ?? 'live stream,featured,streaming').split(',');
+	const runProbe = () => {
+		probeMenuStructure({
+			keywords,
+			queryAll: selector => [...document.querySelectorAll(selector)],
+			report: text => { ipcRenderer.send('wok_dom_probe', text); }
+		});
+	};
+	window.setTimeout(runProbe, 12_000);
+	window.setTimeout(runProbe, 30_000);
 }
 
 // Diagnostic-only gameplay frame log. Inert unless WOK_FPS_LOG is set in the environment.

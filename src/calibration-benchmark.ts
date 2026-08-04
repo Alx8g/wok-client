@@ -84,6 +84,9 @@ export const BENCHMARK_REJECTION_REASONS = [
 ] as const;
 export type BenchmarkRejectionReason = (typeof BENCHMARK_REJECTION_REASONS)[number];
 
+/** Share of the progress bar owned by warmup; the measured phase owns the remainder. */
+export const BENCHMARK_PROGRESS_WARMUP_SHARE = 0.15;
+
 export const BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG = 'gpu-queue-exceeds-frame-budget';
 export const BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG = 'fence-pacing-dominates-frame-interval';
 
@@ -335,6 +338,7 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		}
 	};
 
+	let reportedProgress = 0;
 	let start: number | undefined;
 	let warmupMinEnd = 0;
 	let warmupHardEnd = 0;
@@ -420,9 +424,17 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 				lastFrameCallbackTs = timestamp;
 			}
 			if (hooks.onProgress) {
-				hooks.onProgress(measuring
-					? { phase: 'measure', ratio: Math.min(1, 1 - (measureEnd - timestamp) / config.benchmarkMs) }
-					: { phase: 'warmup', ratio: Math.min(1, (timestamp - start) / config.warmupMinMs) });
+				// Wall-clock and monotonic. Frame-derived progress freezes whenever frames are
+				// irregular (a stalled fence tick, a long warmup) and then jumps when they resume,
+				// which reads as a broken bar even though the trial is healthy. Warmup owns a
+				// fixed slice of the bar and the measured phase owns the rest, so the fill only
+				// ever advances at a rate the user can follow.
+				const warmupRatio = Math.min(1, (timestamp - start) / config.warmupMinMs);
+				const rawRatio = measuring
+					? BENCHMARK_PROGRESS_WARMUP_SHARE + (1 - BENCHMARK_PROGRESS_WARMUP_SHARE) * Math.min(1, 1 - (measureEnd - timestamp) / config.benchmarkMs)
+					: BENCHMARK_PROGRESS_WARMUP_SHARE * warmupRatio;
+				reportedProgress = Math.max(reportedProgress, Math.min(1, rawRatio));
+				hooks.onProgress({ phase: measuring ? 'measure' : 'warmup', ratio: reportedProgress });
 			}
 
 			// Bounded in-flight work: frame N waits for frame N-6's fence with a non-blocking

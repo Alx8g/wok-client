@@ -592,7 +592,7 @@ test('trial page renders the prior rejection reason only for a second attempt', 
 		retryAttempt,
 		/severe event-loop disturbance \(115\.6 ms timer delay\), AC\/battery power changed/
 	);
-	assert.match(retryAttempt, /running again/);
+	assert.match(retryAttempt, /running again/iu);
 	assert.match(retryAttempt, /warning visible/);
 });
 
@@ -619,7 +619,8 @@ test('result page displays low-confidence and backend-verification evidence with
 	assert.match(page, /WebGL context loss/);
 	assert.match(page, /severe event-loop disturbance/);
 	assert.match(page, /Effective renderer verified as d3d11on12/);
-	assert.match(page, /not an end-to-end input-latency measurement/);
+	// The page must never imply it measured input latency; it measures frame delivery only.
+	assert.ok(!/input.?latency/iu.test(page), 'the results page must not claim a latency measurement');
 	assert.doesNotMatch(page, /renderer-response estimate/);
 });
 
@@ -642,8 +643,10 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	assert.match(page, /2 trials, median shown/);
 	assert.match(page, /Trial 1:/);
 	assert.match(page, /Trial 2:/);
-	assert.match(page, /provisionally/);
-	assert.match(page, /automatically reverts to the previous profile/);
+	// The page must still promise provisional application and automatic revert, in plain language.
+	assert.match(page, /confirm this profile/iu);
+	assert.match(page, /switches back on its own/iu);
+	assert.match(page, /switches back on its own/iu);
 });
 
 test('a fence-pacing artifact invalidates the comparison and keeps the current backend', () => {
@@ -757,7 +760,7 @@ test('the results page explains an artifact-affected verdict instead of claiming
 	const finalized = finalizeCalibration(state);
 
 	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
-	assert.ok(page.includes('could not fairly compare'), 'summary must explain the invalidated comparison');
+	assert.ok(page.includes('could not compare these fairly'), 'summary must explain the invalidated comparison');
 	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
 	assert.ok(page.includes('not comparable'), 'the artifact score must not print as a number');
 	assert.ok(!page.includes('The strongest measured profile'), 'must not claim a measured win');

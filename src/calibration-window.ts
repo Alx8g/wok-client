@@ -118,7 +118,7 @@ function sharedStyles(): string {
 			.pill { padding: 7px 10px; border: 1px solid #383838; background: #181818; color: #D7D7D7; font: 600 12px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace; }
 			.pill.retry { border-color: #725F1A; color: #E6D083; }
 			.progress-track { height: 10px; border: 1px solid #3A3A3A; background: #080808; overflow: hidden; }
-			.progress-fill { width: 0; height: 100%; background: #FBC02D; transition: width 80ms linear; }
+			.progress-fill { width: 100%; height: 100%; background: #FBC02D; transform: scaleX(0); transform-origin: left center; transition: transform 240ms cubic-bezier(.4,0,.2,1); will-change: transform; }
 			.status { display: flex; justify-content: space-between; gap: 20px; margin-top: 10px; color: #8F8F8F; font: 600 12px/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; }
 			.warning { display: none; margin-top: 16px; border: 1px solid #725F1A; background: #1D190B; color: #E6D083; padding: 10px 12px; font-size: 12px; line-height: 1.45; }
 			.warning.visible { display: block; }
@@ -211,8 +211,8 @@ export function buildCalibrationTrialPage(
 		})
 		.join(', ');
 	const retryWarning = previousReasonText
-		? `The previous attempt detected ${previousReasonText}, so this trial is running again.`
-		: 'Interference was detected, so this trial is running again.';
+		? `Interrupted: ${previousReasonText}. Running again.`
+		: 'Interrupted &mdash; running this test again.';
 	const trialDefaults = {
 		benchmarkMs: CALIBRATION_BENCHMARK_MS,
 		minSamples: CALIBRATION_MIN_SAMPLES,
@@ -241,8 +241,8 @@ export function buildCalibrationTrialPage(
 			<div class="accent"></div>
 			<section class="content">
 				${brandMarkup(markSvg)}
-				<h1>Comparing renderer profiles</h1>
-				<p>WOK Client is rendering a representative scene to measure frame delivery, 1% lows, frame pacing, GPU completion, and event-loop disturbance. Avoid moving, hiding, or covering this window: an interfered trial is retried once, then reported as lower confidence.</p>
+				<h1>Measuring graphics profiles</h1>
+				<p>Leave this window alone until it finishes.</p>
 				<div class="meta">
 					<span class="pill">TEST ${step} / ${total}</span>
 					${isRetry ? '<span class="pill retry">RETRY</span>' : ''}
@@ -252,9 +252,9 @@ export function buildCalibrationTrialPage(
 				<div class="progress-track"><div class="progress-fill" id="progress"></div></div>
 				<div class="status"><span id="phase">Preparing renderer</span><span id="live">Collecting samples</span></div>
 				<div class="warning${isRetry ? ' visible' : ''}" id="warning">${isRetry
-					? `${escapeHtml(retryWarning)} If it is interfered with once more, the better attempt is kept as lower-confidence evidence.`
-					: 'This trial has lower-confidence evidence. Measurement will continue and the reason will be shown with the result.'}</div>
-				<div class="privacy">This calibration is local. The private test build does not transmit benchmark results.</div>
+					? escapeHtml(retryWarning)
+					: 'This test was disturbed; the result will be marked lower confidence.'}</div>
+				<div class="privacy">Runs locally. Nothing is sent anywhere.</div>
 			</section>
 		</main>
 		<script>
@@ -328,12 +328,12 @@ export function buildCalibrationTrialPage(
 					if (!force && now - lastUiUpdate < UI_UPDATE_INTERVAL_MS) return;
 					lastUiUpdate = now;
 					if (update.phase === 'warmup') {
-						progress.style.width = Math.round(update.ratio * 12) + '%';
-						phase.textContent = 'Warming up renderer (adaptive)';
+						progress.style.transform = 'scaleX(' + update.ratio + ')';
+						phase.textContent = 'Warming up';
 						live.textContent = 'Waiting for steady state';
 					} else {
-						progress.style.width = Math.round(12 + update.ratio * 88) + '%';
-						phase.textContent = 'Measuring frame delivery';
+						progress.style.transform = 'scaleX(' + update.ratio + ')';
+						phase.textContent = 'Measuring';
 						live.textContent = 'Collecting samples';
 					}
 					// Feed text updates at most 5 Hz through this throttled updater (design §1.2).
@@ -508,11 +508,11 @@ export function buildCalibrationResultPage(
 	const artifactAffected = results.some(result => (result.metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
 	const summary = recommended
 		? retainedKnownGood
-			? `The new evidence did not meaningfully beat the existing known-good <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it remains recommended.`
+			? `Nothing beat your current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it stays.`
 			: artifactAffected
-				? `The benchmark could not fairly compare these profiles (its own frame pacing dominated at least one trial), so the current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile is kept. Your next play sessions confirm it against real gameplay, which the benchmark cannot fake.`
-				: `The strongest measured profile was <strong>${escapeHtml(recommended.candidate.backend)}</strong> with <strong>${escapeHtml(framePolicyLabel(recommended.candidate.framePolicy))}</strong> frame delivery.`
-		: 'Calibration could not collect enough valid frame samples. WOK Client will keep the current safe settings.';
+				? `The test could not compare these fairly, so your current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile is kept.`
+				: `Fastest profile: <strong>${escapeHtml(recommended.candidate.backend)}</strong>.`
+		: 'Not enough clean measurements. Keeping your current settings.';
 
 	return `<!doctype html>
 	<html lang="en">
@@ -528,14 +528,13 @@ export function buildCalibrationResultPage(
 			<section class="content">
 				${brandMarkup(markSvg)}
 				<h1>Calibration complete</h1>
-				<p>${summary} The relative score compares measured frame throughput and consistency. It is not an end-to-end input-latency measurement.</p>
+				<p>${summary}</p>
 				<div class="results">${resultsHtml}</div>
 				<div class="actions">
 					<button class="primary" id="apply" ${hasRecommendation ? '' : 'disabled'}>${applyLabel}</button>
 					<button id="keep">${keepLabel}</button>
 				</div>
-				<div class="result-note">Applying uses the new profile provisionally: your next three clean play sessions confirm it, and WOK automatically reverts to the previous profile if it underperforms in real play.</div>
-				<div class="privacy">Game settings changed by Competitive mode are backed up before modification and restored when the mode is disabled.</div>
+				<div class="result-note">Your next few matches confirm this profile. If it plays worse, WOK switches back on its own.</div>
 			</section>
 		</main>
 		<script>

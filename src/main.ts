@@ -1347,6 +1347,15 @@ ipcMain.handle('adaptiveValidation_recordSession', (event, value: unknown) => {
 	return nextState;
 });
 
+/**
+ * Let the renderer ask for preferences rather than only receiving them.
+ *
+ * Krunker replaces the document during start-up, so a preload instance that never received the
+ * boot payload or the injectClientCSS push has no preferences at all - and every feature that
+ * needs them silently never starts in the document that actually survives.
+ */
+ipcMain.handle('wok_get_user_prefs', event => (isTrustedGameIpcSender(event) ? userPrefs : undefined));
+
 ipcMain.handle('competitiveMode_getBackup', event => (
 	isTrustedGameIpcSender(event) ? loadCompetitiveModeBackup() : undefined
 ));

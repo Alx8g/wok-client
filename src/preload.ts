@@ -138,6 +138,9 @@ if (process.env.WOK_FPS_LOG) {
 	});
 }
 
+// The custom identity starts itself: see beginCustomIdentityWatch.
+window.setTimeout(() => { beginCustomIdentityWatch(); }, 1_000);
+
 // Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
 function sendPerfMark(name: string) {
@@ -1005,6 +1008,18 @@ function beginCustomIdentityWatch() {
 	};
 	identityStarterHandle = window.setInterval(tryStart, 500);
 	tryStart();
+	// This preload instance may never be handed preferences: the boot payload and the
+	// injectClientCSS push both land on the document Krunker discards. Ask for them directly.
+	if (!latestUserPrefs) {
+		void ipcRenderer.invoke('wok_get_user_prefs')
+			.then((prefs: UserPrefs | undefined) => {
+				if (!prefs || latestUserPrefs) return;
+				latestUserPrefs = prefs;
+				traceStartup('preferences fetched directly');
+				tryStart();
+			})
+			.catch(error => { traceStartup(`preference fetch failed: ${String(error)}`); });
+	}
 }
 
 function traceStartup(message: string) {

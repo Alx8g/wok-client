@@ -12,6 +12,8 @@
 		"make": "node scripts/bundle.mjs && node scripts/verify-bundle.mjs && electron-forge make",
 		"bundle": "node scripts/bundle.mjs",
 		"bundle:verify": "node scripts/bundle.mjs && node scripts/verify-bundle.mjs",
+		"installer:art": "node scripts/generate-installer-art.mjs",
+		"installer:art:check": "node scripts/generate-installer-art.mjs --check",
 		"lint": "biome lint .",
 		"test": "node --test tests/*.test.ts",
 		"typecheck": "tsc --noEmit",

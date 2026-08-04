@@ -49,8 +49,11 @@ export function findIdentityIn(
 	if (hits.length >= MAX_HITS || depth > MAX_DEPTH || value === null || value === undefined) return hits;
 
 	if (typeof value === 'string') {
-		if (value === needle) hits.push({ location: path, match: 'exact', sample: sampleOf(value), source });
-		else if (value.includes(needle)) hits.push({ location: path, match: 'contains', sample: sampleOf(value), source });
+		// Case-insensitive: a stored account name may not match the casing the user typed.
+		const lowered = value.toLowerCase();
+		const target = needle.toLowerCase();
+		if (lowered === target) hits.push({ location: path, match: 'exact', sample: sampleOf(value), source });
+		else if (lowered.includes(target)) hits.push({ location: path, match: 'contains', sample: sampleOf(value), source });
 		return hits;
 	}
 	if (typeof value !== 'object') return hits;
@@ -93,6 +96,22 @@ export function probeIdentitySources(hooks: IdentityProbeHooks): IdentitySourceH
 	});
 
 	return hits.slice(0, MAX_HITS);
+}
+
+/**
+ * What the candidate sources actually hold, printed when the needle is not found. A probe that
+ * only says "not here" cannot tell an absent value from a source that was never populated, or
+ * from a search that looked in the wrong shape.
+ */
+export function formatIdentityContext(context: Readonly<Record<string, unknown>>): string {
+	const lines = Object.entries(context).map(([label, value]) => {
+		if (value === undefined) return `  ${label}: undefined`;
+		if (value === null) return `  ${label}: null`;
+		if (Array.isArray(value)) return `  ${label}: [${value.length}] ${sampleOf(value)}`;
+		if (typeof value === 'object') return `  ${label}: {${Object.keys(value as object).join(', ')}} ${sampleOf(value)}`;
+		return `  ${label}: ${sampleOf(value)}`;
+	});
+	return `[wok-identity] source contents:\n${lines.join('\n')}`;
 }
 
 export function formatIdentityProbe(hits: readonly IdentitySourceHit[]): string {

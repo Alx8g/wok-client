@@ -15,7 +15,7 @@ import {
 	startLoadingDeadline
 } from './loading-deadline.ts';
 import { probeMenuStructure } from './menu-dom-probe.ts';
-import { formatIdentityProbe, probeIdentitySources } from './identity-source-probe.ts';
+import { formatIdentityContext, formatIdentityProbe, probeIdentitySources } from './identity-source-probe.ts';
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
@@ -95,6 +95,26 @@ if (process.env.WOK_FIND_IDENTITY) {
 			}
 		});
 		ipcRenderer.send('wok_identity_probe', formatIdentityProbe(hits));
+		if (hits.length === 0) {
+			// Report what the sources hold so an absent value can be told from an unpopulated one.
+			const activity = typeof window.getGameActivity === 'function' ? window.getGameActivity() : undefined;
+			const storageKeys: string[] = [];
+			try {
+				for (let index = 0; index < localStorage.length; index++) {
+					const key = localStorage.key(index);
+					if (key) storageKeys.push(key);
+				}
+			} catch (_error) { /* storage may be unavailable */ }
+			const bodyText = (document.body?.textContent ?? '').replace(/\s+/gu, ' ').trim();
+			ipcRenderer.send('wok_identity_probe', formatIdentityContext({
+				'getGameActivity()': activity,
+				'getGameActivity typeof': typeof window.getGameActivity,
+				'localStorage keys': storageKeys,
+				'document.body text (first 400)': bodyText.slice(0, 400),
+				'window.me': (window as unknown as Record<string, unknown>).me,
+				'window.account': (window as unknown as Record<string, unknown>).account
+			}));
+		}
 	};
 	window.setTimeout(runIdentityProbe, 15_000);
 	window.setTimeout(runIdentityProbe, 40_000);

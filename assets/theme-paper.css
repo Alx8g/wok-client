@@ -1,0 +1,65 @@
+/*
+ * Paper: the light one.
+ *
+ * Warm off-white surfaces, dark ink text and a deep gold accent that keeps enough contrast to be
+ * read on a light background. WOK's panels become a document laid over the game rather than
+ * another dark layer on top of it.
+ *
+ * The FPS overlay stays dark on purpose. It is the one WOK surface that sits over live gameplay
+ * instead of over a WOK panel, and a bright block in the corner of a bright map is unreadable.
+ */
+
+:root {
+	--wok-bg: #EFEAE0;
+	--wok-surface: #FAF7F1;
+	--wok-surface-raised: #F1ECE2;
+	--wok-border: #D9D1C3;
+	--wok-border-strong: #B6AA95;
+
+	--wok-accent: #B57F00;
+	--wok-accent-contrast: #FFFBF0;
+	--wok-accent-soft: rgba(181, 127, 0, .14);
+
+	--wok-text: #1B1712;
+	--wok-text-muted: #554C42;
+	--wok-text-faint: #7E7466;
+
+	--wok-danger: #B3261E;
+	--wok-success: #2E7D32;
+
+	--wok-radius: 6px;
+	--wok-shadow: 0 16px 40px rgba(60, 48, 26, .28);
+
+	--wok-font: Inter, ui-sans-serif, system-ui, sans-serif;
+	--wok-font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--wok-heading-transform: uppercase;
+	--wok-heading-spacing: .10em;
+
+	--wok-overlay-bg: rgba(20, 17, 12, .82);
+	--wok-overlay-border: rgba(181, 127, 0, .78);
+	--wok-overlay-text: #FBF6EA;
+}
+
+/*
+ * Multi-select option labels are the one place the game paints white text inside WOK's panel and
+ * the base layer does not reach. Scoped to the panel, so the game's own lists are untouched.
+ */
+.Crankshaft-settings .crankshaft-multisel-parent .optName {
+	color: var(--wok-text);
+}
+
+/*
+ * The safety icons are tuned for a dark panel and wash out on paper. Darkening rather than
+ * recolouring: the yellow, orange and red ladder still reads as a ladder, and this is the only
+ * theme that needs it, which is why it lives here and not in the base layer.
+ */
+.Crankshaft-settings .setting.safety-2 .desc-icon,
+.Crankshaft-settings .setting.safety-3 .desc-icon,
+.Crankshaft-settings .setting.safety-4 .desc-icon {
+	filter: brightness(.78) saturate(1.15);
+}
+
+/* The loading handoff stays dark: it covers the whole window before any panel exists. */
+.crankshaft-loading-background {
+	background-color: #0A0A0A;
+}

@@ -99,6 +99,15 @@ import {
 import { readBoundedMatchmakerJson } from './matchmaker-response.ts';
 import { parseSettingsBaselineMarker, planSettingsBaseline, type SettingsBaselineMarker } from './settings-baseline.ts';
 import {
+	buildUserThemeTemplate,
+	migrateThemePreference,
+	THEME_BASE_ASSET,
+	THEME_NONE,
+	THEME_TEMPLATE_FILE,
+	THEME_TEMPLATE_STARTER_ID,
+	themeAssetName
+} from './themes.ts';
+import {
 	containsObsoletePreferences,
 	parseUserPreferencePatch,
 	shouldMigrateMatchmakerMapScope
@@ -315,7 +324,11 @@ const competitiveModeBackupPath = pathJoin(configPath, 'competitive-mode-backup.
 const safetyBaselinePath = pathJoin(configPath, 'safety-baseline-v1.json');
 const filtersPath = pathJoin(configPath, 'filters.txt');
 const cssPath = pathJoin(configPath, 'css');
-const exampleCssPath = pathJoin(cssPath, 'example.css');
+const themeTemplatePath = pathJoin(cssPath, THEME_TEMPLATE_FILE);
+
+// Declared with the other paths rather than beside the window code: ensureCssStorage() reads the
+// bundled theme assets during startup preference handling, long before a window exists.
+const $assets = pathResolve(import.meta.dirname, '..', 'assets');
 
 const settingsSkeleton = {
 	fpsUncap: true,
@@ -326,7 +339,7 @@ const settingsSkeleton = {
 	quickClassPicker: false,
 	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless
 	resourceSwapper: false,
-	cssSwapper: 'None',
+	theme: THEME_NONE,
 	clientSplash: true,
 	immersiveSplash: false,
 	introAnimation: true,
@@ -383,9 +396,14 @@ if (!existsSync(settingsPath)) writeFileSync(settingsPath, JSON.stringify(settin
 try {
 	const rawSettings: unknown = JSON.parse(readFileSync(settingsPath, { encoding: 'utf-8' }));
 	const migrateMatchmakerMapScope = shouldMigrateMatchmakerMapScope(rawSettings);
+	// The CSS swapper became the theme picker; a profile that selected a .css file keeps it. The
+	// rewrite that drops the old key is triggered by 'cssSwapper' being in the obsolete-key set,
+	// which is true exactly when this returns a value.
+	const migratedTheme = migrateThemePreference(rawSettings);
 	settingsNeedCanonicalRewrite = containsObsoletePreferences(rawSettings) || migrateMatchmakerMapScope;
 	Object.assign(userPrefs, parseUserPreferencePatch(rawSettings));
 	if (migrateMatchmakerMapScope) userPrefs.matchmaker_mapScope = 'all';
+	if (migratedTheme !== undefined) userPrefs.theme = migratedTheme;
 } catch (error) {
 	console.error('Failed to read WOK Client settings; using safe defaults', error);
 }
@@ -662,12 +680,22 @@ function ensureFilterStorage() {
 `);
 }
 
+/**
+ * The user's theme folder. Any .css dropped here shows up in the Theme picker; the template is a
+ * working copy of a bundled theme (its palette plus the shared layer) so that writing one is
+ * editing values rather than reverse-engineering selectors. It is only written when missing, so
+ * deleting it is how a user asks for a fresh one after an update.
+ */
 function ensureCssStorage() {
 	if (!existsSync(cssPath)) mkdirSync(cssPath, { recursive: true });
-	if (!existsSync(exampleCssPath)) {
-		writeFileSync(exampleCssPath,
-			`/* This is an example of a css file that can be loaded by WOK Client. */
-/* Files in this directory automatically show up in the CSS Swapper setting's dropdown. */`);
+	if (existsSync(themeTemplatePath)) return;
+	try {
+		writeFileSync(themeTemplatePath, buildUserThemeTemplate(
+			readFileSync(pathJoin($assets, THEME_BASE_ASSET), { encoding: 'utf-8' }),
+			readFileSync(pathJoin($assets, themeAssetName(THEME_TEMPLATE_STARTER_ID)), { encoding: 'utf-8' })
+		), { encoding: 'utf-8' });
+	} catch (error) {
+		console.error('Failed to write the user theme template; the theme folder still works', error);
 	}
 }
 
@@ -678,7 +706,7 @@ function ensureOptionalFeatureStorage() {
 }
 
 if (userPrefs.customFilters) ensureFilterStorage();
-if (userPrefs.cssSwapper !== 'None') ensureCssStorage();
+if (userPrefs.theme !== THEME_NONE) ensureCssStorage();
 
 
 // convert legacy settings files to newer formats
@@ -1325,8 +1353,6 @@ ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
 ipcMain.on('closeClient', event => {
 	if (isTrustedGameIpcSender(event)) app.quit();
 });
-
-const $assets = pathResolve(import.meta.dirname, '..', 'assets');
 
 function calibrationDataUrl(html: string): string {
 	return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;

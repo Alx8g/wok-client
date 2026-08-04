@@ -1,3 +1,11 @@
+## Unreleased
+
+### Themes
+- The CSS swapper is now a theme picker, in Settings > Visuals. It ships five themes for WOK's own UI (Noir, Ember, Frost, Terminal, Paper) and still lists any .css file in the client's css folder. Themes apply immediately; nothing needs a restart or a page reload.
+- Bundled themes are built from a documented set of CSS variables rather than from selectors, so a theme is a palette. The client writes a working `theme-template.css` into the css folder containing that palette and the shared layer, which is all anyone needs to write their own.
+- Only surfaces WOK adds to the page are themed: the settings panel, its toasts and dialogs, the matchmaker popup, the match-result button, the FPS overlay and the loading handoff. Krunker's own UI is untouched, and a test enforces the boundary.
+- Existing `cssSwapper` selections carry over to the new `theme` preference on first launch, and user CSS files are still injected exactly as before.
+
 ## WOK Client 1.1.0-rc.4 (2026-08-04)
 
 ### Graphics calibration

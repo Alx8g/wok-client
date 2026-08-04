@@ -1,0 +1,46 @@
+/*
+ * Ember: warm charcoal lit from inside.
+ *
+ * Browns and soot instead of neutral greys, with a burnt orange accent and cream text. Reads as
+ * hot rather than clinical; the closest of the five to the game's own warmth.
+ */
+
+:root {
+	--wok-bg: #120C09;
+	--wok-surface: #1C1310;
+	--wok-surface-raised: #2A1D17;
+	--wok-border: #3A281F;
+	--wok-border-strong: #5C3B26;
+
+	--wok-accent: #FF6B35;
+	--wok-accent-contrast: #17100C;
+	--wok-accent-soft: rgba(255, 107, 53, .14);
+
+	--wok-text: #FBEFE7;
+	--wok-text-muted: #C9A992;
+	--wok-text-faint: #94796A;
+
+	--wok-danger: #FF4D4D;
+	--wok-success: #8FBF5F;
+
+	--wok-radius: 3px;
+	--wok-shadow: 0 20px 46px rgba(20, 8, 2, .68);
+
+	--wok-font: Inter, ui-sans-serif, system-ui, sans-serif;
+	--wok-font-mono: ui-monospace, 'Cascadia Code', Consolas, monospace;
+	--wok-heading-transform: uppercase;
+	--wok-heading-spacing: .09em;
+
+	--wok-overlay-bg: rgba(18, 12, 9, .86);
+	--wok-overlay-border: rgba(255, 107, 53, .70);
+	--wok-overlay-text: #FBEFE7;
+}
+
+/* A low ember glow behind the section list, warmest at the bottom where the content sits. */
+.Crankshaft-settings-pane {
+	background: linear-gradient(180deg, rgba(255, 107, 53, 0) 40%, rgba(255, 107, 53, .05) 100%);
+}
+
+.Crankshaft-settings .setting.heading .setting-title {
+	text-shadow: 0 0 14px rgba(255, 107, 53, .35);
+}

@@ -1,4 +1,8 @@
+import { parseThemePreference } from './themes.ts';
+
 const OBSOLETE_PREFERENCE_KEYS = new Set([
+	// Superseded by 'theme', which also selects the bundled themes. See migrateThemePreference.
+	'cssSwapper',
 	// Placebo-with-downside: raised a renderer-process ceiling a one-origin app never reaches.
 	'experimentalFlags_increaseLimits',
 	'inProcessGPU',
@@ -126,13 +130,9 @@ function parsePreferenceValue(key: string, value: unknown): UserPrefValue | unde
 			: undefined;
 	}
 
-	if (key === 'cssSwapper') {
-		return typeof value === 'string'
-			&& value.length <= 128
-			&& (value === 'None' || (/^[^/\\]+\.css$/u.test(value)))
-			? value
-			: undefined;
-	}
+	// 'None', a bundled theme id, or a bare .css filename in the user's css folder. Anything with
+	// a path separator is rejected, so a selection can never escape that folder.
+	if (key === 'theme') return parseThemePreference(value);
 
 	if (key === 'immersiveSplashBackgroundColor') {
 		return typeof value === 'string' && /^#[0-9A-Fa-f]{6}$/u.test(value) ? value : undefined;

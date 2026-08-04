@@ -5,6 +5,20 @@ import { MakerNSIS } from "./MakerNSIS.ts";
 import { copyFileSync, existsSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { verifyPackagedApplication } from './scripts/verify-package.mjs';
+import { BUNDLED_THEMES, THEME_BASE_ASSET, themeAssetName } from './src/themes.ts';
+
+// Assets are packaged by an explicit allowlist. The theme stylesheets come from the registry so a
+// new bundled theme cannot be listed in settings but missing from the build.
+const packagedAssetNames = [
+    'blockFilters.txt', 'wok-mark.svg', 'hideAds.css',
+    'intro-short-1080.webm', 'intro-short-1440.webm', 'intro-long-1080.webm', 'intro-long-1440.webm',
+    'intro.html', 'intro.js', 'matchmaker.css', 'menuTimer.css', 'quickClassPicker.css',
+    'settings.css', 'splash-frame.webp', 'splash.css',
+    THEME_BASE_ASSET, ...BUNDLED_THEMES.map(theme => themeAssetName(theme.id))
+];
+const packagedAssetsPattern = new RegExp(
+    `^/assets/(?!(?:${packagedAssetNames.map(name => name.replaceAll('.', '\\.')).join('|')})$)`
+);
 
 export const PATCHED_ELECTRON_VERSION = "44.0.0-nightly.20260522";
 export const PATCHED_ELECTRON_RELEASE = `v${PATCHED_ELECTRON_VERSION}-patched-2`;
@@ -75,7 +89,7 @@ export default {
             /^\/(?!(bundle|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
             /^\/bundle\/metafile\.json$/,
             /^\/bundle\/.*\.mjs\.map$/,
-            /^\/assets\/(?!(?:blockFilters\.txt|wok-mark\.svg|hideAds\.css|intro-short-1080\.webm|intro-short-1440\.webm|intro-long-1080\.webm|intro-long-1440\.webm|intro\.html|intro\.js|matchmaker\.css|menuTimer\.css|quickClassPicker\.css|settings\.css|splash-frame\.webp|splash\.css)$)/
+            packagedAssetsPattern
         ],
         prune: true,
         asar: true,

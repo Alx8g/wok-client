@@ -1,21 +1,34 @@
 import { ipcRenderer } from 'electron';
 import {
 	MATCHMAKER_GAMEMODES,
-	MATCHMAKER_MAP_ICON_INDICES,
-	MATCHMAKER_REGION_NAMES
+	MATCHMAKER_MAP_ICON_INDICES
 } from './matchmaker-data.ts';
 import {
 	matchmakerCandidateRegions,
 	waitForMatchmakerOperation
 } from './matchmaker-flow.ts';
 import { MatchmakerPopupLifecycle, type MatchmakerPopupDismissal } from './matchmaker-popup-lifecycle.ts';
+import {
+	type MatchmakerAction,
+	type MatchmakerChip,
+	type MatchmakerHotkeyLabels,
+	type MatchmakerView,
+	matchmakerCancelledView,
+	matchmakerDurationLabel,
+	matchmakerErrorView,
+	matchmakerLobbyView,
+	matchmakerNoGamesView,
+	matchmakerSearchingView,
+	matchmakerTimeLeftChip
+} from './matchmaker-presentation.ts';
 import { MatchmakerResponseTooLargeError, readBoundedMatchmakerJson } from './matchmaker-response.ts';
 import {
 	collectMatchmakerCandidates,
+	matchmakerRegionLatency,
 	rankMatchmakerCandidates,
 	selectRevalidatedMatchmakerGame
 } from './matchmaker-selection.ts';
-import { createElement, keyboardEventMatchesCustomSetting, secondsToTimestring } from './utils.ts';
+import { createElement, keyboardEventMatchesCustomSetting, parseKeybindSettingDisplay } from './utils.ts';
 
 export {
 	MATCHMAKER_GAMEMODES,
@@ -26,6 +39,8 @@ export {
 
 const MATCHMAKER_REQUEST_TIMEOUT_MS = 10_000;
 const MATCHMAKER_GAME_LIST_URL = 'https://matchmaker.krunker.io/game-list';
+/** How long the "Search Cancelled" confirmation stays up before it clears itself. */
+const MATCHMAKER_CANCELLED_POPUP_MS = 1_400;
 
 class MatchmakerHttpError extends Error {
 	public readonly retryAfter: string | null;
@@ -61,16 +76,23 @@ function abortActiveMatchmakerSearch() {
 function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
 	if (!dismissal.dismissed) return;
 
+	stopMatchmakerTicker();
+	clearMatchmakerAutoDismiss();
 	if (dismissal.abortSearch) abortActiveMatchmakerSearch();
 	matchmakerBindListener?.abort();
 	matchmakerBindListener = undefined;
 	if (dismissal.playSelect) window.playSelect();
 	if (dismissal.joinGame && currentMatch !== 'none') {
 		window.location.href = `https://krunker.io/?game=${currentMatch}`;
-	} else {
-		popupElement.remove();
-		if (dismissal.openServerWindow) window.openServerWindow(0);
+		return;
 	}
+	// A cancelled search is confirmed briefly instead of vanishing without explanation.
+	if (dismissal.abortSearch) {
+		showMatchmakerCancelledPopup();
+		return;
+	}
+	popupElement.remove();
+	if (dismissal.openServerWindow) window.openServerWindow(0);
 }
 
 /**
@@ -91,13 +113,52 @@ const popupContainerID = "matchmakerPopupContainer";
 // Create popup element
 const popupElement = createElement('div', { id: popupContainerID });
 
+// One strip across the top: it sweeps while searching, then turns solid in the colour of the outcome.
+const popupProgress = createElement('div', { id: "matchmakerSearchProgress" });
+popupProgress.appendChild(createElement('div', { id: "matchmakerSearchProgressBar" }));
+popupElement.appendChild(popupProgress);
+
+const popupBody = createElement('div', { id: "matchmakerPopupBody" });
+popupElement.appendChild(popupBody);
+
+const popupHeader = createElement('div', { id: "matchmakerPopupHeader" });
 const popupTitle = createElement('div', { id: "matchmakerPopupTitle" });
-popupElement.appendChild(popupTitle);
+const popupPulse = createElement('span', { id: "matchmakerSearchPulse" });
+popupPulse.appendChild(createElement('span', { class: "matchmakerPulseRing" }));
+popupPulse.appendChild(createElement('span', { class: "matchmakerPulseRing" }));
+const popupTimer = createElement('div', { id: "matchmakerPopupTimer" });
+popupHeader.appendChild(popupPulse);
+popupHeader.appendChild(popupTitle);
+popupHeader.appendChild(popupTimer);
+popupBody.appendChild(popupHeader);
 
 const popupDescription = createElement('div', { id: "matchmakerPopupDescription" });
-popupElement.appendChild(popupDescription);
+popupBody.appendChild(popupDescription);
+
+const popupChips = createElement('div', { id: "matchmakerPopupChips" });
+popupBody.appendChild(popupChips);
 
 const popupOptions = createElement('div', { id: "matchmakerPopupOptions" });
+
+interface MatchmakerPopupButton {
+	button: HTMLElement;
+	hotkey: HTMLElement;
+	label: HTMLElement;
+}
+
+function createMatchmakerButton(id: string, accept: boolean): MatchmakerPopupButton {
+	const button = createElement('div', {
+		class: ["matchmakerPopupButton", "bigShadowT"],
+		id,
+		onmouseenter: "playTick()" // This is to play the little krunker 'tick' noise when hovering over the button.
+	});
+	const label = createElement('span', { class: "matchmakerButtonLabel" });
+	const hotkey = createElement('kbd', { class: "matchmakerButtonHotkey" });
+	button.appendChild(label);
+	button.appendChild(hotkey);
+	button.addEventListener('click', () => { decideMatchmakerDecision(accept); });
+	return { button, hotkey, label };
+}
 
 let confirmKey: KeybindUserPref = {
 	shift: false,
@@ -105,31 +166,84 @@ let confirmKey: KeybindUserPref = {
 	alt: false,
 	key: "Enter"
 }
-const popupConfirmOption = createElement('div', {
-	class: ["matchmakerPopupButton", "bigShadowT"],
-	id: "matchmakerConfirmButton",
-	text: "Join",
-	onmouseenter: "playTick()" // This is to play the little krunker 'tick' noise when hovering over the button.
-})
-popupConfirmOption.addEventListener('click', () => { decideMatchmakerDecision(true) });
-
 let cancelKey: KeybindUserPref = {
 	shift: false,
 	ctrl: false,
 	alt: false,
 	key: "Escape"
 }
-const popupCancelOption = createElement('div', {
-	class: ["matchmakerPopupButton", "bigShadowT"],
-	id: "matchmakerCancelButton",
-	text: "Cancel",
-	onmouseenter: "playTick()" // This is to play the little krunker 'tick' noise when hovering over the button.
-})
-popupCancelOption.addEventListener('click', () => { decideMatchmakerDecision(false) });
 
-popupOptions.appendChild(popupConfirmOption);
-popupOptions.appendChild(popupCancelOption);
-popupElement.appendChild(popupOptions);
+const popupConfirmOption = createMatchmakerButton("matchmakerConfirmButton", true);
+const popupCancelOption = createMatchmakerButton("matchmakerCancelButton", false);
+popupOptions.appendChild(popupConfirmOption.button);
+popupOptions.appendChild(popupCancelOption.button);
+popupBody.appendChild(popupOptions);
+
+const popupHint = createElement('div', { id: "matchmakerPopupHint" });
+popupBody.appendChild(popupHint);
+
+let hotkeyLabels: MatchmakerHotkeyLabels = { accept: 'ENTER', cancel: 'ESCAPE', search: 'F1' };
+/** The chip whose value keeps counting down while a lobby is offered. */
+let countdownValue: HTMLElement | undefined;
+let popupTicker: number | undefined;
+let popupAutoDismiss: number | undefined;
+
+function stopMatchmakerTicker() {
+	if (popupTicker !== undefined) window.clearInterval(popupTicker);
+	popupTicker = undefined;
+}
+
+function startMatchmakerTicker(tick: () => void) {
+	stopMatchmakerTicker();
+	tick();
+	popupTicker = window.setInterval(tick, 1_000);
+}
+
+function clearMatchmakerAutoDismiss() {
+	if (popupAutoDismiss !== undefined) window.clearTimeout(popupAutoDismiss);
+	popupAutoDismiss = undefined;
+}
+
+function applyMatchmakerChipTone(value: HTMLElement, chip: MatchmakerChip) {
+	if (chip.tone) value.dataset.tone = chip.tone;
+	else delete value.dataset.tone;
+}
+
+function renderMatchmakerChips(chips: readonly MatchmakerChip[]) {
+	countdownValue = undefined;
+	popupChips.replaceChildren();
+	for (const chip of chips) {
+		const node = createElement('div', { class: "matchmakerChip" });
+		node.appendChild(createElement('span', { class: "matchmakerChipLabel", text: chip.label }));
+		const value = createElement('span', { class: "matchmakerChipValue", text: chip.value });
+		applyMatchmakerChipTone(value, chip);
+		node.appendChild(value);
+		popupChips.appendChild(node);
+		if (chip.key === 'timeLeft') countdownValue = value;
+	}
+}
+
+function applyMatchmakerAction(target: MatchmakerPopupButton, action: MatchmakerAction | undefined) {
+	if (!action) {
+		target.button.style.display = 'none';
+		return;
+	}
+	target.button.style.display = '';
+	target.label.textContent = action.label;
+	target.hotkey.textContent = action.hotkey;
+	target.hotkey.style.display = action.hotkey ? '' : 'none';
+}
+
+function renderMatchmakerView(view: MatchmakerView) {
+	popupElement.dataset.state = view.state;
+	popupTitle.textContent = view.title;
+	popupTimer.textContent = '';
+	popupDescription.textContent = view.description;
+	popupHint.textContent = view.hint;
+	renderMatchmakerChips(view.chips);
+	applyMatchmakerAction(popupConfirmOption, view.confirm);
+	applyMatchmakerAction(popupCancelOption, view.cancel);
+}
 
 /**
  * Handles keyboard input for the matchmaker
@@ -142,34 +256,11 @@ function handleMatchmakerBind(event: KeyboardEvent) {
 	if (matchesAcceptKey || matchesCancelKey) decideMatchmakerDecision(matchesAcceptKey);
 }
 
-/**
- * Sets the matchmaker element styles & content, shows the popup
- * @param game The game that was retrieved by the custom matchmaker
- */
-function createFetchedGamePopup(game: IMatchmakerGame) {
-	const mapIndex = MATCHMAKER_MAP_ICON_INDICES.indexOf(game.map);
-	popupElement.style.backgroundImage = game.gameID !== 'none' && mapIndex >= 0
-		? `url(https://assets.krunker.io/img/maps/map_${mapIndex}.png)`
-		: '';
+function showMatchmakerPopup(view: MatchmakerView): boolean {
+	stopMatchmakerTicker();
+	clearMatchmakerAutoDismiss();
+	renderMatchmakerView(view);
 
-	currentMatch = game.gameID;
-	let state: 'game' | 'no-games';
-	if (game.gameID === "none") {
-		popupTitle.innerText = "No Games Found...";
-		popupDescription.innerHTML = "Check the server browser to see other lobbies.";
-		popupConfirmOption.style.display = "none";
-		state = 'no-games';
-	} else {
-		popupTitle.innerText = "Game Found!";
-		popupDescription.innerHTML = `${game.gamemode} on ${game.map} (${MATCHMAKER_REGION_NAMES[game.region as keyof typeof MATCHMAKER_REGION_NAMES] ?? "Unknown Region"})<br/>${game.playerCount}/${game.playerLimit} Players, ${ secondsToTimestring(game.remainingTime) } Left`;
-		popupConfirmOption.style.display = "block";
-		state = 'game';
-	}
-
-	showMatchmakerPopup(state);
-}
-
-function showMatchmakerPopup(state: 'error' | 'game' | 'no-games' | 'searching'): boolean {
 	const uiBase = document.getElementById("uiBase");
 	if (!uiBase) {
 		currentMatch = '';
@@ -178,28 +269,70 @@ function showMatchmakerPopup(state: 'error' | 'game' | 'no-games' | 'searching')
 	}
 
 	uiBase.appendChild(popupElement);
-	popupLifecycle.show(state);
+	popupLifecycle.show(view.state);
 	matchmakerBindListener?.abort();
 	matchmakerBindListener = new AbortController();
 	document.addEventListener('keydown', handleMatchmakerBind, { capture: true, signal: matchmakerBindListener.signal });
 	return true;
 }
 
-function createMatchmakerSearchingPopup(): boolean {
-	popupElement.style.backgroundImage = '';
-	popupTitle.innerText = 'Finding a Game...';
-	popupDescription.innerText = 'Checking lobby availability and region latency.';
-	popupConfirmOption.style.display = 'none';
-	return showMatchmakerPopup('searching');
+/**
+ * Sets the matchmaker element styles & content, shows the popup
+ * @param game The game that was retrieved by the custom matchmaker
+ * @param latencyMs The measured latency of the game's region, when one is known
+ */
+function showMatchmakerLobbyPopup(game: IMatchmakerGame, latencyMs: number | undefined) {
+	const mapIndex = MATCHMAKER_MAP_ICON_INDICES.indexOf(game.map);
+	popupElement.style.backgroundImage = mapIndex >= 0
+		? `url(https://assets.krunker.io/img/maps/map_${mapIndex}.png)`
+		: '';
+
+	currentMatch = game.gameID;
+	if (!showMatchmakerPopup(matchmakerLobbyView(game, latencyMs, hotkeyLabels))) return;
+
+	const endsAt = Date.now() + (game.remainingTime * 1_000);
+	startMatchmakerTicker(() => {
+		if (!countdownValue) return;
+		const remaining = Math.round((endsAt - Date.now()) / 1_000);
+		const chip = matchmakerTimeLeftChip(remaining);
+		countdownValue.textContent = chip.value;
+		applyMatchmakerChipTone(countdownValue, chip);
+		if (remaining <= 0) stopMatchmakerTicker();
+	});
 }
 
-function createMatchmakerErrorPopup(message: string) {
+function showMatchmakerNoGamesPopup(criteria: IMatchmakerCriteria) {
 	currentMatch = 'none';
 	popupElement.style.backgroundImage = '';
-	popupTitle.innerText = 'Matchmaker Unavailable';
-	popupDescription.innerText = message;
-	popupConfirmOption.style.display = 'none';
-	showMatchmakerPopup('error');
+	showMatchmakerPopup(matchmakerNoGamesView(criteria, hotkeyLabels, openServerWindow));
+}
+
+function showMatchmakerSearchingPopup(criteria: IMatchmakerCriteria): boolean {
+	popupElement.style.backgroundImage = '';
+	if (!showMatchmakerPopup(matchmakerSearchingView(criteria, hotkeyLabels))) return false;
+
+	const startedAt = Date.now();
+	startMatchmakerTicker(() => {
+		popupTimer.textContent = matchmakerDurationLabel(Math.floor((Date.now() - startedAt) / 1_000));
+	});
+	return true;
+}
+
+function showMatchmakerErrorPopup(message: string) {
+	currentMatch = 'none';
+	popupElement.style.backgroundImage = '';
+	showMatchmakerPopup(matchmakerErrorView(message, hotkeyLabels, openServerWindow));
+}
+
+function showMatchmakerCancelledPopup() {
+	// currentMatch is left alone: a cancelled search should not un-reject the lobby the user last skipped.
+	popupElement.style.backgroundImage = '';
+	if (!showMatchmakerPopup(matchmakerCancelledView(hotkeyLabels))) return;
+
+	popupAutoDismiss = window.setTimeout(() => {
+		popupAutoDismiss = undefined;
+		applyMatchmakerPopupDismissal(popupLifecycle.replace());
+	}, MATCHMAKER_CANCELLED_POPUP_MS);
 }
 
 /**
@@ -236,15 +369,12 @@ function matchmakerRegionLatencies(value: unknown): Readonly<Record<string, unkn
 		: {};
 }
 
-const NO_MATCHMAKER_GAME: IMatchmakerGame = {
-	gameID: 'none',
-	region: 'none',
-	playerCount: 0,
-	playerLimit: 0,
-	map: '',
-	gamemode: MATCHMAKER_GAMEMODES[0],
-	remainingTime: 0
-};
+function matchmakerHotkeyLabel(value: unknown, fallback: string): string {
+	const pref = value as KeybindUserPref | undefined;
+	return pref && typeof pref.key === 'string' && pref.key.length > 0
+		? parseKeybindSettingDisplay(pref)
+		: fallback;
+}
 
 /**
  * Retrieves a lobby using the custom matchmaker, presents the user with a popup
@@ -254,6 +384,11 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 	openServerWindow = _userPrefs.matchmaker_openServerWindow as boolean;
 	confirmKey = _userPrefs.matchmakerAcceptKey as KeybindUserPref;
 	cancelKey = _userPrefs.matchmakerCancelKey as KeybindUserPref;
+	hotkeyLabels = {
+		accept: matchmakerHotkeyLabel(confirmKey, 'ENTER'),
+		cancel: matchmakerHotkeyLabel(cancelKey, 'ESCAPE'),
+		search: matchmakerHotkeyLabel(_userPrefs.matchmakerKey, '')
+	};
 
 	// Replacing a popup for a retry is not a user cancellation.
 	replaceMatchmakerPopup();
@@ -274,7 +409,7 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 	matchmakerRequest?.abort();
 	const request = new AbortController();
 	matchmakerRequest = request;
-	if (!createMatchmakerSearchingPopup()) {
+	if (!showMatchmakerSearchingPopup(criteria)) {
 		abortActiveMatchmakerSearch();
 		return;
 	}
@@ -294,7 +429,7 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			MATCHMAKER_GAMEMODES
 		);
 		if (candidates.length === 0) {
-			createFetchedGamePopup(NO_MATCHMAKER_GAME);
+			showMatchmakerNoGamesPopup(criteria);
 			return;
 		}
 
@@ -312,10 +447,8 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			assertCurrentMatchmakerRequest(request);
 			console.warn('Failed to measure matchmaker region latency', error);
 		}
-		const rankedCandidates = rankMatchmakerCandidates(
-			candidates,
-			matchmakerRegionLatencies(latencyResult)
-		);
+		const latencies = matchmakerRegionLatencies(latencyResult);
+		const rankedCandidates = rankMatchmakerCandidates(candidates, latencies);
 
 		const freshResult = await loadMatchmakerGameList(request);
 		const freshCandidates = collectMatchmakerCandidates(
@@ -328,20 +461,21 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			rankedCandidates,
 			freshCandidates
 		);
-		createFetchedGamePopup(selectedGame ?? NO_MATCHMAKER_GAME);
+		if (selectedGame) showMatchmakerLobbyPopup(selectedGame, matchmakerRegionLatency(latencies, selectedGame.region));
+		else showMatchmakerNoGamesPopup(criteria);
 	} catch (error) {
 		if (matchmakerRequest !== request || error instanceof MatchmakerRequestSupersededError) return;
 		if (timedOut) {
-			createMatchmakerErrorPopup('The matchmaker took too long to respond. Try again or open the server browser.');
+			showMatchmakerErrorPopup('The matchmaker timed out.');
 			return;
 		}
 		if ((error as Error).name === 'AbortError') return;
 		console.error('Failed to fetch a matchmaker game', error);
-		createMatchmakerErrorPopup(error instanceof MatchmakerResponseTooLargeError
-			? 'The server list response was unexpectedly large. Try again or open the server browser.'
+		showMatchmakerErrorPopup(error instanceof MatchmakerResponseTooLargeError
+			? 'The server list response was too large.'
 			: error instanceof MatchmakerHttpError && error.retryAfter
-				? `The matchmaker is rate-limited. Try again after ${error.retryAfter}.`
-				: 'The server list could not be loaded. Try again or open the server browser.');
+				? `Rate limited. Try again after ${error.retryAfter}.`
+				: "The server list couldn't be loaded.");
 	} finally {
 		window.clearTimeout(timeoutHandle);
 		if (matchmakerRequest === request) matchmakerRequest = undefined;

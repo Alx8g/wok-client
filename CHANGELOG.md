@@ -30,6 +30,11 @@
 - New "Copy diagnostics report" (Ctrl+F9) copies hardware, the active graphics backend and why it was chosen, calibration evidence, gameplay validation history, and performance settings.
 - Added optional gameplay measurement instruments used to anchor calibration to the real game rather than to assumptions.
 
+### Matchmaker
+- Rebuilt the popup. A running search now shows a scanning indicator, how long it has been searching, and the filters it is using.
+- A found lobby shows region, ping, gamemode, map, players, and a live countdown at a glance, with the accept and cancel hotkeys printed on the buttons.
+- Empty results point at the filter most likely responsible, failures say what went wrong, and a cancelled search is confirmed instead of silently disappearing.
+
 ### Windows
 - Reimplemented borderless mode as a plain frameless full-screen window and restored the option on Windows.
 - Graphics failures on a manually selected backend are now recorded and surfaced instead of being silently ignored.

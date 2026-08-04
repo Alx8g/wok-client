@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+	MATCHMAKER_LATENCY_FALLBACK_PORT,
+	MATCHMAKER_LATENCY_PROBE_ATTEMPTS,
 	MATCHMAKER_LATENCY_CACHE_TTL_MS,
 	MatchmakerRegionLatencyService,
 	parseMatchmakerPingTargets,
@@ -64,12 +66,14 @@ test('latency measurements deduplicate known regions and use the bounded cache',
 	assert.deepEqual(await service.measure(['FRA', 'FRA', 'MOON', 42]), { FRA: 12 });
 	assert.deepEqual(await service.measure(['FRA']), { FRA: 12 });
 	assert.equal(loadCount, 1);
-	assert.equal(probeCount, 1);
+	// Each reachable region is sampled MATCHMAKER_LATENCY_PROBE_ATTEMPTS times; the first connect
+	// to a host also pays DNS, so the best sample is kept.
+	assert.equal(probeCount, MATCHMAKER_LATENCY_PROBE_ATTEMPTS);
 
 	now += MATCHMAKER_LATENCY_CACHE_TTL_MS + 1;
 	assert.deepEqual(await service.measure(['FRA']), { FRA: 12 });
 	assert.equal(loadCount, 2);
-	assert.equal(probeCount, 2);
+	assert.equal(probeCount, 2 * MATCHMAKER_LATENCY_PROBE_ATTEMPTS);
 });
 
 test('latency probes obey the configured concurrency bound', async () => {
@@ -163,5 +167,36 @@ test('an expired target list is reused only within its bounded stale window', as
 	now = 31;
 	assert.deepEqual(await service.measure(['FRA']), {});
 	assert.equal(loadCount, 3);
-	assert.equal(probeCount, 2);
+	assert.equal(probeCount, 2 * MATCHMAKER_LATENCY_PROBE_ATTEMPTS);
+});
+
+
+test('falls back to a reachable port when the advertised game port never answers', async () => {
+	// Field evidence: Krunker advertises port 3000, which times out on ordinary networks for every
+	// region, so no latency was ever recorded and the popup showed a dash. Port 443 answers.
+	const attempted: number[] = [];
+	const service = new MatchmakerRegionLatencyService({
+		loadTargets: () => Promise.resolve({ 'au-syd': 'lobby-a.sydney.krunker.io:3000' }),
+		probeTarget: target => {
+			attempted.push(target.port);
+			return Promise.resolve(target.port === MATCHMAKER_LATENCY_FALLBACK_PORT ? 48 : undefined);
+		}
+	});
+
+	assert.deepEqual(await service.measure(['SYD']), { SYD: 48 });
+	assert.equal(attempted[0], 3000, 'the advertised port is tried first');
+	assert.ok(attempted.includes(MATCHMAKER_LATENCY_FALLBACK_PORT), 'the fallback port is tried');
+	assert.equal(attempted.filter(port => port === 3000).length, 1, 'a silent port is not retried');
+});
+
+test('keeps the best sample so first-connect DNS cost is not reported as latency', async () => {
+	// Measured on the reference machine: 153 ms on the first connect to a host, ~55 ms after.
+	const samples = [153, 55];
+	let index = 0;
+	const service = new MatchmakerRegionLatencyService({
+		loadTargets: () => Promise.resolve({ 'au-syd': `lobby-a.sydney.krunker.io:${MATCHMAKER_LATENCY_FALLBACK_PORT}` }),
+		probeTarget: () => Promise.resolve(samples[Math.min(index++, samples.length - 1)])
+	});
+
+	assert.deepEqual(await service.measure(['SYD']), { SYD: 55 });
 });

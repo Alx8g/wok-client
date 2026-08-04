@@ -82,6 +82,35 @@ test('searching can only be cancelled and never opens the server browser', () =>
 	});
 });
 
+test('the cancellation confirmation dismisses on any key and never joins or opens the server browser', () => {
+	for (const accept of [true, false]) {
+		const lifecycle = new MatchmakerPopupLifecycle();
+		lifecycle.show('cancelled');
+
+		assert.deepEqual(lifecycle.decide(accept, true), {
+			abortSearch: false,
+			dismissed: true,
+			joinGame: false,
+			openServerWindow: false,
+			playSelect: true
+		});
+	}
+});
+
+test('the cancellation confirmation clears itself without a second cancellation sound', () => {
+	const lifecycle = new MatchmakerPopupLifecycle();
+	lifecycle.show('cancelled');
+
+	assert.deepEqual(lifecycle.replace(), {
+		abortSearch: false,
+		dismissed: true,
+		joinGame: false,
+		openServerWindow: false,
+		playSelect: false
+	});
+	assert.deepEqual(lifecycle.replace(), noDismissal);
+});
+
 test('replacing a search does not report a user cancellation', () => {
 	const lifecycle = new MatchmakerPopupLifecycle();
 	lifecycle.show('searching');

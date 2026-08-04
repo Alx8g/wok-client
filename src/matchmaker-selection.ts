@@ -86,7 +86,8 @@ interface RankedMatchmakerCandidate {
 	latencyMs?: number;
 }
 
-function matchmakerRegionLatency(
+/** The only place a raw latency payload is trusted, shared by ranking and by the popup's ping. */
+export function matchmakerRegionLatency(
 	latencies: Readonly<Record<string, unknown>>,
 	region: string
 ): number | undefined {

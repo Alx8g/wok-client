@@ -1,84 +1,364 @@
-@keyframes matchmakerPopupSlideDown {
+/* Matchmaker popup.
+   Everything animated here is transform/opacity only, so nothing in this file can trigger
+   layout or paint work while the search runs behind the game menu. */
+
+@keyframes matchmakerPopupEnter {
+    from {
+        transform: translate(-50%, -1.4em) scale(0.97);
+        opacity: 0;
+    }
+
+    to {
+        transform: translate(-50%, 0) scale(1);
+        opacity: 1;
+    }
+}
+
+/* A narrow band swept across the strip: one composited element, no width animation. */
+@keyframes matchmakerSweep {
+    from {
+        transform: translateX(-110%);
+    }
+
+    to {
+        transform: translateX(415%);
+    }
+}
+
+/* Radar ping next to the title, so "live" reads without looking at the strip. */
+@keyframes matchmakerPulse {
     0% {
-        transform: translate(-50%, -500%);
+        transform: scale(1);
+        opacity: 0.85;
     }
 
     100% {
-        transform: translate(-50%, 0%);
+        transform: scale(3.2);
+        opacity: 0;
     }
 }
 
+@keyframes matchmakerChipIn {
+    from {
+        transform: translateY(0.35em);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+/* Hidden during gameplay. visibility also drops the hit target and pauses every animation,
+   so the popup costs nothing while the user is actually playing. */
 .onGame #matchmakerPopupContainer {
     opacity: 0 !important;
+    visibility: hidden;
+}
+
+.onGame #matchmakerPopupContainer,
+.onGame #matchmakerPopupContainer * {
+    animation-play-state: paused !important;
 }
 
 #matchmakerPopupContainer {
+    --mm-accent: #FBC02D;
+    --mm-good: #8BD450;
+    --mm-bad: #FF6B6B;
+    --mm-line: rgba(255, 255, 255, 0.09);
+
     position: absolute;
-    top: 10em;
+    top: 8em;
     left: 50%;
     z-index: 10000000000000000000;
     box-sizing: border-box;
-    width: 35em;
-    aspect-ratio: 2.5/1;
-    border-radius: 1.2em;
+    width: 36em;
+    border-radius: 0.85em;
     overflow: hidden;
-    background-size: 100% 100%;
     pointer-events: all;
-    background-color: #212121;
-    animation: matchmakerPopupSlideDown 0.5s ease forwards;
+    color: #fff;
+    background-color: #171717;
+    background-size: cover;
+    background-position: center;
+    box-shadow: 0 1.2em 2.4em rgba(0, 0, 0, 0.55);
+    transform: translate(-50%, 0);
+    animation: matchmakerPopupEnter 0.26s cubic-bezier(0.2, 0.8, 0.25, 1) both;
 }
 
-#matchmakerPopupTitle {
-    font-size: 1.8em;
-    color: white;
-    padding: 0.3em 0.7em;
-    background: var(--div-black);
-    margin-bottom: 0.3em;
-}
-
-#matchmakerPopupDescription {
-    background: var(--div-black);
-    color: var(--yellow);
-    box-sizing: border-box;
-    padding: 0.6em 1em;
-}
-
-#matchmakerPopupOptions {
+/* Scrim over the map art so the values stay readable on every map. */
+#matchmakerPopupContainer::before {
+    content: '';
     position: absolute;
+    inset: 0;
+    background: linear-gradient(105deg, rgba(9, 9, 9, 0.95) 0%, rgba(9, 9, 9, 0.86) 58%, rgba(9, 9, 9, 0.62) 100%);
+    pointer-events: none;
+}
+
+/* State strip */
+#matchmakerSearchProgress {
+    position: relative;
+    z-index: 1;
+    height: 0.26em;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+#matchmakerSearchProgressBar {
+    position: absolute;
+    top: 0;
     bottom: 0;
     left: 0;
     width: 100%;
+    background: var(--mm-accent);
+}
+
+#matchmakerPopupContainer[data-state="searching"] #matchmakerSearchProgressBar {
+    width: 32%;
+    background: linear-gradient(90deg, rgba(251, 192, 45, 0) 0%, var(--mm-accent) 50%, rgba(251, 192, 45, 0) 100%);
+    animation: matchmakerSweep 1.15s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+    will-change: transform;
+}
+
+#matchmakerPopupContainer[data-state="game"] #matchmakerSearchProgressBar {
+    background: var(--mm-good);
+}
+
+#matchmakerPopupContainer[data-state="error"] #matchmakerSearchProgressBar,
+#matchmakerPopupContainer[data-state="no-games"] #matchmakerSearchProgressBar {
+    background: var(--mm-bad);
+}
+
+#matchmakerPopupContainer[data-state="cancelled"] #matchmakerSearchProgressBar {
+    background: rgba(255, 255, 255, 0.32);
+}
+
+#matchmakerPopupBody {
+    position: relative;
+    z-index: 1;
+    padding: 0.85em 1.1em 1em;
+}
+
+/* Header */
+#matchmakerPopupHeader {
     display: flex;
+    align-items: center;
+    column-gap: 0.6em;
+}
+
+#matchmakerPopupTitle {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-size: 1.55em;
+    font-weight: 700;
+    line-height: 1.2;
+    color: #fff;
+}
+
+#matchmakerPopupTimer {
+    flex: 0 0 auto;
+    display: none;
+    font-size: 1.05em;
+    font-variant-numeric: tabular-nums;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+#matchmakerPopupContainer[data-state="searching"] #matchmakerPopupTimer {
+    display: block;
+}
+
+#matchmakerSearchPulse {
+    position: relative;
+    display: none;
+    flex: 0 0 auto;
+    width: 0.62em;
+    height: 0.62em;
+}
+
+#matchmakerPopupContainer[data-state="searching"] #matchmakerSearchPulse {
+    display: block;
+}
+
+#matchmakerSearchPulse::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    background: var(--mm-accent);
+}
+
+#matchmakerSearchPulse .matchmakerPulseRing {
+    position: absolute;
+    inset: 0;
+    border: 0.12em solid var(--mm-accent);
+    border-radius: 50%;
+    animation: matchmakerPulse 1.6s cubic-bezier(0.2, 0.6, 0.4, 1) infinite;
+    will-change: transform, opacity;
+}
+
+#matchmakerSearchPulse .matchmakerPulseRing:nth-child(2) {
+    animation-delay: 0.8s;
+}
+
+/* Secondary lines */
+#matchmakerPopupDescription {
+    margin-top: 0.25em;
+    font-size: 0.95em;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+#matchmakerPopupHint {
+    margin-top: 0.6em;
+    font-size: 0.8em;
+    letter-spacing: 0.02em;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+#matchmakerPopupChips:empty,
+#matchmakerPopupDescription:empty,
+#matchmakerPopupHint:empty {
+    display: none;
+}
+
+/* Stats */
+#matchmakerPopupChips {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.45em;
+    margin-top: 0.8em;
+}
+
+#matchmakerPopupContainer[data-state="no-games"] #matchmakerPopupChips,
+#matchmakerPopupContainer[data-state="searching"] #matchmakerPopupChips {
+    grid-template-columns: repeat(auto-fit, minmax(7em, 1fr));
+}
+
+#matchmakerPopupContainer[data-state="no-games"] #matchmakerPopupChips::before,
+#matchmakerPopupContainer[data-state="searching"] #matchmakerPopupChips::before {
+    content: 'Your filters';
+    grid-column: 1 / -1;
+    font-size: 0.62em;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.35);
+}
+
+.matchmakerChip {
+    min-width: 0;
+    padding: 0.35em 0.55em;
+    border: 1px solid var(--mm-line);
+    border-radius: 0.35em;
+    background: rgba(255, 255, 255, 0.05);
+    animation: matchmakerChipIn 0.22s ease both;
+}
+
+.matchmakerChip:nth-child(2) { animation-delay: 0.03s; }
+.matchmakerChip:nth-child(3) { animation-delay: 0.06s; }
+.matchmakerChip:nth-child(4) { animation-delay: 0.09s; }
+.matchmakerChip:nth-child(5) { animation-delay: 0.12s; }
+.matchmakerChip:nth-child(6) { animation-delay: 0.15s; }
+
+.matchmakerChipLabel {
+    display: block;
+    font-size: 0.62em;
+    font-weight: 700;
+    line-height: 1.5;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.matchmakerChipValue {
+    display: block;
+    overflow: hidden;
+    font-size: 1.02em;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: #fff;
+}
+
+.matchmakerChipValue[data-tone="good"] {
+    color: var(--mm-good);
+}
+
+.matchmakerChipValue[data-tone="warn"] {
+    color: var(--mm-accent);
+}
+
+.matchmakerChipValue[data-tone="bad"] {
+    color: var(--mm-bad);
+}
+
+/* Actions */
+#matchmakerPopupOptions {
+    display: flex;
+    column-gap: 0.55em;
+    margin-top: 0.9em;
 }
 
 .matchmakerPopupButton {
-    text-align: center;
-    border: 0.3em solid;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    column-gap: 0.5em;
     box-sizing: border-box;
-    margin: 0.5em;
-    color: white;
+    padding: 0.35em 1em;
+    border: 0.16em solid;
     border-radius: 0.3em;
-    font-size: 1.3em;
-    background-color: var(--div-black);
-    padding: 0.2em 1.4em;
-    transition: all 0.08s;
+    font-size: 1.15em;
+    color: #fff;
+    background-color: rgba(0, 0, 0, 0.45);
+    transition: transform 0.08s ease, border-color 0.08s ease;
 }
 
 #matchmakerConfirmButton {
-    border-color: var(--accept-color);
-    flex-grow: 1;
+    flex-grow: 2;
+    border-color: var(--accept-color, #6DBF3C);
 }
 
 #matchmakerCancelButton {
-    border-color: var(--danger-color);
+    border-color: var(--danger-color, #C63A3A);
 }
 
 .matchmakerPopupButton:hover {
     cursor: pointer;
     border-color: white !important;
-    transform: scale(0.95);
+    transform: scale(0.97);
 }
 
 .matchmakerPopupButton:active {
-    transform: scale(0.85);
+    transform: scale(0.93);
+}
+
+.matchmakerButtonHotkey {
+    padding: 0.15em 0.45em;
+    border-radius: 0.25em;
+    font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, monospace;
+    font-size: 0.6em;
+    font-style: normal;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.82);
+    background: rgba(255, 255, 255, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #matchmakerPopupContainer,
+    #matchmakerPopupContainer * {
+        animation: none !important;
+    }
+
+    #matchmakerPopupContainer[data-state="searching"] #matchmakerSearchProgressBar {
+        width: 100%;
+        opacity: 0.45;
+    }
+
+    #matchmakerPopupContainer[data-state="searching"] .matchmakerPulseRing {
+        opacity: 0.5;
+    }
 }

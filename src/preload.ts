@@ -998,16 +998,19 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 
 	const { matchmaker, hideAds, menuTimer, quickClassPicker, clientSplash, theme } = _userPrefs;
 
+	traceStartup('before settings.css read');
 	if (!clientCSSInjected) {
 		clientCSSInjected = true;
 		webFrame.insertCSS(await readFile(pathJoin($assets, 'settings.css'), { encoding: 'utf-8' }));
 		sendPerfMark('css-injected');
 	}
+	traceStartup('settings.css done; before matchmaker.css');
 	if (matchmaker && !matchmakerCSSInjected) {
 		matchmakerCSSInjected = true;
 		webFrame.insertCSS(await readFile(pathJoin($assets, 'matchmaker.css'), { encoding: 'utf-8' }));
 	}
 
+	traceStartup('matchmaker.css done; before splash');
 	if (clientSplash && !splashMountAttempted) {
 		void mountClientSplash(_userPrefs).catch(error => {
 			strippedConsole.error('Failed to mount the client splash screen', error);
@@ -1028,6 +1031,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 		toggleSettingCSS(styleSettingsCSS.quickClassPicker, 'quickClassPicker', quickClassPickerCSSApplied);
 	}
 
+	traceStartup('reached whenDOMReady registration');
 	whenDOMReady(() => {
 		// Each step is isolated: these are independent features, and one throwing must not silently
 		// cancel the ones queued behind it. That is exactly how the custom identity stopped
@@ -1054,13 +1058,13 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 // Kept for reloads and as the fallback when the boot payload is unavailable.
 ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: string, cssPath: string) => {
 	void applyClientVisuals(_userPrefs, version, cssPath)
-		.catch(error => { strippedConsole.error('Failed to apply client visuals', error); });
+		.catch(error => { traceStartup(`applyClientVisuals REJECTED: ${String(error)}`); strippedConsole.error('Failed to apply client visuals', error); });
 });
 
 const wokBootPayload = parseWokBootPayload();
 if (wokBootPayload) {
 	void applyClientVisuals(wokBootPayload.userPrefs, wokBootPayload.version, wokBootPayload.cssPath)
-		.catch(error => { strippedConsole.error('Failed to apply early client visuals', error); });
+		.catch(error => { traceStartup(`early applyClientVisuals REJECTED: ${String(error)}`); strippedConsole.error('Failed to apply early client visuals', error); });
 }
 
 // warning: timezone calculation may be slighty innacurate: no special logic for DST and approx. offsets for BRZ, BHN and AFR

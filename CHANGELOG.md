@@ -1,3 +1,30 @@
+## WOK Client 1.1.0-rc.4 (2026-08-04)
+
+### Graphics calibration
+- Rebuilt the calibration benchmark after it was found to rank backends the opposite way real gameplay does. Its frame pacing could stall on itself on some drivers, its GPU timing queries taxed the very backend they measured, and its workload rendered a 1,000-draw stress scene when a real Krunker frame issues about 23 draws. The benchmark now renders a measured game frame and reproducibly selects the profile that is genuinely faster.
+- Trials whose numbers came from the benchmark's own pacing rather than the graphics backend are now marked as non-comparable evidence, kept out of every comparison, and shown as such on the results page instead of appearing as a real measurement.
+- Removed display-synchronised (vsync) profiles from the automatic path. A competitive preset no longer trades hidden input latency for a synthetic stability score; manual vsync remains available by turning FPS un-cap off.
+- Windows systems that are not Intel-only now benchmark a genuinely different graphics backend instead of comparing Chromium's default against itself.
+- Calibration completes immediately on platforms with no alternative backend to compare, instead of spending launches on a single-candidate comparison.
+
+### Performance
+- New "Prefer High-Performance GPU" setting, on by default, so dual-GPU laptops stop rendering on the power-saving GPU. Diagnostics warn when the integrated GPU is active while a discrete GPU is present.
+- The game window is never background-throttled, so the launch animation can no longer slow the loading game behind it.
+- GPU rasterization is off by default and described honestly: modern Chromium already rasterizes on the GPU, and forcing it only bypasses driver safety checks. Existing installations are migrated once.
+- Removed Chromium switches that were verified to do nothing for this client, and reworded the remaining experimental toggle to say what it actually does.
+
+### Gameplay validation
+- Performance regressions are now judged against the machine's own validated history, so a profile that halves a fast machine's frame rate is detected and rolled back even when every session looks healthy in isolation.
+- Instability is judged by absolute frame delivery rather than a ratio of the machine's own average, which previously flagged fast machines as unstable and blocked confirmation.
+
+### Diagnostics
+- New "Copy diagnostics report" (Ctrl+F9) copies hardware, the active graphics backend and why it was chosen, calibration evidence, gameplay validation history, and performance settings.
+- Added optional gameplay measurement instruments used to anchor calibration to the real game rather than to assumptions.
+
+### Windows
+- Reimplemented borderless mode as a plain frameless full-screen window and restored the option on Windows.
+- Graphics failures on a manually selected backend are now recorded and surfaced instead of being silently ignored.
+
 ## WOK Client 1.1.0-rc.3 (2026-08-03)
 
 ### WOK fixes

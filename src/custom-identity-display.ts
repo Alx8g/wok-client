@@ -144,7 +144,9 @@ function ambientEnvironment(): CustomIdentityEnvironment | undefined {
 			? () => window.getGameActivity()
 			: undefined),
 		...(diagnosticSink ? { onDiagnostic: diagnosticSink } : {}),
-		root: () => document.body as unknown as IdentityRewriteNode,
+		// body may not exist in every document this runs in; documentElement always does, and the
+		// engine only needs a subtree root to observe.
+		root: () => (document.body ?? document.documentElement) as unknown as IdentityRewriteNode,
 		// One frame of batching. Replacements land before the next paint, so nothing is ever seen
 		// with the real name on it, and a burst of mutations still costs a single walk.
 		schedule: callback => requestAnimationFrame(() => { callback(); }),

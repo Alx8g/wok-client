@@ -995,7 +995,10 @@ let identityStarterHandle: number | undefined;
 function beginCustomIdentityWatch() {
 	if (identityStarterHandle !== undefined) return;
 	const tryStart = () => {
-		if (!latestUserPrefs || !document.body) return;
+		// documentElement always exists; body may never appear in the document this preload
+		// instance is attached to, which is precisely where the watch was stalling. The rewrite
+		// engine only needs a root to observe, and the element is a valid one.
+		if (!latestUserPrefs || !(document.body ?? document.documentElement)) return;
 		window.clearInterval(identityStarterHandle);
 		identityStarterHandle = undefined;
 		traceStartup('independent identity start');

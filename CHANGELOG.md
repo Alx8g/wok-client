@@ -20,8 +20,6 @@
 - Consolidated the useful historical client work into the unified WOK implementation.
 - Added the full adaptive startup-video system and one-shot gameplay-readiness handoff.
 - Added hardened calibration, graphics selection, settings, matchmaking, diagnostics, and recovery behavior.
-- Added verified native ETL capture, offline PresentMon replay, creation-qualified process binding, and content-addressed runtime evidence.
-- Added mandatory verified tournament dry runs, exact attested execution ordering, and at least seven paired blocks.
 - Tightened Electron IPC boundaries, package inventory checks, notice provenance, and cross-platform validation.
 
 ## WOK Client 1.0.0 (2026-08-02)

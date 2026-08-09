@@ -107,10 +107,14 @@ export function matchmakerLobbyChips(game: IMatchmakerGame, latencyMs?: number):
 
 function mapScopeLabel(criteria: IMatchmakerCriteria): string {
 	if (criteria.mapScope === 'all') return 'Any';
-	if (criteria.mapScope === 'official') return 'Official';
-	if (criteria.maps.length === 0) return 'None';
-	if (criteria.maps.length === 1) return shortText(criteria.maps[0], 18);
-	return `${criteria.maps.length} picked`;
+	if (criteria.maps.length === 0) return criteria.mapScope === 'official' ? 'Official' : 'None';
+	if (criteria.maps.length === 1) {
+		const map = shortText(criteria.maps[0], 18);
+		return criteria.mapScope === 'official' ? `Official · ${map}` : map;
+	}
+	return criteria.mapScope === 'official'
+		? `${criteria.maps.length} official picked`
+		: `${criteria.maps.length} picked`;
 }
 
 export function matchmakerFilterChips(criteria: IMatchmakerCriteria): MatchmakerChip[] {
@@ -130,7 +134,7 @@ export function matchmakerFilterChips(criteria: IMatchmakerCriteria): Matchmaker
 export function matchmakerNoResultsHint(criteria: IMatchmakerCriteria): string {
 	if (criteria.mapScope === 'selected' && criteria.maps.length === 0) return 'No maps are selected.';
 	if (criteria.minPlayers > criteria.maxPlayers) return 'Minimum players is above maximum.';
-	if (criteria.mapScope === 'selected' && criteria.maps.length <= MATCHMAKER_FEW_MAPS) return 'Try selecting more maps.';
+	if (criteria.mapScope !== 'all' && criteria.maps.length > 0 && criteria.maps.length <= MATCHMAKER_FEW_MAPS) return 'Try selecting more maps.';
 	if (criteria.regions.length === 1) return 'Try more regions.';
 	if (criteria.gameModes.length === 1) return 'Try more gamemodes.';
 	if (criteria.minRemainingTime >= MATCHMAKER_LONG_TIME_FILTER_S) return 'Try lowering minimum time left.';

@@ -122,6 +122,8 @@ test('long filter selections are summarised rather than truncated away', () => {
 test('the map filter says which maps are actually in play', () => {
 	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'all' }))[2].value, 'Any');
 	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'official' }))[2].value, 'Official');
+	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'official', maps: ['Burg'] }))[2].value, 'Official · Burg');
+	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'official', maps: ['Burg', 'Site'] }))[2].value, '2 official picked');
 	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'selected', maps: [] }))[2].value, 'None');
 	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'selected', maps: ['Burg'] }))[2].value, 'Burg');
 	assert.equal(matchmakerFilterChips(criteria({ mapScope: 'selected', maps: ['Burg', 'Site'] }))[2].value, '2 picked');
@@ -138,6 +140,10 @@ test('an empty result names the filter most likely to be the cause', () => {
 	);
 	assert.equal(
 		matchmakerNoResultsHint(criteria({ mapScope: 'selected', maps: ['Burg', 'Site'] })),
+		'Try selecting more maps.'
+	);
+	assert.equal(
+		matchmakerNoResultsHint(criteria({ mapScope: 'official', maps: ['Burg'] })),
 		'Try selecting more maps.'
 	);
 	assert.equal(matchmakerNoResultsHint(criteria({ regions: ['FRA'] })), 'Try more regions.');

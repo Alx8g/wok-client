@@ -20,8 +20,16 @@ const criteria: IMatchmakerCriteria = {
 	regions: ['FRA']
 };
 
-function game(id: string, players = 2, limit = 8, mode = 0, remaining = 180, map = 'Burg') {
-	return [id, 0, players, limit, { g: mode, i: map }, remaining];
+function game(
+	id: string,
+	players = 2,
+	limit = 8,
+	mode = 0,
+	remaining = 180,
+	map = 'Burg',
+	detailOverrides: Record<string, unknown> = {}
+): unknown[] {
+	return [id, 0, players, limit, { c: 0, cm: 0, g: mode, i: map, ...detailOverrides }, remaining];
 }
 
 const emptyContext = { currentMatch: '', currentUrl: '' };
@@ -156,9 +164,46 @@ test('official map scope accepts normalized official maps and rejects other maps
 	]);
 });
 
-test('selected map scope uses normalized selected identifiers', () => {
+test('official map scope combines selected maps with the official whitelist across all regions', () => {
 	const candidates = collect([
-		game('FRA:selected', 2, 8, 0, 180, 'Krunk_Plaza'),
+		game('FRA:selected-official', 2, 8, 0, 180, 'Burg'),
+		game('NY:selected-official', 2, 8, 0, 180, 'burg'),
+		game('DAL:unselected-official', 2, 8, 0, 180, 'Site'),
+		game('SYD:selected-custom', 2, 8, 0, 180, 'AIM Room')
+	], {
+		gameModes: [],
+		mapScope: 'official',
+		maps: ['  burg  ', 'AIM_Room'],
+		regions: []
+	});
+
+	assert.deepEqual(candidates.map(candidate => candidate.gameID), [
+		'FRA:selected-official',
+		'NY:selected-official'
+	]);
+});
+
+test('official map scope rejects custom lobbies that reuse an official map name', () => {
+	const missingMarkers = game('FRA:missing-markers');
+	missingMarkers[4] = { g: 0, i: 'Burg' };
+	const candidates = collect([
+		game('FRA:official'),
+		game('FRA:custom-game', 2, 8, 0, 180, 'Burg', { c: 1 }),
+		game('FRA:custom-map', 2, 8, 0, 180, 'Burg', { cm: 42 }),
+		game('FRA:malformed-markers', 2, 8, 0, 180, 'Burg', { c: '0', cm: '0' }),
+		missingMarkers
+	], {
+		mapScope: 'official'
+	});
+
+	assert.deepEqual(candidates.map(candidate => candidate.gameID), [
+		'FRA:official'
+	]);
+});
+
+test('selected map scope uses normalized selected identifiers, including custom lobbies', () => {
+	const candidates = collect([
+		game('FRA:selected', 2, 8, 0, 180, 'Krunk_Plaza', { c: 1, cm: 42 }),
 		game('FRA:not-selected', 2, 8, 0, 180, 'Burg')
 	], {
 		mapScope: 'selected',
@@ -182,7 +227,7 @@ test('selected map scope with no maps rejects every lobby', () => {
 test('all map scope accepts official and community maps', () => {
 	const candidates = collect([
 		game('FRA:official', 2, 8, 0, 180, 'Burg'),
-		game('FRA:community', 2, 8, 0, 180, 'AIM_Room')
+		game('FRA:community', 2, 8, 0, 180, 'AIM_Room', { c: 1, cm: 42 })
 	], {
 		mapScope: 'all'
 	});

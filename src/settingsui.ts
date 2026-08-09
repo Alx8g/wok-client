@@ -182,7 +182,7 @@ const settingsDesc: SettingsDesc = {
 	matchmaker_regions: { title: 'Regions', type: 'multisel', desc: 'Leave empty for any region.', safety: 0, cat: 3, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
 	matchmaker_gamemodes: { title: 'Gamemodes', type: 'multisel', desc: 'Leave empty for any mode.', safety: 0, cat: 3, opts: MATCHMAKER_GAMEMODES, cols: 4, instant: true },
 	matchmaker_mapScope: { title: 'Map Scope', type: 'sel', desc: 'Which maps to accept.', safety: 0, cat: 3, opts: MATCHMAKER_MAP_SCOPES, instant: true },
-	matchmaker_maps: { title: 'Maps', type: 'multisel', desc: 'Used only when Map Scope is set to selected.', safety: 0, cat: 3, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
+	matchmaker_maps: { title: 'Maps', type: 'multisel', desc: 'Narrows Official or Selected scope to these maps. Leave empty with Official scope to allow every official map.', safety: 0, cat: 3, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
 	matchmaker_minPlayers: { title: 'Minimum Players', type: 'num', min: 0, max: 7, safety: 0, cat: 3, instant: true },
 	matchmaker_maxPlayers: { title: 'Maximum Players', type: 'num', min: 0, max: 7, desc: 'Strict filters may find nothing.', safety: 0, cat: 3, instant: true },
 	matchmaker_minRemainingTime: { title: 'Minimum Time Left', type: 'num', min: 0, max: 480, desc: 'Seconds remaining in the match.', safety: 0, cat: 3, instant: true },

@@ -63,14 +63,26 @@ function matchmakerResponseGames(value: unknown): unknown[] {
 	return games;
 }
 
+/** Official rotation lobbies report both the custom-game and custom-map markers as zero. */
+function isOfficialMatchmakerLobby(value: unknown): boolean {
+	if (!Array.isArray(value)) return false;
+	const details = value[4];
+	if (!details || typeof details !== 'object' || Array.isArray(details)) return false;
+	const rawDetails = details as Record<string, unknown>;
+	return rawDetails.c === 0 && rawDetails.cm === 0;
+}
+
 function allowedMatchmakerMapIdentifiers(criteria: IMatchmakerCriteria): ReadonlySet<string> | undefined {
 	if (criteria.mapScope === 'all') return undefined;
-	if (criteria.mapScope === 'official') return OFFICIAL_MATCHMAKER_MAP_IDENTIFIERS;
-	if (criteria.mapScope === 'selected') {
-		return new Set(criteria.maps
-			.map(normalizeMatchmakerMapIdentifier)
-			.filter(identifier => identifier.length > 0));
+	const selectedIdentifiers = new Set(criteria.maps
+		.map(normalizeMatchmakerMapIdentifier)
+		.filter(identifier => identifier.length > 0));
+	if (criteria.mapScope === 'official') {
+		if (selectedIdentifiers.size === 0) return OFFICIAL_MATCHMAKER_MAP_IDENTIFIERS;
+		return new Set([...selectedIdentifiers]
+			.filter(identifier => OFFICIAL_MATCHMAKER_MAP_IDENTIFIERS.has(identifier)));
 	}
+	if (criteria.mapScope === 'selected') return selectedIdentifiers;
 	return new Set();
 }
 
@@ -202,6 +214,7 @@ export function collectMatchmakerCandidates(
 		if (
 			(restrictRegions && !allowedRegions.has(game.region))
 			|| (restrictGameModes && !allowedGameModes.has(game.gamemode))
+			|| (criteria.mapScope === 'official' && !isOfficialMatchmakerLobby(value))
 			|| (allowedMapIdentifiers && !allowedMapIdentifiers.has(normalizeMatchmakerMapIdentifier(game.map)))
 			|| game.playerCount < criteria.minPlayers
 			|| game.playerCount > criteria.maxPlayers

@@ -2,6 +2,7 @@ import { webFrame } from 'electron';
 import { strippedConsole } from './preload.ts';
 import * as os from "os";
 import { UPSTREAM_REPO_ID } from './branding.ts';
+import { keyboardEventMatchesKeybind } from './keybind-matching.ts';
 
 export const upstreamRepoID = UPSTREAM_REPO_ID;
 
@@ -167,8 +168,7 @@ export  function objectsAreEqual(object1: {[key: string]: any}, object2: {[key: 
  * @returns Whether or not the passed KeyboardEvent matches the keybind setting
  */
 export function keyboardEventMatchesCustomSetting(setting: KeybindUserPref, event: KeyboardEvent) {
-	if (document.activeElement.tagName === "INPUT") return; // Don't fire keybind inputs when in chat, typing something into a form, etc.
-	return event.key === setting.key && event.shiftKey === setting.shift && event.altKey === setting.alt && event.ctrlKey === setting.ctrl;
+	return keyboardEventMatchesKeybind(setting, event, document.activeElement as HTMLElement | null);
 }
 
 /**

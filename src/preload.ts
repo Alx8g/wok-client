@@ -597,19 +597,32 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 	};
 	if (alreadyRegistered) return;
 
-	document.addEventListener('keydown', event => {
+	// Capture before Krunker's gameplay handlers so number keys and other in-game binds still reach
+	// the client. A matched matchmaker key is consumed before the game can treat it as an action.
+	window.addEventListener('keydown', event => {
 		if (event.code === 'Escape') document.exitPointerLock();
-		if (event.repeat) return;
+		if (event.repeat || document.querySelector('.customKeybindSettingWrapper')) return;
 		const config = clientHotkeyConfig;
 		if (!config || !keyboardEventMatchesCustomSetting(config.matchmakerKey, event)) return;
 		if (config.matchmakerEnabled) {
+			// The popup is interactive, so release gameplay mouse capture before showing it.
+			document.exitPointerLock();
 			event.preventDefault();
-			event.stopPropagation();
+			event.stopImmediatePropagation();
 			ipcRenderer.send('matchmaker_requests_userPrefs');
 		} else {
 			window.location.href = `${config.overrideURL || 'https://krunker.io'}`;
 		}
-	});
+	}, { capture: true });
+}
+
+/** Apply matchmaker enablement and its search key immediately from the settings renderer. */
+export function applyClientMatchmakerSettings(_userPrefs: UserPrefs) {
+	applyClientHotkeys(_userPrefs);
+	if (_userPrefs.matchmaker) {
+		void ensureMatchmakerStylesheet()
+			.catch(error => { strippedConsole.error('Failed to apply matchmaker styles', error); });
+	}
 }
 
 let gameUsableObservationStarted = false;
@@ -980,8 +993,19 @@ async function readClientStylesheet(file: string, timeoutMs = 5_000): Promise<st
 	}
 }
 
+async function ensureMatchmakerStylesheet(): Promise<void> {
+	if (matchmakerCSSInjected) return;
+	matchmakerCSSInjected = true;
+	const matchmakerCSS = await readClientStylesheet('matchmaker.css');
+	if (matchmakerCSS !== undefined) webFrame.insertCSS(matchmakerCSS);
+	else traceStartup('matchmaker.css read timed out; continuing');
+}
+
 let latestUserPrefs: UserPrefs | undefined;
 let identityStarterHandle: number | undefined;
+let authoritativeUserPrefsReceived = false;
+let userPrefsRecoveryStarted = false;
+let userPrefsFetchInFlight = false;
 
 /**
  * Start the local display identity independently of the visuals pipeline.
@@ -1014,28 +1038,34 @@ function beginCustomIdentityWatch() {
 	identityStarterHandle = window.setInterval(tryStart, 500);
 	tryStart();
 	// This preload instance may never be handed preferences: the boot payload and the
-	// injectClientCSS push both land on the document Krunker discards. Ask for them directly -
-	// and keep asking, because main only answers a sender it can identify as the game frame, which
-	// is not yet true while the first document is still being replaced. A single early attempt
-	// returns nothing and, worse, returned it silently.
+	// injectClientCSS push can both land on a document Krunker discards. Ask main for the
+	// authoritative settings in every surviving document, even when a boot snapshot exists. The
+	// snapshot can be stale after a live settings change, and merely storing a successful pull does
+	// not initialize per-document features such as the matchmaker hotkey.
+	if (userPrefsRecoveryStarted) return;
+	userPrefsRecoveryStarted = true;
 	const fetchPrefs = () => {
-		if (latestUserPrefs) return;
+		if (authoritativeUserPrefsReceived || userPrefsFetchInFlight) return;
+		userPrefsFetchInFlight = true;
 		void ipcRenderer.invoke('wok_get_user_prefs')
 			.then((prefs: UserPrefs | undefined) => {
-				if (latestUserPrefs) return;
+				if (authoritativeUserPrefsReceived) return;
 				if (!prefs) {
 					traceStartup('preference fetch returned nothing (sender not trusted yet)');
 					return;
 				}
+				authoritativeUserPrefsReceived = true;
 				latestUserPrefs = prefs;
-				traceStartup('preferences fetched directly');
+				applyClientMatchmakerSettings(prefs);
+				traceStartup('authoritative preferences fetched and applied');
 				tryStart();
 			})
-			.catch(error => { traceStartup(`preference fetch failed: ${String(error)}`); });
+			.catch(error => { traceStartup(`preference fetch failed: ${String(error)}`); })
+			.finally(() => { userPrefsFetchInFlight = false; });
 	};
 	fetchPrefs();
 	const prefsPoll = window.setInterval(() => {
-		if (latestUserPrefs) {
+		if (authoritativeUserPrefsReceived) {
 			window.clearInterval(prefsPoll);
 			return;
 		}
@@ -1097,12 +1127,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 		sendPerfMark('css-injected');
 	}
 	traceStartup('settings.css done; before matchmaker.css');
-	if (matchmaker && !matchmakerCSSInjected) {
-		matchmakerCSSInjected = true;
-		const matchmakerCSS = await readClientStylesheet('matchmaker.css');
-		if (matchmakerCSS !== undefined) webFrame.insertCSS(matchmakerCSS);
-		else traceStartup('matchmaker.css read timed out; continuing');
-	}
+	if (matchmaker) await ensureMatchmakerStylesheet();
 
 	traceStartup('matchmaker.css done; before splash');
 	if (clientSplash && !splashMountAttempted) {

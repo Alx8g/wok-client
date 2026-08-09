@@ -50,17 +50,8 @@
     }
 }
 
-/* Hidden during gameplay. visibility also drops the hit target and pauses every animation,
-   so the popup costs nothing while the user is actually playing. */
-.onGame #matchmakerPopupContainer {
-    opacity: 0 !important;
-    visibility: hidden;
-}
-
-.onGame #matchmakerPopupContainer,
-.onGame #matchmakerPopupContainer * {
-    animation-play-state: paused !important;
-}
+/* The popup only exists while a search or decision is active. Keep it visible when a search is
+   started from the current lobby; the search hotkey releases pointer lock before mounting it. */
 
 #matchmakerPopupContainer {
     --mm-accent: #FBC02D;

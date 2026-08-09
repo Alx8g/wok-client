@@ -4,7 +4,7 @@ import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
-import { applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { applyClientMatchmakerSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
 import { buildThemeOptions, normalizeThemeSelection } from './themes.ts';
 import {
 	MATCHMAKER_GAMEMODES,
@@ -175,8 +175,8 @@ const settingsDesc: SettingsDesc = {
 	immersiveSplash: { title: 'Full-Screen Splash', type: 'bool', desc: 'Covers the Krunker loading screen behind it.', safety: 0, cat: 2, refreshOnly: true },
 	immersiveSplashBackgroundColor: { title: 'Splash Colour', type: 'color', desc: 'Background colour for the full-screen splash.', safety: 0, cat: 2, refreshOnly: true },
 
-	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: 'Finds lobbies matching your filters. Unofficial matchmaking may conflict with game rules.', safety: 2, cat: 3, refreshOnly: true },
-	matchmakerKey: { title: 'Search Hotkey', type: 'keybind', desc: 'Starts a search.', safety: 0, cat: 3, refreshOnly: true },
+	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: 'Finds lobbies matching your filters. Unofficial matchmaking may conflict with game rules.', safety: 2, cat: 3, instant: true },
+	matchmakerKey: { title: 'Search Hotkey', type: 'keybind', desc: 'Starts a search.', safety: 0, cat: 3, instant: true },
 	matchmakerAcceptKey: { title: 'Accept Hotkey', type: 'keybind', desc: 'Joins the found lobby.', safety: 0, cat: 3, instant: true },
 	matchmakerCancelKey: { title: 'Cancel Hotkey', type: 'keybind', desc: 'Rejects the found lobby.', safety: 0, cat: 3, instant: true },
 	matchmaker_regions: { title: 'Regions', type: 'multisel', desc: 'Leave empty for any region.', safety: 0, cat: 3, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
@@ -516,6 +516,9 @@ class SettingElem {
 			}
 
 			if (this.props.key === 'theme') applyThemeSelection(String(value));
+			if (this.props.key === 'matchmaker' || this.props.key === 'matchmakerKey') {
+				applyClientMatchmakerSettings(userPrefs);
+			}
 
 			// Live-applies: the replacement engine runs in this renderer, so there is nothing to
 			// reload. Clearing the values puts the game's own text straight back.

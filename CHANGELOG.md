@@ -1,3 +1,12 @@
+## WOK Client 1.1.0-rc.7 (2026-08-17)
+
+### Startup
+- Fixed the repeatable one-time gameplay freeze shortly after every launch. WOK was calling Chromium's complete Windows GPU-information path exactly 15 seconds after the page finished loading, which paused visible rendering for about 1.34 seconds. Ordinary sessions now use the lightweight basic adapter query, while complete driver enumeration is reserved for explicit calibration.
+- Preserved graphics recommendations, stored driver identity, calibration version checks and adaptive validation updates without running the expensive complete query during live gameplay.
+
+### Diagnostics
+- Fixed delayed custom-identity startup callbacks throwing `ReferenceError: process is not defined` after Krunker removed the page-level Node global. Diagnostic configuration is now captured when the preload first evaluates.
+
 ## WOK Client 1.1.0-rc.5 (2026-08-04)
 
 ### Fixed

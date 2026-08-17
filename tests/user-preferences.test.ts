@@ -17,7 +17,8 @@ test('accepts bounded WOK preference values', () => {
 		matchmaker_maps: ['Krunk Plaza', 'Krunk Plaza', 'AIM_Room'],
 		matchmaker_minPlayers: 2,
 		matchmaker_regions: ['us-ca-s', 'de-fra'],
-		overrideURL: 'https://comp.krunker.io/?game=ABC:123'
+		overrideURL: 'https://comp.krunker.io/?game=ABC:123',
+		rawMouseInput: true
 	}), {
 		competitiveMode: true,
 		fullscreen: 'fullscreen',
@@ -28,7 +29,8 @@ test('accepts bounded WOK preference values', () => {
 		matchmaker_maps: ['Krunk Plaza', 'AIM_Room'],
 		matchmaker_minPlayers: 2,
 		matchmaker_regions: ['us-ca-s', 'de-fra'],
-		overrideURL: 'https://comp.krunker.io/?game=ABC:123'
+		overrideURL: 'https://comp.krunker.io/?game=ABC:123',
+		rawMouseInput: true
 	});
 });
 

@@ -41,6 +41,7 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'menuTimer',
 	'performanceOverlay',
 	'quickClassPicker',
+	'rawMouseInput',
 	'regionTimezones',
 	'resourceSwapper',
 	'safeFlags_disableBackgrounding',

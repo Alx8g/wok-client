@@ -339,6 +339,7 @@ const $assets = pathResolve(import.meta.dirname, '..', 'assets');
 
 const settingsSkeleton = {
 	fpsUncap: true,
+	rawMouseInput: true,
 	graphicsBackend: 'auto',
 	competitiveMode: false,
 	performanceOverlay: false,

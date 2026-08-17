@@ -9,6 +9,7 @@ import { buildDiagnosticsReport } from './diagnostics-report.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
 import { runBeforeDeadline } from './absolute-deadline.ts';
+import { fetchCalibrationGraphicsInfo, fetchRuntimeGraphicsInfo } from './gpu-info-policy.ts';
 import { createIntroGameWindowHandoff, getIntroWindowBounds, selectIntroSource, startIntroSequence, type IntroSequence } from './intro-window.ts';
 import { startLoadingDeadline, WINDOW_REVEAL_DEADLINE_MS } from './loading-deadline.ts';
 import {
@@ -1627,12 +1628,15 @@ async function showCalibrationDecision(state: CalibrationState): Promise<'apply'
 	}
 }
 
-function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
+function prepareCalibrationForGraphicsIdentity(
+	hardwareFingerprint: string,
+	driverFingerprint: string
+): CalibrationState {
 	const signature = createCalibrationSignature(
 		app.getVersion(),
 		process.versions.electron,
-		graphicsProfileState.hardwareFingerprint,
-		calibrationDriverFingerprint(gpuInfo)
+		hardwareFingerprint,
+		driverFingerprint
 	);
 	const releasedGraphicsState = releaseExpiredGraphicsQuarantines(graphicsProfileState);
 	if (releasedGraphicsState !== graphicsProfileState) {
@@ -1659,6 +1663,13 @@ function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
 	}
 	calibrationState = preparedState;
 	return preparedState;
+}
+
+function prepareCalibrationForGpuInfo(gpuInfo: unknown): CalibrationState {
+	return prepareCalibrationForGraphicsIdentity(
+		graphicsProfileState.hardwareFingerprint,
+		calibrationDriverFingerprint(gpuInfo)
+	);
 }
 
 function finalizeCalibrationForBudgetExhaustion(): void {
@@ -1922,13 +1933,13 @@ if (userPrefs.resourceSwapper) {
 	} ]);
 }
 
-const COMPLETE_GPU_INFO_TIMEOUT_MS = 5_000;
+const GPU_INFO_TIMEOUT_MS = 5_000;
 
 async function refreshCompleteGraphicsInfo(): Promise<unknown> {
 	try {
 		const gpuInfo = await runBeforeDeadline(
-			() => app.getGPUInfo('complete'),
-			Date.now() + COMPLETE_GPU_INFO_TIMEOUT_MS,
+			() => fetchCalibrationGraphicsInfo(infoType => app.getGPUInfo(infoType)),
+			Date.now() + GPU_INFO_TIMEOUT_MS,
 			'Complete GPU information'
 		);
 		const devices = normalizeGraphicsDevices(gpuInfo);
@@ -1943,6 +1954,27 @@ async function refreshCompleteGraphicsInfo(): Promise<unknown> {
 	} catch (error) {
 		console.error('Failed to detect graphics adapters', error);
 		return {};
+	}
+}
+
+async function refreshRuntimeGraphicsInfo(): Promise<boolean> {
+	try {
+		const gpuInfo = await runBeforeDeadline(
+			() => fetchRuntimeGraphicsInfo(infoType => app.getGPUInfo(infoType)),
+			Date.now() + GPU_INFO_TIMEOUT_MS,
+			'Basic GPU information'
+		);
+		const devices = normalizeGraphicsDevices(gpuInfo);
+		graphicsProfileState = updateGraphicsDetection(graphicsProfileState, process.platform, devices);
+		// Basic information deliberately does not touch the driver fingerprint. Chromium's complete
+		// Windows query is the path that froze the live renderer, and only explicit calibration needs
+		// the driver fields it supplies.
+		persistGraphicsProfile();
+		console.log(`Refreshed ${devices.length} graphics adapter${devices.length === 1 ? '' : 's'}; next-launch recommendation: ${graphicsProfileState.recommendedBackend}`);
+		return true;
+	} catch (error) {
+		console.error('Failed to refresh graphics adapters', error);
+		return false;
 	}
 }
 
@@ -2326,8 +2358,9 @@ app.on('ready', async () => {
 	}
 
 	if (!calibrationBlocksStartup) {
-		// Refresh the complete GPU identity well after load: did-finish-load is the game's
-		// heaviest startup moment and nothing consumes the result until the next launch.
+		// Keep ordinary gameplay on Chromium's basic cached adapter query. On Windows the complete
+		// query performs extra system enumeration and was measured freezing the visible renderer for
+		// about 1.34 seconds. Complete driver identity is now fetched only by explicit calibration.
 		const GPU_IDENTITY_REFRESH_DELAY_MS = 15_000;
 		let gpuIdentityRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 		const clearGpuIdentityRefreshTimer = () => {
@@ -2341,15 +2374,28 @@ app.on('ready', async () => {
 			gpuIdentityRefreshTimer = setTimeout(() => {
 				gpuIdentityRefreshTimer = undefined;
 				if (mainWindow.isDestroyed()) return;
-				void refreshCompleteGraphicsInfo().then(gpuInfo => {
-					const previousCalibrationState = calibrationState;
-					const preparedState = prepareCalibrationForGpuInfo(gpuInfo);
-					if (preparedState !== previousCalibrationState && preparedState.status === 'uncalibrated') {
-						console.log('Graphics identity changed; calibration can be rerun from Settings when convenient.');
+				void refreshRuntimeGraphicsInfo().then(refreshed => {
+					if (!refreshed) return;
+					if (
+						graphicsProfileState.hardwareFingerprint !== ''
+						&& graphicsProfileState.driverFingerprint !== ''
+					) {
+						const previousCalibrationState = calibrationState;
+						const preparedState = prepareCalibrationForGraphicsIdentity(
+							graphicsProfileState.hardwareFingerprint,
+							graphicsProfileState.driverFingerprint
+						);
+						if (
+							previousCalibrationState
+							&& preparedState !== previousCalibrationState
+							&& preparedState.status === 'uncalibrated'
+						) {
+							console.log('Graphics identity changed; calibration can be rerun from Settings when convenient.');
+						}
+						// Version-only staleness can be evaluated from the complete identity already on disk;
+						// no live complete query is needed to retain its one-time prompt (§5.2).
+						void maybeShowStaleCalibrationPrompt();
 					}
-					// Benchmark-only staleness gets its single dismissible rerun-when-convenient notice (§5.2).
-					void maybeShowStaleCalibrationPrompt();
-
 					const currentAdaptiveValidationState = userPrefs.competitiveMode
 						? prepareCurrentAdaptiveValidationState()
 						: undefined;

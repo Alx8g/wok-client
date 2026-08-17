@@ -23,7 +23,10 @@
 - Calibration no longer promises to switch back "if it plays worse" - it switches back if it runs badly, which is what it can actually detect.
 - The graphics profile you were measured to be fastest on is kept when Competitive Mode is switched off. Competitive Mode governs in-game visual settings.
 
-## Unreleased
+## WOK Client 1.1.0-rc.6 (2026-08-17)
+
+### Input
+- Added a High-Polling Mouse Fix, enabled by default, that requests Chromium's unadjusted Pointer Lock path. This avoids the Windows cursor-recentering movement spikes behind Krunker's long-standing random 180–360-degree camera flicks while preserving a one-time ordinary Pointer Lock fallback on unsupported platforms. The fix was physically confirmed at 1000 Hz in addition to automated request/fallback coverage.
 
 ### Themes
 - The CSS swapper is now a theme picker, in Settings > Visuals. It ships six themes — WOK, Silk, Ember, Frost, Paper and Terminal — and still lists any .css file in the client's css folder. Themes apply immediately; nothing needs a restart or a page reload.

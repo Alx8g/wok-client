@@ -20,6 +20,15 @@ import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
 import { resolveTheme } from './themes.ts';
+import { installRawPointerLock } from './raw-pointer-lock.ts';
+
+// Install before Krunker's scripts can capture requestPointerLock. contextIsolation is disabled for
+// the game window, so this prototype is the one used by the page's canvas as well as the preload.
+const wokBootPayload = parseWokBootPayload();
+const rawPointerLockController = installRawPointerLock(
+	Element.prototype,
+	wokBootPayload?.userPrefs.rawMouseInput !== false
+);
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
 // Measures what a real Krunker frame issues so the calibration workload can be anchored to the
@@ -407,6 +416,7 @@ ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
 });
 
 ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
+	applyRawMouseInputPreference(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
 	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
 	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
@@ -520,6 +530,10 @@ function parseWokBootPayload(): WokBootPayload | undefined {
 	} catch (_error) {
 		return undefined;
 	}
+}
+
+function applyRawMouseInputPreference(_userPrefs: UserPrefs): void {
+	rawPointerLockController.setEnabled(_userPrefs.rawMouseInput !== false);
 }
 
 /** Run a callback immediately when the DOM is already parsed, otherwise at DOMContentLoaded. */
@@ -1056,6 +1070,7 @@ function beginCustomIdentityWatch() {
 				}
 				authoritativeUserPrefsReceived = true;
 				latestUserPrefs = prefs;
+				applyRawMouseInputPreference(prefs);
 				applyClientMatchmakerSettings(prefs);
 				traceStartup('authoritative preferences fetched and applied');
 				tryStart();
@@ -1111,6 +1126,7 @@ function injectKeyframeFix() {
  */
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	latestUserPrefs = _userPrefs;
+	applyRawMouseInputPreference(_userPrefs);
 	beginCustomIdentityWatch();
 	traceStartup(`applyClientVisuals entered; readyState=${document.readyState} body=${document.body ? 'present' : 'null'}`);
 	applyClientHotkeys(_userPrefs);
@@ -1180,7 +1196,6 @@ ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: strin
 		.catch(error => { traceStartup(`applyClientVisuals REJECTED: ${String(error)}`); strippedConsole.error('Failed to apply client visuals', error); });
 });
 
-const wokBootPayload = parseWokBootPayload();
 if (wokBootPayload) {
 	void applyClientVisuals(wokBootPayload.userPrefs, wokBootPayload.version, wokBootPayload.cssPath)
 		.catch(error => { traceStartup(`early applyClientVisuals REJECTED: ${String(error)}`); strippedConsole.error('Failed to apply early client visuals', error); });

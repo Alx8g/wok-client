@@ -17,6 +17,9 @@ test('accepts bounded WOK preference values', () => {
 		matchmaker_maps: ['Krunk Plaza', 'Krunk Plaza', 'AIM_Room'],
 		matchmaker_minPlayers: 2,
 		matchmaker_regions: ['us-ca-s', 'de-fra'],
+		motionBlur: true,
+		motionBlurQuality: 'balanced',
+		motionBlurStrength: 50,
 		overrideURL: 'https://comp.krunker.io/?game=ABC:123',
 		rawMouseInput: true
 	}), {
@@ -29,6 +32,9 @@ test('accepts bounded WOK preference values', () => {
 		matchmaker_maps: ['Krunk Plaza', 'AIM_Room'],
 		matchmaker_minPlayers: 2,
 		matchmaker_regions: ['us-ca-s', 'de-fra'],
+		motionBlur: true,
+		motionBlurQuality: 'balanced',
+		motionBlurStrength: 50,
 		overrideURL: 'https://comp.krunker.io/?game=ABC:123',
 		rawMouseInput: true
 	});
@@ -48,6 +54,7 @@ test('detects parser-rejected obsolete settings for canonical rewrites', () => {
 	};
 	assert.equal(containsObsoletePreferences(rawSettings), true);
 	assert.deepEqual(parseUserPreferencePatch(rawSettings), { competitiveMode: true });
+	assert.equal(containsObsoletePreferences({ motionBlurShutterAngle: 180 }), true);
 	assert.equal(containsObsoletePreferences({ competitiveMode: true }), false);
 });
 
@@ -61,6 +68,8 @@ test('rejects unsafe URLs, paths, ranges, and malformed keybinds', () => {
 		matchmaker_maps: new Array(65).fill('Burg'),
 		matchmaker_maxPlayers: 100,
 		matchmaker_regions: new Array(100).fill('region'),
+		motionBlurQuality: 'cinematic',
+		motionBlurStrength: 101,
 		overrideURL: 'https://evilkrunker.io/?game=owned',
 		unknownSetting: true
 	}), {});

@@ -22,6 +22,7 @@ import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDis
 import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
 import { captureIdentityDiagnostic } from './preload-diagnostics.ts';
+import type { MotionBlurController } from './motion-blur.ts';
 
 // Capture Node-backed diagnostic configuration during preload evaluation. Krunker can remove the
 // page's `process` global before delayed callbacks run because context isolation is disabled.
@@ -175,6 +176,53 @@ export const strippedConsole = {
 	time: console.time.bind(console),
 	timeEnd: console.timeEnd.bind(console)
 };
+
+let motionBlurController: MotionBlurController | undefined;
+let motionBlurLoadGeneration = 0;
+let motionBlurModulePromise: Promise<typeof import('./motion-blur.ts')> | undefined;
+
+function stopMotionBlurRuntime(): void {
+	motionBlurLoadGeneration++;
+	motionBlurController?.destroy();
+	motionBlurController = undefined;
+}
+
+/** Apply the persisted blur controls without loading the effect module while it is switched off. */
+export function applyClientMotionBlurSettings(preferences: UserPrefs): void {
+	const generation = ++motionBlurLoadGeneration;
+	if (preferences.motionBlur !== true) {
+		motionBlurController?.destroy();
+		motionBlurController = undefined;
+		return;
+	}
+
+	if (!motionBlurModulePromise) motionBlurModulePromise = import('./motion-blur.ts');
+	const modulePromise = motionBlurModulePromise;
+	void modulePromise
+		.then(motionBlur => {
+			if (generation !== motionBlurLoadGeneration || preferences.motionBlur !== true) return;
+			const options = motionBlur.motionBlurOptionsFromUserPrefs(preferences);
+			if (motionBlurController) {
+				motionBlurController.update(options);
+				return;
+			}
+
+			let nextController: MotionBlurController;
+			nextController = motionBlur.startMotionBlur(options, {
+				onError: error => {
+					if (motionBlurController === nextController) motionBlurController = undefined;
+					strippedConsole.error('Motion blur stopped after a rendering error', error);
+				}
+			});
+			motionBlurController = nextController;
+		})
+		.catch(error => {
+			if (motionBlurModulePromise === modulePromise) motionBlurModulePromise = undefined;
+			if (generation === motionBlurLoadGeneration) strippedConsole.error('Failed to start motion blur', error);
+		});
+}
+
+window.addEventListener('beforeunload', stopMotionBlurRuntime, { once: true });
 
 let settingsRenderPromise: Promise<void> | undefined;
 let stopAdaptiveValidationRuntime: (() => void) | undefined;
@@ -421,6 +469,7 @@ ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
 
 ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
 	applyRawMouseInputPreference(_userPrefs);
+	applyClientMotionBlurSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
 	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
 	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
@@ -1076,6 +1125,7 @@ function beginCustomIdentityWatch() {
 				latestUserPrefs = prefs;
 				applyRawMouseInputPreference(prefs);
 				applyClientMatchmakerSettings(prefs);
+				applyClientMotionBlurSettings(prefs);
 				traceStartup('authoritative preferences fetched and applied');
 				tryStart();
 			})

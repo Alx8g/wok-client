@@ -15,6 +15,7 @@ const OBSOLETE_PREFERENCE_KEYS = new Set([
 	'experimentalFlags_increaseLimits',
 	'inProcessGPU',
 	'loadingSplashTitleCardBackgroundColor',
+	'motionBlurShutterAngle',
 	'userscripts'
 ]);
 
@@ -39,6 +40,7 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'matchmaker',
 	'matchmaker_openServerWindow',
 	'menuTimer',
+	'motionBlur',
 	'performanceOverlay',
 	'quickClassPicker',
 	'rawMouseInput',
@@ -65,13 +67,15 @@ const ENUM_PREFERENCES: Readonly<Record<string, readonly string[]>> = {
 	fullscreen: ['windowed', 'maximized', 'fullscreen', 'borderless'],
 	graphicsBackend: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'],
 	hideAds: ['off', 'hide', 'block'],
-	matchmaker_mapScope: ['official', 'selected', 'all']
+	matchmaker_mapScope: ['official', 'selected', 'all'],
+	motionBlurQuality: ['native', 'balanced', 'performance']
 };
 
 const NUMBER_PREFERENCES: Readonly<Record<string, readonly [number, number]>> = {
 	matchmaker_maxPlayers: [0, 7],
 	matchmaker_minPlayers: [0, 7],
-	matchmaker_minRemainingTime: [0, 480]
+	matchmaker_minRemainingTime: [0, 480],
+	motionBlurStrength: [0, 100]
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {

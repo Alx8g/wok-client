@@ -21,6 +21,11 @@ import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-p
 import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
 import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
+import { captureIdentityDiagnostic } from './preload-diagnostics.ts';
+
+// Capture Node-backed diagnostic configuration during preload evaluation. Krunker can remove the
+// page's `process` global before delayed callbacks run because context isolation is disabled.
+const identityDiagnostic = captureIdentityDiagnostic(process.env);
 
 // Install before Krunker's scripts can capture requestPointerLock. contextIsolation is disabled for
 // the game window, so this prototype is the one used by the page's canvas as well as the preload.
@@ -67,11 +72,10 @@ if (process.env.WOK_DUMP_DOM) {
 // Diagnostic-only hunt for where Krunker keeps the local player's name. Inert unless
 // WOK_FIND_IDENTITY is set. Automatic detection failed on a real account, so rather than guess
 // another source this searches for a name the user has already supplied and reports every hit.
-if (process.env.WOK_FIND_IDENTITY) {
+if (identityDiagnostic.enabled) {
 	const runIdentityProbe = () => {
-		const needle = process.env.WOK_FIND_IDENTITY ?? '';
 		const hits = probeIdentitySources({
-			needle,
+			needle: identityDiagnostic.needle,
 			readActivity: () => (typeof window.getGameActivity === 'function' ? window.getGameActivity() : undefined),
 			readGlobals: () => {
 				const globals: Record<string, unknown> = {};
@@ -1089,12 +1093,12 @@ function beginCustomIdentityWatch() {
 }
 
 function traceStartup(message: string) {
-	if (!process.env.WOK_FIND_IDENTITY) return;
+	if (!identityDiagnostic.enabled) return;
 	ipcRenderer.send('wok_identity_probe', `[wok-identity] startup: ${message}`);
 }
 
 function startCustomIdentity(_userPrefs: UserPrefs) {
-	if (process.env.WOK_FIND_IDENTITY) {
+	if (identityDiagnostic.enabled) {
 		setCustomIdentityDiagnostic(message => { ipcRenderer.send('wok_identity_probe', `[wok-identity] ${message}`); });
 	}
 	applyCustomIdentity(_userPrefs);

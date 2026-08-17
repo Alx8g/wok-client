@@ -344,6 +344,9 @@ const settingsSkeleton = {
 	graphicsBackend: 'auto',
 	competitiveMode: false,
 	performanceOverlay: false,
+	motionBlur: false,
+	motionBlurStrength: 50,
+	motionBlurQuality: 'native',
 	menuTimer: false,
 	quickClassPicker: false,
 	// Local display only: swapped into this renderer's own UI, never sent to Krunker. Empty = real

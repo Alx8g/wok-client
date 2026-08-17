@@ -4,7 +4,7 @@ import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
-import { applyClientMatchmakerSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
 import { buildThemeOptions, normalizeThemeSelection } from './themes.ts';
 import {
 	MATCHMAKER_GAMEMODES,
@@ -169,6 +169,9 @@ const settingsDesc: SettingsDesc = {
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },
 
+	motionBlur: { title: 'Motion Blur', type: 'bool', desc: 'Blends recent game frames only while turning for montage-style trails. The HUD stays sharp.', safety: 0, cat: 2, instant: true },
+	motionBlurStrength: { title: 'Motion Blur Strength', type: 'num', min: 0, max: 100, desc: 'Controls the trail while turning. 50 is recommended; higher values feel dreamier.', safety: 0, cat: 2, instant: true },
+	motionBlurQuality: { title: 'Motion Blur Quality', type: 'sel', desc: 'Native preserves full sharpness. Lower resolutions reduce GPU work but soften the image while turning.', safety: 0, cat: 2, instant: true, opts: ['native', 'balanced', 'performance'], optLabels: ['Native (100%)', 'Balanced (75%)', 'Performance (50%)'] },
 	theme: themeOption,
 	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation while the game loads.', safety: 0, cat: 2 },
 	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Sound for the launch animation.', safety: 0, cat: 2 },
@@ -519,6 +522,9 @@ class SettingElem {
 			if (this.props.key === 'theme') applyThemeSelection(String(value));
 			if (this.props.key === 'matchmaker' || this.props.key === 'matchmakerKey') {
 				applyClientMatchmakerSettings(userPrefs);
+			}
+			if (this.props.key === 'motionBlur' || this.props.key === 'motionBlurStrength' || this.props.key === 'motionBlurQuality') {
+				applyClientMotionBlurSettings(userPrefs);
 			}
 
 			// Live-applies: the replacement engine runs in this renderer, so there is nothing to

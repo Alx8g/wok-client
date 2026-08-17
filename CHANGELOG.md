@@ -1,3 +1,13 @@
+## WOK Client 1.1.0-rc.8 (2026-08-17)
+
+### Visuals
+- Added opt-in motion blur for smooth montage-style camera trails. It activates only during deliberate turns, ignores fine aim corrections, switches itself off at rest, and leaves the HUD, crosshair, menus and text sharp.
+- Added instant controls under Settings > Visuals: a simple 0–100 strength slider and Native, Balanced and Performance quality modes. Native preserves the game canvas resolution; lower modes reduce the processed pixel count.
+
+### Rendering
+- Captured frames inside Krunker's own WebGL render task, preventing discarded-buffer black frames without enabling `preserveDrawingBuffer` and its permanent rendering cost.
+- The effect loads only when enabled and restores every wrapped WebGL method when disabled or when the page unloads.
+
 ## WOK Client 1.1.0-rc.7 (2026-08-17)
 
 ### Startup

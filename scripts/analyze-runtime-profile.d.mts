@@ -2,6 +2,8 @@ export interface CpuProfileAnalysisEntry {
 	category: string;
 	column: number;
 	functionName: string;
+	inclusiveMs: number;
+	inclusivePercent: number;
 	line: number;
 	nodeId: number;
 	samples: number;
@@ -22,6 +24,7 @@ export interface CpuProfileAnalysis {
 	durationMs: number;
 	sampleCount: number;
 	top: CpuProfileAnalysisEntry[];
+	topInclusive: CpuProfileAnalysisEntry[];
 	unattributedSamples: number;
 	usedRecordedTimeDeltas: boolean;
 }

@@ -35,11 +35,18 @@ export function analyzeCpuProfile(profile, limit = 40) {
 	if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('Result limit must be an integer from 1 through 500.');
 
 	const nodes = new Map();
+	const parents = new Map();
 	for (const node of profile.nodes) {
 		const id = nonNegativeInteger(node?.id);
 		const frame = callFrameFor(node);
 		if (id === undefined || !frame) continue;
 		nodes.set(id, { frame, id });
+		if (Array.isArray(node.children)) {
+			for (const child of node.children) {
+				const childId = nonNegativeInteger(child);
+				if (childId !== undefined) parents.set(childId, id);
+			}
+		}
 	}
 	if (nodes.size === 0) throw new Error('CPU profile contains no valid nodes.');
 
@@ -54,6 +61,7 @@ export function analyzeCpuProfile(profile, limit = 40) {
 		? measuredDurationUs / profile.samples.length
 		: 1_000;
 	const byNode = new Map();
+	const inclusiveByNode = new Map();
 	let attributedUs = 0;
 	let unattributedSamples = 0;
 
@@ -69,22 +77,42 @@ export function analyzeCpuProfile(profile, limit = 40) {
 		existing.samples++;
 		existing.selfUs += sampleUs;
 		byNode.set(id, existing);
+		const visited = new Set();
+		let ancestorId = id;
+		while (nodes.has(ancestorId) && !visited.has(ancestorId)) {
+			visited.add(ancestorId);
+			inclusiveByNode.set(ancestorId, (inclusiveByNode.get(ancestorId) ?? 0) + sampleUs);
+			const parentId = parents.get(ancestorId);
+			if (parentId === undefined) break;
+			ancestorId = parentId;
+		}
 		attributedUs += sampleUs;
 	}
 
 	const totalUs = measuredDurationUs ?? attributedUs;
-	const entries = [...byNode.values()]
-		.map(({ node, samples, selfUs }) => ({
+	const entries = [...nodes.values()].map(node => {
+		const self = byNode.get(node.id) ?? { samples: 0, selfUs: 0 };
+		const inclusiveUs = inclusiveByNode.get(node.id) ?? 0;
+		return {
 			category: frameCategory(node.frame),
 			column: node.frame.columnNumber + 1,
 			functionName: node.frame.functionName,
+			inclusiveMs: inclusiveUs / 1_000,
+			inclusivePercent: totalUs > 0 ? 100 * inclusiveUs / totalUs : 0,
 			line: node.frame.lineNumber + 1,
 			nodeId: node.id,
-			samples,
-			selfMs: selfUs / 1_000,
-			selfPercent: totalUs > 0 ? 100 * selfUs / totalUs : 0,
+			samples: self.samples,
+			selfMs: self.selfUs / 1_000,
+			selfPercent: totalUs > 0 ? 100 * self.selfUs / totalUs : 0,
 			url: node.frame.url
-		}))
+		};
+	});
+	const topInclusive = entries
+		.filter(entry => entry.functionName !== '(root)' && entry.inclusiveMs > 0)
+		.sort((left, right) => right.inclusiveMs - left.inclusiveMs || right.selfMs - left.selfMs)
+		.slice(0, limit);
+	const topSelf = entries
+		.filter(entry => entry.selfMs > 0)
 		.sort((left, right) => right.selfMs - left.selfMs || right.samples - left.samples)
 		.slice(0, limit);
 	const categories = new Map();
@@ -104,7 +132,8 @@ export function analyzeCpuProfile(profile, limit = 40) {
 			.sort((left, right) => right.selfMs - left.selfMs),
 		durationMs: totalUs / 1_000,
 		sampleCount: profile.samples.length,
-		top: entries,
+		top: topSelf,
+		topInclusive,
 		unattributedSamples,
 		usedRecordedTimeDeltas: validDeltas
 	};
@@ -124,6 +153,12 @@ export function formatCpuProfileAnalysis(analysis) {
 	];
 	for (const category of analysis.categories) {
 		lines.push(`  ${category.category.padEnd(18)} ${category.selfMs.toFixed(1).padStart(9)} ms  ${category.selfPercent.toFixed(2).padStart(6)}%`);
+	}
+	lines.push('', 'Top inclusive time:');
+	for (const entry of analysis.topInclusive) {
+		lines.push(
+			`${entry.inclusivePercent.toFixed(2).padStart(6)}%  ${entry.inclusiveMs.toFixed(1).padStart(9)} ms  ${entry.functionName}  ${printableLocation(entry)}`
+		);
 	}
 	lines.push('', 'Top self-time:');
 	for (const entry of analysis.top) {

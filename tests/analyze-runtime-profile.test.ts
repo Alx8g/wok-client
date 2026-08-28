@@ -5,7 +5,7 @@ import { analyzeCpuProfile, formatCpuProfileAnalysis } from '../scripts/analyze-
 const profile = {
 	endTime: 10_000,
 	nodes: [
-		{ callFrame: { columnNumber: 2, functionName: 'gameLoop', lineNumber: 10, url: '' }, id: 1 },
+		{ callFrame: { columnNumber: 2, functionName: 'gameLoop', lineNumber: 10, url: '' }, children: [3], id: 1 },
 		{ callFrame: { columnNumber: 0, functionName: '(garbage collector)', lineNumber: 0, url: '' }, id: 2 },
 		{ callFrame: { columnNumber: 4, functionName: 'wokHook', lineNumber: 20, url: 'file:///Wok/preload.mjs' }, id: 3 }
 	],
@@ -21,6 +21,10 @@ test('ranks CPU-profile nodes by measured self-time and separates runtime catego
 	assert.equal(analysis.attributedMs, 10);
 	assert.equal(analysis.sampleCount, 4);
 	assert.equal(analysis.usedRecordedTimeDeltas, true);
+	assert.deepEqual(analysis.topInclusive.slice(0, 2).map(entry => [entry.functionName, entry.inclusiveMs, entry.inclusivePercent]), [
+		['gameLoop', 8, 80],
+		['wokHook', 6, 60]
+	]);
 	assert.deepEqual(analysis.top.map(entry => ({
 		category: entry.category,
 		functionName: entry.functionName,

@@ -134,6 +134,12 @@ import {
 	type AdaptiveValidationProfileIdentity,
 	type AdaptiveValidationState
 } from './adaptive-validation.ts';
+import {
+	RUNTIME_PROFILE_DURATION_MS,
+	RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
+	RuntimeProfiler,
+	type RuntimeProfilePaths
+} from './runtime-profiler.ts';
 
 // Diagnostic-only userData override for isolated test profiles. Inert unless WOK_USER_DATA_DIR is
 // set to an absolute path. Must run before any app.getPath('userData') use so config, caches, and
@@ -176,20 +182,28 @@ const traceDelayMs = Number.isFinite(parsedTraceDelayMs) && parsedTraceDelayMs >
 const TRACE_DEFAULT_CATEGORIES = 'toplevel,v8,blink,cc,gpu,viz,latency,benchmark,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.frame';
 let traceScheduled = false;
 
-async function recordDiagnosticTrace(): Promise<void> {
-	const categories = (process.env.WOK_TRACE_CATEGORIES ?? TRACE_DEFAULT_CATEGORIES)
+function configuredTraceCategories(): string[] {
+	return (process.env.WOK_TRACE_CATEGORIES ?? TRACE_DEFAULT_CATEGORIES)
 		.split(',')
 		.map(category => category.trim())
 		.filter(category => category.length > 0);
+}
+
+async function startDiagnosticTrace(categories: string[]): Promise<void> {
+	const knownCategories = new Set(await contentTracing.getCategories());
+	for (const category of categories) {
+		if (!knownCategories.has(category)) console.log(`[wok-trace] category-not-listed ${category}`);
+	}
+	await contentTracing.startRecording({
+		recording_mode: 'record-until-full',
+		included_categories: categories
+	});
+}
+
+async function recordDiagnosticTrace(): Promise<void> {
+	const categories = configuredTraceCategories();
 	try {
-		const knownCategories = new Set(await contentTracing.getCategories());
-		for (const category of categories) {
-			if (!knownCategories.has(category)) console.log(`[wok-trace] category-not-listed ${category}`);
-		}
-		await contentTracing.startRecording({
-			recording_mode: 'record-until-full',
-			included_categories: categories
-		});
+		await startDiagnosticTrace(categories);
 		console.log(`[wok-trace] recording-started duration-ms=${traceDurationMs}`);
 		await new Promise(resolve => { setTimeout(resolve, traceDurationMs); });
 		const tracePath = await contentTracing.stopRecording(process.env.WOK_TRACE_OUT || undefined);
@@ -2065,6 +2079,78 @@ app.on('ready', async () => {
 	logPerfMark('window-created');
 	if (userPrefs.fullscreen === 'borderless') mainWindow.moveTop();
 
+	const runtimeProfileDirectory = pathJoin(configPath, 'runtime-profiles');
+	const runtimeProfilePaths = (capturedAt = new Date()): RuntimeProfilePaths => {
+		const stamp = capturedAt.toISOString().replaceAll(':', '-').replaceAll('.', '-');
+		const directory = pathJoin(runtimeProfileDirectory, stamp);
+		mkdirSync(directory, { recursive: true });
+		return {
+			cpuProfile: pathJoin(directory, 'renderer.cpuprofile'),
+			manifest: pathJoin(directory, 'manifest.json'),
+			trace: pathJoin(directory, 'chromium-trace.json')
+		};
+	};
+	const runtimeProfiler = new RuntimeProfiler({
+		debugger: {
+			attach: protocolVersion => { mainWindow.webContents.debugger.attach(protocolVersion); },
+			detach: () => { mainWindow.webContents.debugger.detach(); },
+			isAttached: () => mainWindow.webContents.debugger.isAttached(),
+			sendCommand: (method, commandParameters) => mainWindow.webContents.debugger.sendCommand(method, commandParameters)
+		},
+		now: () => new Date(),
+		startTracing: startDiagnosticTrace,
+		stopTracing: resultPath => contentTracing.stopRecording(resultPath),
+		wait: durationMs => new Promise(resolve => { setTimeout(resolve, durationMs); }),
+		writeJson: (artifactPath, value) => writeFile(artifactPath, `${JSON.stringify(value)}\n`, 'utf-8')
+	});
+	const captureInMatchRuntimeProfile = async () => {
+		if (runtimeProfiler.isRunning()) {
+			console.log('[wok-runtime-profile] capture already running');
+			return;
+		}
+		const paths = runtimeProfilePaths();
+		const pageUrl = parseKrunkerUrl(mainWindow.webContents.getURL(), true);
+		console.log(`[wok-runtime-profile] recording-started duration-ms=${RUNTIME_PROFILE_DURATION_MS}`);
+		try {
+			const result = await runtimeProfiler.capture({
+				durationMs: RUNTIME_PROFILE_DURATION_MS,
+				metadata: {
+					appVersion: app.getVersion(),
+					chromeVersion: process.versions.chrome,
+					electronVersion: process.versions.electron,
+					graphicsBackend: graphicsSelection.backend,
+					page: pageUrl ? `${pageUrl.origin}${pageUrl.pathname}` : 'unavailable',
+					platform: process.platform
+				},
+				paths,
+				sampleIntervalUs: RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
+				traceCategories: configuredTraceCategories()
+			});
+			console.log(`[wok-runtime-profile] cpu-profile-written ${result.cpuProfilePath}`);
+			console.log(`[wok-runtime-profile] trace-written ${result.tracePath}`);
+			if (!mainWindow.isDestroyed()) {
+				await dialog.showMessageBox(mainWindow, {
+					buttons: ['OK'],
+					detail: `Renderer CPU profile:\n${result.cpuProfilePath}\n\nChromium trace:\n${result.tracePath}`,
+					message: 'In-match performance profile captured.',
+					title: 'WOK performance profile',
+					type: 'info'
+				});
+			}
+		} catch (error) {
+			console.error('[wok-runtime-profile] failed', error);
+			if (!mainWindow.isDestroyed()) {
+				await dialog.showMessageBox(mainWindow, {
+					buttons: ['OK'],
+					detail: error instanceof Error ? error.message : String(error),
+					message: 'The in-match performance profile could not be captured.',
+					title: 'WOK performance profile',
+					type: 'error'
+				});
+			}
+		}
+	};
+
 	// Phase 2 of the legacy migration: copy deferred regular files and directory trees in
 	// the background now that a window exists. The request handler indexes the resource
 	// swapper before these files land, so migrated resources are only served after its next
@@ -2294,6 +2380,11 @@ app.on('ready', async () => {
 						...(adaptiveValidationState ? { adaptiveValidation: adaptiveValidationState } : {})
 					}));
 				}
+			},
+			{
+				label: 'Capture 10-second in-match performance profile',
+				accelerator: 'CommandOrControl+Shift+F9',
+				click: () => { void captureInMatchRuntimeProfile(); }
 			},
 			{ type: 'separator' },
 			...constructDevtoolsSubmenu(mainWindow, userPrefs.alwaysWaitForDevTools || null)

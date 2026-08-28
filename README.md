@@ -46,7 +46,14 @@ Press `Alt` on Windows or Linux to reveal the application menu.
 - `Ctrl+F7` or `Cmd+F7`: join the game link from the clipboard
 - `F12` or `Ctrl+Shift+I`/`Cmd+Shift+I`: toggle Developer Tools
 - `Alt+F8`: toggle performance diagnostics when enabled
+- `Ctrl+Shift+F9` or `Cmd+Shift+F9`: capture a 10-second renderer CPU profile and Chromium trace
 - Matchmaker accept, cancel, and launch keys are configurable; the default launch key is `F1`
+
+Runtime profiles are written beneath the app's `config/runtime-profiles/` directory. Rank renderer self-time from a source checkout with:
+
+```sh
+node scripts/analyze-runtime-profile.mjs "/path/to/renderer.cpuprofile"
+```
 
 ## Build and validation
 

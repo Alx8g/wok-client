@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
 	RUNTIME_PROFILE_DURATION_MS,
 	RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
+	RUNTIME_PROFILE_TRIGGER_ARGUMENT,
 	RuntimeProfiler,
+	runtimeProfileRequested,
 	type RuntimeProfileEnvironment,
 	type RuntimeProfileRequest
 } from '../src/runtime-profiler.ts';
@@ -72,6 +74,12 @@ function environment(options: {
 	};
 	return { calls, environment: value, writes };
 }
+
+test('recognizes only the explicit local runtime-profile trigger argument', () => {
+	assert.equal(runtimeProfileRequested(['wok-client.exe', RUNTIME_PROFILE_TRIGGER_ARGUMENT]), true);
+	assert.equal(runtimeProfileRequested(['wok-client.exe', `${RUNTIME_PROFILE_TRIGGER_ARGUMENT}=1`]), false);
+	assert.equal(runtimeProfileRequested(['wok-client.exe']), false);
+});
 
 test('captures matching renderer CPU and Chromium trace artifacts, then detaches cleanly', async () => {
 	const fixture = environment();

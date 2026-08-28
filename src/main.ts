@@ -138,6 +138,7 @@ import {
 	RUNTIME_PROFILE_DURATION_MS,
 	RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
 	RuntimeProfiler,
+	runtimeProfileRequested,
 	type RuntimeProfilePaths
 } from './runtime-profiler.ts';
 
@@ -277,6 +278,9 @@ function findClientUrl(args: string[]): string | undefined {
 	return undefined;
 }
 
+let captureInMatchRuntimeProfile: (() => Promise<void>) | undefined;
+let runtimeProfileTriggerPending = runtimeProfileRequested(process.argv);
+
 const gotTheLock = app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
@@ -299,6 +303,10 @@ if (!gotTheLock) {
 		if (mainWindow) {
 			if (mainWindow.isMinimized()) mainWindow.restore();
 			mainWindow.focus();
+		}
+		if (runtimeProfileRequested(commandLine)) {
+			if (captureInMatchRuntimeProfile) void captureInMatchRuntimeProfile();
+			else runtimeProfileTriggerPending = true;
 		}
 		const url = findClientUrl(commandLine);
 		if (!url) return;
@@ -2103,7 +2111,7 @@ app.on('ready', async () => {
 		wait: durationMs => new Promise(resolve => { setTimeout(resolve, durationMs); }),
 		writeJson: (artifactPath, value) => writeFile(artifactPath, `${JSON.stringify(value)}\n`, 'utf-8')
 	});
-	const captureInMatchRuntimeProfile = async () => {
+	captureInMatchRuntimeProfile = async () => {
 		if (runtimeProfiler.isRunning()) {
 			console.log('[wok-runtime-profile] capture already running');
 			return;
@@ -2150,6 +2158,10 @@ app.on('ready', async () => {
 			}
 		}
 	};
+	if (runtimeProfileTriggerPending) {
+		runtimeProfileTriggerPending = false;
+		void captureInMatchRuntimeProfile();
+	}
 
 	// Phase 2 of the legacy migration: copy deferred regular files and directory trees in
 	// the background now that a window exists. The request handler indexes the resource

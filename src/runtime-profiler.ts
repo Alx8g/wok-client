@@ -1,5 +1,10 @@
 export const RUNTIME_PROFILE_DURATION_MS = 10_000;
 export const RUNTIME_PROFILE_SAMPLE_INTERVAL_US = 1_000;
+export const RUNTIME_PROFILE_TRIGGER_ARGUMENT = '--capture-runtime-profile';
+
+export function runtimeProfileRequested(argumentsList: readonly string[]): boolean {
+	return argumentsList.includes(RUNTIME_PROFILE_TRIGGER_ARGUMENT);
+}
 
 export interface RuntimeProfilePaths {
 	cpuProfile: string;

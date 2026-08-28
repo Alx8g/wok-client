@@ -274,33 +274,29 @@ export function createCalibrationCandidates({
 	addCandidate(currentBackend, currentFramePolicy);
 	addCandidate(recommendedBackend, 'uncapped');
 
-	// On Windows, Chromium's `default` IS ANGLE-D3D11, so a d3d11 challenger would benchmark the
-	// incumbent against itself and waste the whole run. D3D11on12 is the only distinct backend the
-	// automatic plan can offer, and the quarantine plus provisional-confirmation loop contain it.
-	const fallbackBackend: AppliedGraphicsBackend = platform === 'win32' && recommendedBackend === 'default'
-		? 'd3d11on12'
-		: 'default';
-	addCandidate(fallbackBackend, 'uncapped');
+	// Chromium default on Windows is ANGLE-D3D11. D3D11on12 is a valid automatic candidate only
+	// when hardware selection explicitly recommended it (Intel-only systems). Forcing it as a
+	// generic AMD/NVIDIA challenger can fall through to d3d11-warp-webgl software rendering.
+	if (platform === 'win32' && recommendedBackend === 'd3d11on12') addCandidate('default', 'uncapped');
 
 	if (candidates.length === 0) addCandidate('default', 'uncapped');
 	return candidates.slice(0, 2);
 }
 
 /**
- * True when the staged candidates offer a genuine backend comparison for the shootout. Windows
- * plans always run (kept as-is; whether a capped/uncapped pairing of one backend is worth its
- * launches is A8's territory, not this guard's). Off Windows the automatic candidate space
- * collapses to Chromium default — macOS default is already ANGLE-Metal and the d3d11 pair is
- * Windows-only — so unless a manual selection contributes a genuinely different backend (for
- * example vulkan on Linux), the consent/relaunch/benchmark cycle would measure one candidate
- * against itself (audit C2).
+ * True when staged candidates offer genuinely different renderer backends. Frame-policy variants
+ * of one backend are not a backend comparison, and Windows `default` and explicit `d3d11` both
+ * resolve to ANGLE-D3D11. Avoiding tautological trials also prevents unsupported D3D11on12 probes
+ * from falling through to software WARP on AMD/NVIDIA systems.
  */
 export function calibrationOffersBackendComparison(
 	candidates: CalibrationCandidate[],
 	platform: NodeJS.Platform = process.platform
 ): boolean {
-	if (platform === 'win32') return true;
-	return new Set(candidates.map(candidate => candidate.backend)).size > 1;
+	const backends = new Set(candidates.map(candidate =>
+		platform === 'win32' && candidate.backend === 'd3d11' ? 'default' : candidate.backend
+	));
+	return backends.size > 1;
 }
 
 /** Reason persisted (and shown in diagnostics) when calibration completes without a benchmark cycle. */

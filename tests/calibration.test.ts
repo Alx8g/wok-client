@@ -719,29 +719,26 @@ test('the same slow trial without the artifact flag still lets the numeric winne
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'default:uncapped');
 });
 
-test('non-Intel Windows machines get a real challenger, not ANGLE-D3D11 against itself', () => {
-	// Chromium's `default` on Windows is already ANGLE-D3D11, so a d3d11 challenger would spend
-	// the whole calibration budget comparing the incumbent against itself.
-	const nvidiaCandidates = createCalibrationCandidates({
+test('non-Intel Windows machines retain hardware D3D11 instead of probing a WARP fallback', () => {
+	// Chromium default on Windows is already ANGLE-D3D11. Field verification on AMD showed that
+	// forcing d3d11on12 can resolve to d3d11-warp-webgl, so it is not a generic challenger.
+	const amdOrNvidiaCandidates = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'uncapped',
 		platform: 'win32',
 		recommendedBackend: 'default'
 	});
-	assert.deepEqual(nvidiaCandidates.map(candidate => candidate.id), [
-		'default:uncapped',
-		'd3d11on12:uncapped'
-	]);
+	assert.deepEqual(amdOrNvidiaCandidates.map(candidate => candidate.id), ['default:uncapped']);
+	assert.equal(calibrationOffersBackendComparison(amdOrNvidiaCandidates, 'win32'), false);
 
-	// A quarantined d3d11on12 leaves a single-candidate plan instead of a tautological pair.
-	const quarantinedCandidates = createCalibrationCandidates({
-		blockedBackends: ['d3d11on12'],
-		currentBackend: 'default',
+	// Explicit D3D11 is equivalent to Chromium default on Windows, not another backend.
+	const explicitD3d11Candidates = createCalibrationCandidates({
+		currentBackend: 'd3d11',
 		currentFramePolicy: 'uncapped',
 		platform: 'win32',
 		recommendedBackend: 'default'
 	});
-	assert.deepEqual(quarantinedCandidates.map(candidate => candidate.id), ['default:uncapped']);
+	assert.equal(calibrationOffersBackendComparison(explicitD3d11Candidates, 'win32'), false);
 });
 
 test('the results page explains an artifact-affected verdict instead of claiming a measured win', () => {
@@ -812,7 +809,7 @@ function createLinuxCandidates() {
 	});
 }
 
-test('only multi-backend plans count as a comparison off Windows; Windows plans always run', () => {
+test('only genuinely different renderer backends count as a comparison on every platform', () => {
 	const singleDefault = createLinuxCandidates();
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'linux'), false);
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'darwin'), false);
@@ -836,9 +833,9 @@ test('only multi-backend plans count as a comparison off Windows; Windows plans 
 	});
 	assert.equal(calibrationOffersBackendComparison(vulkanChallenge, 'linux'), true);
 
-	// Windows keeps today's behavior for every plan shape, including same-backend policy pairs.
+	// Intel D3D11on12 versus default D3D11 remains a real Windows comparison; one default is not.
 	assert.equal(calibrationOffersBackendComparison(createWindowsCandidates(), 'win32'), true);
-	assert.equal(calibrationOffersBackendComparison(singleDefault, 'win32'), true);
+	assert.equal(calibrationOffersBackendComparison(singleDefault, 'win32'), false);
 });
 
 test('non-Windows calibration completes immediately with the default profile, clearly reasoned', () => {
@@ -884,7 +881,7 @@ test('a genuine backend comparison still runs off Windows', () => {
 	assert.equal(running.plan.length, 2);
 });
 
-test('single-backend Windows plans keep running exactly as before', () => {
+test('single-backend Windows plans complete without a pointless restart cycle', () => {
 	const cappedPair = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'capped',
@@ -894,8 +891,9 @@ test('single-backend Windows plans keep running exactly as before', () => {
 	assert.deepEqual(cappedPair.map(candidate => candidate.id), ['default:capped', 'default:uncapped']);
 
 	const prepared = prepareCalibrationState(undefined, signature, cappedPair, false, 'win32');
-	assert.equal(prepared.status, 'uncalibrated');
-	assert.equal(prepareCalibrationState(requestCalibrationRerun(prepared), signature, cappedPair, false, 'win32').status, 'running');
+	assert.equal(prepared.status, 'complete');
+	assert.equal(prepared.completionReason, CALIBRATION_NO_COMPARISON_REASON);
+	assert.equal(prepareCalibrationState(requestCalibrationRerun(prepared), signature, cappedPair, false, 'win32').status, 'complete');
 });
 
 test('the unmeasured completion reason survives the persistence round trip', () => {

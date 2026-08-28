@@ -3,7 +3,7 @@
 	"productName": "WOK Client",
 	"version": "1.1.0-rc.8",
 	"private": true,
-	"description": "Hardware-adaptive, performance-focused Krunker desktop client based on Crankshaft",
+	"description": "The fastest Krunker client. Ever.",
 	"main": "./bundle/main.mjs",
 	"desktopName": "wok-client.desktop",
 	"type": "module",
@@ -25,7 +25,7 @@
 		"Crankshaft contributors (https://github.com/KraXen72/crankshaft/graphs/contributors)"
 	],
 	"license": "GPL-3.0-only",
-	"homepage": "https://client.wok.social",
+	"homepage": "https://wok.social",
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/nzalexgarciagil-ctrl/wok-client.git"

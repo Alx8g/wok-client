@@ -1,8 +1,8 @@
 # WOK Client
 
-WOK Client is a hardware-adaptive, performance-focused Krunker desktop client written in TypeScript.
+WOK Client is the fastest Krunker client. Ever.
 
-Website: [client.wok.social](https://client.wok.social)
+Website: [wok.social](https://wok.social)
 
 Source: [github.com/nzalexgarciagil-ctrl/wok-client](https://github.com/nzalexgarciagil-ctrl/wok-client)
 

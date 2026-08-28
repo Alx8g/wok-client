@@ -21,12 +21,21 @@ import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-p
 import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
 import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
+import { HUD_CONTAINMENT_CSS } from './hud-containment.ts';
 import { captureIdentityDiagnostic } from './preload-diagnostics.ts';
 import type { MotionBlurController } from './motion-blur.ts';
 
 // Capture Node-backed diagnostic configuration during preload evaluation. Krunker can remove the
 // page's `process` global before delayed callbacks run because context isolation is disabled.
 const identityDiagnostic = captureIdentityDiagnostic(process.env);
+
+// Keep Krunker's fixed FPS/ping telemetry subtree out of unrelated per-frame layout and paint.
+// This changes no dimensions or content and measured a repeatable frame-time reduction.
+try {
+	webFrame.insertCSS(HUD_CONTAINMENT_CSS, { cssOrigin: 'user' });
+} catch (error) {
+	console.error('Failed to install WOK HUD containment.', error);
+}
 
 // Install before Krunker's scripts can capture requestPointerLock. contextIsolation is disabled for
 // the game window, so this prototype is the one used by the page's canvas as well as the preload.

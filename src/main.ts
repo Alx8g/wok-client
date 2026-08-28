@@ -2094,8 +2094,7 @@ app.on('ready', async () => {
 		mkdirSync(directory, { recursive: true });
 		return {
 			cpuProfile: pathJoin(directory, 'renderer.cpuprofile'),
-			manifest: pathJoin(directory, 'manifest.json'),
-			trace: pathJoin(directory, 'chromium-trace.json')
+			manifest: pathJoin(directory, 'manifest.json')
 		};
 	};
 	const runtimeProfiler = new RuntimeProfiler({
@@ -2131,16 +2130,14 @@ app.on('ready', async () => {
 					platform: process.platform
 				},
 				paths,
-				sampleIntervalUs: RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
-				traceCategories: configuredTraceCategories()
+				sampleIntervalUs: RUNTIME_PROFILE_SAMPLE_INTERVAL_US
 			});
 			console.log(`[wok-runtime-profile] cpu-profile-written ${result.cpuProfilePath}`);
-			console.log(`[wok-runtime-profile] trace-written ${result.tracePath}`);
 			if (!mainWindow.isDestroyed()) {
 				await dialog.showMessageBox(mainWindow, {
 					buttons: ['OK'],
-					detail: `Renderer CPU profile:\n${result.cpuProfilePath}\n\nChromium trace:\n${result.tracePath}`,
-					message: 'In-match performance profile captured.',
+					detail: `Renderer CPU profile:\n${result.cpuProfilePath}`,
+					message: 'In-match renderer CPU profile captured.',
 					title: 'WOK performance profile',
 					type: 'info'
 				});
@@ -2394,7 +2391,7 @@ app.on('ready', async () => {
 				}
 			},
 			{
-				label: 'Capture 10-second in-match performance profile',
+				label: 'Capture 10-second in-match renderer CPU profile',
 				accelerator: 'CommandOrControl+Shift+F9',
 				click: () => { void captureInMatchRuntimeProfile(); }
 			},

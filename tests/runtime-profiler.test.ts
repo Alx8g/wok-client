@@ -112,6 +112,38 @@ test('captures matching renderer CPU and Chromium trace artifacts, then detaches
 	assert.equal(profiler.isRunning(), false);
 });
 
+test('captures a low-overhead CPU profile without starting broad Chromium tracing', async () => {
+	const fixture = environment();
+	const profiler = new RuntimeProfiler(fixture.environment);
+
+	const result = await profiler.capture(request({
+		paths: { cpuProfile: 'profile.cpuprofile', manifest: 'manifest.json' },
+		traceCategories: undefined
+	}));
+
+	assert.deepEqual(fixture.calls, [
+		'attach:1.3',
+		'Profiler.enable',
+		`Profiler.setSamplingInterval:{"interval":${RUNTIME_PROFILE_SAMPLE_INTERVAL_US}}`,
+		'Profiler.start',
+		`wait:${RUNTIME_PROFILE_DURATION_MS}`,
+		'Profiler.stop',
+		'write:profile.cpuprofile',
+		'write:manifest.json',
+		'Profiler.disable',
+		'detach'
+	]);
+	assert.equal(result.tracePath, undefined);
+	assert.deepEqual(fixture.writes.get('manifest.json'), {
+		completedAt: '2026-08-28T00:00:01.000Z',
+		cpuProfilePath: 'profile.cpuprofile',
+		durationMs: RUNTIME_PROFILE_DURATION_MS,
+		metadata: { build: 'test' },
+		sampleIntervalUs: RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
+		startedAt: '2026-08-28T00:00:00.000Z'
+	});
+});
+
 test('rejects overlap while a capture is waiting and becomes reusable afterward', async () => {
 	let releaseWait: (() => void) | undefined;
 	const waiting = new Promise<void>(resolve => { releaseWait = resolve; });

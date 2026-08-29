@@ -1,5 +1,9 @@
 /** biome-ignore-all lint/correctness/noUnusedVariables: .d.ts file */
 type UserPrefs = {
+	/** Local-only rewritten identity styling; disabled by default. */
+	customIdentityRgbCycle?: boolean;
+	/** Sort Public server regions by measured latency and show ping; enabled by default. */
+	wokPublicServerPingSort?: boolean;
 	[preference: string]: UserPrefValue;
 };
 

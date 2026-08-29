@@ -55,6 +55,8 @@ export function sanitizeCustomClan(value: unknown): string {
 /** Preference keys this module owns, so user-preferences.ts and main.ts cannot drift apart. */
 export const CUSTOM_NAME_PREFERENCE_KEY = 'customName';
 export const CUSTOM_CLAN_PREFERENCE_KEY = 'customClan';
+/** Opt-in legacy-style fast RGB animation for the rewritten identity fragments. */
+export const CUSTOM_IDENTITY_RGB_CYCLE_PREFERENCE_KEY = 'customIdentityRgbCycle';
 
 /**
  * The manual half of identity discovery. The client reads the real name from Krunker at runtime
@@ -66,16 +68,30 @@ export const REAL_NAME_PREFERENCE_KEY = 'realName';
 export const REAL_CLAN_PREFERENCE_KEY = 'realClan';
 
 const CLAN_PREFERENCE_KEYS = new Set<string>([CUSTOM_CLAN_PREFERENCE_KEY, REAL_CLAN_PREFERENCE_KEY]);
-const IDENTITY_PREFERENCE_KEYS = new Set<string>([
+const TEXT_IDENTITY_PREFERENCE_KEYS = new Set<string>([
 	CUSTOM_CLAN_PREFERENCE_KEY,
 	CUSTOM_NAME_PREFERENCE_KEY,
 	REAL_CLAN_PREFERENCE_KEY,
 	REAL_NAME_PREFERENCE_KEY
 ]);
+const IDENTITY_PREFERENCE_KEYS = new Set<string>([
+	...TEXT_IDENTITY_PREFERENCE_KEYS,
+	CUSTOM_IDENTITY_RGB_CYCLE_PREFERENCE_KEY
+]);
 
-/** True for every preference key this module validates. */
+/** True for every custom-identity preference, including the RGB-cycle toggle. */
 export function isCustomIdentityPreferenceKey(key: string): boolean {
 	return IDENTITY_PREFERENCE_KEYS.has(key);
+}
+
+/** True for the identity preferences whose values are sanitized handle strings. */
+export function isCustomIdentityTextPreferenceKey(key: string): boolean {
+	return TEXT_IDENTITY_PREFERENCE_KEYS.has(key);
+}
+
+/** Read the opt-in legacy RGB animation preference with a safe-off default. */
+export function resolveCustomIdentityRgbCycle(prefs: Readonly<Partial<UserPrefs>> | undefined): boolean {
+	return prefs?.[CUSTOM_IDENTITY_RGB_CYCLE_PREFERENCE_KEY] === true;
 }
 
 /**
@@ -84,8 +100,9 @@ export function isCustomIdentityPreferenceKey(key: string): boolean {
  * markup-bearing value; anything else is dropped and the empty default applies. '' is valid and
  * means "use the real one".
  */
-export function parseCustomIdentityPreference(key: string, value: unknown): string | undefined {
-	if (typeof value !== 'string') return undefined;
+export function parseCustomIdentityPreference(key: string, value: unknown): string | boolean | undefined {
+	if (key === CUSTOM_IDENTITY_RGB_CYCLE_PREFERENCE_KEY) return typeof value === 'boolean' ? value : undefined;
+	if (!isCustomIdentityTextPreferenceKey(key) || typeof value !== 'string') return undefined;
 	const sanitized = CLAN_PREFERENCE_KEYS.has(key) ? sanitizeCustomClan(value) : sanitizeCustomName(value);
 	return sanitized === value ? value : undefined;
 }

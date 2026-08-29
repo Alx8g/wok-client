@@ -19,6 +19,7 @@ import { formatIdentityContext, formatIdentityProbe, probeIdentitySources } from
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
+import { applyPublicServerPingSortSettings as applyPublicServerPingSortRuntime } from './public-server-ping-sort.ts';
 import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
 import { HUD_CONTAINMENT_CSS } from './hud-containment.ts';
@@ -484,6 +485,7 @@ ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
 ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
 	applyRawMouseInputPreference(_userPrefs);
 	applyClientMotionBlurSettings(_userPrefs);
+	applyPublicServerPingSortSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
 	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
 	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
@@ -696,6 +698,14 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 			window.location.href = `${config.overrideURL || 'https://krunker.io'}`;
 		}
 	}, { capture: true });
+}
+
+/** Apply Public-screen ping annotation and sorting through the trusted main-process probe. */
+export function applyPublicServerPingSortSettings(_userPrefs: UserPrefs): void {
+	applyPublicServerPingSortRuntime(
+		_userPrefs,
+		regions => ipcRenderer.invoke('matchmaker_measure_region_latency', regions)
+	);
 }
 
 /** Apply matchmaker enablement and its search key immediately from the settings renderer. */
@@ -1141,6 +1151,7 @@ function beginCustomIdentityWatch() {
 				applyRawMouseInputPreference(prefs);
 				applyClientMatchmakerSettings(prefs);
 				applyClientMotionBlurSettings(prefs);
+				applyPublicServerPingSortSettings(prefs);
 				traceStartup('authoritative preferences fetched and applied');
 				tryStart();
 			})
@@ -1201,6 +1212,7 @@ function injectKeyframeFix() {
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	latestUserPrefs = _userPrefs;
 	applyRawMouseInputPreference(_userPrefs);
+	applyPublicServerPingSortSettings(_userPrefs);
 	beginCustomIdentityWatch();
 	traceStartup(`applyClientVisuals entered; readyState=${document.readyState} body=${document.body ? 'present' : 'null'}`);
 	applyClientHotkeys(_userPrefs);

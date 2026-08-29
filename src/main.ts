@@ -366,6 +366,8 @@ const settingsSkeleton = {
 	graphicsBackend: 'auto',
 	competitiveMode: false,
 	performanceOverlay: false,
+	// Public screen only: pin fixed categories, then show and sort geographic regions by ping.
+	wokPublicServerPingSort: true,
 	motionBlur: false,
 	motionBlurStrength: 50,
 	motionBlurQuality: 'native',
@@ -375,6 +377,7 @@ const settingsSkeleton = {
 	// one. realName/realClan are the manual fallback for what to search for; normally detected.
 	customName: '',
 	customClan: '',
+	customIdentityRgbCycle: false,
 	realName: '',
 	realClan: '',
 	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless

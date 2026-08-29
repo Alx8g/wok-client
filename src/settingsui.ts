@@ -4,7 +4,7 @@ import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
-import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyPublicServerPingSortSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
 import { buildThemeOptions, normalizeThemeSelection } from './themes.ts';
 import {
 	MATCHMAKER_GAMEMODES,
@@ -153,6 +153,7 @@ function applyThemeSelection(value: string) {
 const settingsDesc: SettingsDesc = {
 	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Measures your PC and applies the fastest graphics profile, plus lower in-game visuals for more FPS. Your Krunker settings are restored if you turn it off.', safety: 0, cat: 0 },
 	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
+	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Pins fixed Public categories, shows numeric regional ping, and sorts measured geographic regions from lowest to highest latency.', safety: 0, cat: 1, instant: true },
 	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
 	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Uses unadjusted Pointer Lock input to avoid Windows Chromium camera jumps and OS mouse acceleration. Restart required.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto. Competitive Mode picks whichever measured fastest here.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
@@ -163,6 +164,7 @@ const settingsDesc: SettingsDesc = {
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
 	customName: { title: 'Custom Name', type: 'text', desc: 'Shows this name instead of yours in chat, the scoreboard, the kill feed and the menu. Only on your screen; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
 	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
+	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Cycles your whole local name and clan through fast RGB colours. Custom Name and Clan override the text; blank fields keep your real identity. Only visible on your screen.', safety: 0, cat: 1, instant: true },
 	realName: { title: 'Your Real Name', type: 'text', desc: 'Only needed if the custom name is not being applied: the exact Krunker name to replace. The client normally detects this by itself.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
 	realClan: { title: 'Your Real Clan', type: 'text', desc: 'Only needed if the custom clan tag is not being applied: your real tag, without brackets.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
 	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
@@ -526,6 +528,7 @@ class SettingElem {
 			if (this.props.key === 'motionBlur' || this.props.key === 'motionBlurStrength' || this.props.key === 'motionBlurQuality') {
 				applyClientMotionBlurSettings(userPrefs);
 			}
+			if (this.props.key === 'wokPublicServerPingSort') applyPublicServerPingSortSettings(userPrefs);
 
 			// Live-applies: the replacement engine runs in this renderer, so there is nothing to
 			// reload. Clearing the values puts the game's own text straight back.

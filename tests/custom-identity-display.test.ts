@@ -35,10 +35,15 @@ function allText(node: FakeNode): string[] {
 function createEnvironment(root: FakeNode) {
 	const frames: (() => void)[] = [];
 	const timers = new Map<number, () => void>();
+	let currentRoot = root;
 	let timerSequence = 0;
 	let observerCount = 0;
 	let disconnectCount = 0;
 	let gameActivity: (() => unknown) | undefined;
+	type RenderedIdentity = Readonly<Partial<{ clan: string; name: string }>> | (() => Readonly<Partial<{ clan: string; name: string }>> | undefined);
+	let renderedIdentity: RenderedIdentity | undefined;
+	let rootObserverCallback: (() => void) | undefined;
+	let savedIdentityName: unknown;
 
 	const environment: CustomIdentityEnvironment = {
 		clearTimer: handle => { timers.delete(handle); },
@@ -50,7 +55,18 @@ function createEnvironment(root: FakeNode) {
 			};
 		},
 		getGameActivity: () => gameActivity,
-		root: () => root,
+		getRenderedIdentity: () => typeof renderedIdentity === 'function' ? renderedIdentity() : renderedIdentity,
+		getSavedIdentityName: () => savedIdentityName,
+		observeRoot: callback => {
+			rootObserverCallback = callback;
+			return {
+				disconnect: () => {
+					if (rootObserverCallback === callback) rootObserverCallback = undefined;
+				},
+				observe: () => {}
+			};
+		},
+		root: () => currentRoot,
 		schedule: callback => {
 			frames.push(callback);
 			return frames.length;
@@ -83,7 +99,13 @@ function createEnvironment(root: FakeNode) {
 				next[1]();
 			}
 		},
-		setGameActivity(activity: (() => unknown) | undefined) { gameActivity = activity; }
+		setGameActivity(activity: (() => unknown) | undefined) { gameActivity = activity; },
+		setRenderedIdentity(identity: RenderedIdentity | undefined) { renderedIdentity = identity; },
+		setRoot(next: FakeNode) {
+			currentRoot = next;
+			rootObserverCallback?.();
+		},
+		setSavedIdentityName(name: unknown) { savedIdentityName = name; }
 	};
 }
 
@@ -192,6 +214,109 @@ test('the discovered name is what gets replaced across the whole UI', () => {
 		assert.equal(otherPlayer.data, 'Rocketeer2 killed Bandit', 'another player is not the local player');
 		assert.deepEqual(getCustomIdentity(), { clan: '', name: 'Nightfall' });
 		assert.equal(getRealIdentityForDisplay().name, 'Rocketeer');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('the saved account username is provisional while a Premium display alias may still appear', () => {
+	const accountName = text('Lamborghini');
+	const root = element('BODY', [accountName]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setSavedIdentityName('Lamborghini');
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+
+		assert.equal(accountName.data, 'Nightfall');
+		assert.equal(getRealIdentityForDisplay().name, 'Lamborghini');
+		assert.equal(harness.pendingTimers, 1, 'the account name must not end Premium alias discovery');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('rendered Premium alias and clan win over the underlying account username automatically', () => {
+	const card = text('[GO] Goat');
+	const root = element('BODY', [card]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setSavedIdentityName('Lamborghini');
+		harness.setRenderedIdentity({ clan: 'GO', name: 'Goat' });
+		applyCustomIdentity({ customIdentityRgbCycle: true }, harness.environment);
+		harness.runFrames();
+
+		assert.deepEqual(getRealIdentityForDisplay(), { clan: 'GO', name: 'Goat' });
+		assert.equal(harness.pendingTimers, 0, 'the visible alias and clan are authoritative immediately');
+		assert.equal(card.data, '[GO] Goat');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('discovery does not promote a generated alias over the saved Lamborghini candidate', () => {
+	const accountName = text('Lamborghini');
+	const root = element('BODY', [accountName]);
+	const harness = createEnvironment(root);
+	let premiumAlias = '';
+	try {
+		harness.setSavedIdentityName('Lamborghini');
+		applyCustomIdentity({ customName: 'Goat' }, harness.environment);
+		harness.runFrames();
+		assert.equal(accountName.data, 'Goat');
+
+		// The menu reader sees WOK's generated Goat until it reads the source with the display swap
+		// temporarily restored. The real Premium alias is published only after this feedback-loop check.
+		harness.setRenderedIdentity(() => ({ name: premiumAlias || accountName.data }));
+		harness.runTimers();
+		assert.equal(accountName.data, 'Goat', 'the generated alias must be restored and reapplied, not become a new rule');
+		assert.equal(getRealIdentityForDisplay().name, 'Lamborghini');
+		assert.equal(harness.pendingTimers, 1, 'the saved username remains provisional');
+
+		premiumAlias = 'Goat';
+		harness.runTimers();
+		harness.runFrames();
+		assert.equal(getRealIdentityForDisplay().name, 'Goat', 'the actual Premium alias wins once it appears');
+		assert.equal(accountName.data, 'Goat');
+		assert.equal(harness.pendingTimers, 0);
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('body replacement rebinds the identity engine to the new root', () => {
+	const oldChat = text('Rocketeer: gg');
+	const oldRoot = element('BODY', [oldChat]);
+	const newChat = text('Rocketeer: gg');
+	const newRoot = element('BODY', [newChat]);
+	const harness = createEnvironment(oldRoot);
+	try {
+		harness.setGameActivity(() => ({ user: 'Rocketeer' }));
+		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
+		harness.runFrames();
+		assert.equal(oldChat.data, 'Nightfall: gg');
+
+		harness.setRoot(newRoot);
+		harness.runFrames();
+		assert.equal(oldChat.data, 'Rocketeer: gg', 'the detached body is restored during rebind');
+		assert.equal(newChat.data, 'Nightfall: gg', 'the replacement body remains automatically rewritten');
+	} finally {
+		stopCustomIdentityDisplay();
+	}
+});
+
+test('RGB alone discovers and watches the real identity without requiring a custom alias', () => {
+	const card = text('[GO] Goat');
+	const root = element('BODY', [card]);
+	const harness = createEnvironment(root);
+	try {
+		harness.setGameActivity(() => ({ user: 'Goat' }));
+		applyCustomIdentity({ customIdentityRgbCycle: true }, harness.environment);
+		harness.runFrames(10);
+
+		assert.equal(harness.observerCount > 0, true);
+		assert.deepEqual(getRealIdentityForDisplay(), { clan: 'GO', name: 'Goat' });
+		assert.equal(card.data, '[GO] Goat', 'decoration keeps the real visible text unchanged');
 	} finally {
 		stopCustomIdentityDisplay();
 	}

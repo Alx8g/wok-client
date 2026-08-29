@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+	createIdentityTextRewrite,
 	createIdentityTextRewriter,
 	type IdentityMutationRecord,
 	type IdentityRewriteCallback,
@@ -134,6 +135,55 @@ test('replaces whole-token names and leaves lookalikes alone', () => {
 	// Case-sensitive: Krunker upper-cases with CSS, which does not change the text.
 	assert.equal(swapRocketeer('rocketeer'), undefined);
 	assert.equal(swapRocketeer('Bandit killed Sniper'), undefined);
+});
+
+test('reports one combined range for a bracketed clan and name', () => {
+	const rewrite = createIdentityTextRewrite({
+		clans: ['OLD'],
+		displayClan: 'WOK',
+		displayName: 'Nightfall',
+		names: ['Rocketeer']
+	});
+	assert.ok(rewrite);
+	assert.deepEqual(rewrite('[OLD] Rocketeer: gg'), {
+		fragments: [{ end: 15, start: 0 }],
+		text: '[WOK] Nightfall: gg'
+	});
+	assert.deepEqual(rewrite('say [OLD] Rocketeer!'), {
+		fragments: [{ end: 19, start: 4 }],
+		text: 'say [WOK] Nightfall!'
+	});
+	// The range is one whole identity fragment, not one range per character.
+	assert.equal(rewrite('[OLD] Rocketeer: gg')?.fragments.length, 1);
+});
+
+test('RGB decoration can preserve the real identity while reporting its whole fragment', () => {
+	const rewrite = createIdentityTextRewrite({
+		clans: ['GO'],
+		decorateUnchanged: true,
+		displayClan: 'GO',
+		displayName: 'Goat',
+		names: ['Goat']
+	});
+	assert.ok(rewrite);
+	assert.deepEqual(rewrite('[GO] Goat: gg'), {
+		fragments: [{ end: 9, start: 0 }],
+		text: '[GO] Goat: gg'
+	});
+});
+
+test('keeps separate identity occurrences separate while leaving surrounding text unmarked', () => {
+	const rewrite = createIdentityTextRewrite({
+		clans: [],
+		displayClan: '',
+		displayName: 'Nightfall',
+		names: ['Rocketeer']
+	});
+	assert.ok(rewrite);
+	assert.deepEqual(rewrite('Rocketeer says hi to Rocketeer'), {
+		fragments: [{ end: 9, start: 0 }, { end: 30, start: 21 }],
+		text: 'Nightfall says hi to Nightfall'
+	});
 });
 
 test('replaces the clan tag only where it is unambiguously a clan tag', () => {
@@ -271,6 +321,34 @@ test('never rewrites what the user types, code, or anything opted out', () => {
 	}
 	assert.deepEqual(allText(chat), ['Nightfall: gg']);
 	assert.equal(harness.engine.rewrittenNodeCount, 1);
+});
+
+test('the engine applies a same-value detailed decoration instead of discarding it', () => {
+	const mine = text('Goat');
+	const root = element('BODY', [mine]);
+	const rewriteDetailed = createIdentityTextRewrite({
+		clans: [],
+		decorateUnchanged: true,
+		displayClan: '',
+		displayName: 'Goat',
+		names: ['Goat']
+	});
+	assert.ok(rewriteDetailed);
+	let applications = 0;
+	const engine = startIdentityRewriteEngine({
+		applyRewrite: (node, original, rewrite) => {
+			applications += 1;
+			return { applied: rewrite.text, node, original, restore: () => {} };
+		},
+		createObserver: () => ({ disconnect: () => {}, observe: () => {} }),
+		rewrite: value => rewriteDetailed(value)?.text,
+		rewriteDetailed,
+		root,
+		schedule: frame => { frame(); }
+	});
+
+	assert.equal(applications, 1);
+	assert.equal(engine.rewrittenNodeCount, 1);
 });
 
 test('an extra exclusion rule composes with the built-in ones', () => {

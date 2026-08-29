@@ -9,6 +9,7 @@ import {
 test('accepts bounded WOK preference values', () => {
 	assert.deepEqual(parseUserPreferencePatch({
 		competitiveMode: true,
+		customIdentityRgbCycle: true,
 		fullscreen: 'fullscreen',
 		graphicsBackend: 'd3d11on12',
 		hideAds: 'off',
@@ -21,9 +22,11 @@ test('accepts bounded WOK preference values', () => {
 		motionBlurQuality: 'balanced',
 		motionBlurStrength: 50,
 		overrideURL: 'https://comp.krunker.io/?game=ABC:123',
-		rawMouseInput: true
+		rawMouseInput: true,
+		wokPublicServerPingSort: true
 	}), {
 		competitiveMode: true,
+		customIdentityRgbCycle: true,
 		fullscreen: 'fullscreen',
 		graphicsBackend: 'd3d11on12',
 		hideAds: 'off',
@@ -36,8 +39,19 @@ test('accepts bounded WOK preference values', () => {
 		motionBlurQuality: 'balanced',
 		motionBlurStrength: 50,
 		overrideURL: 'https://comp.krunker.io/?game=ABC:123',
-		rawMouseInput: true
+		rawMouseInput: true,
+		wokPublicServerPingSort: true
 	});
+});
+
+test('accepts only explicit booleans for Public region ping sorting', () => {
+	assert.deepEqual(parseUserPreferencePatch({ wokPublicServerPingSort: true }), {
+		wokPublicServerPingSort: true
+	});
+	assert.deepEqual(parseUserPreferencePatch({ wokPublicServerPingSort: false }), {
+		wokPublicServerPingSort: false
+	});
+	assert.deepEqual(parseUserPreferencePatch({ wokPublicServerPingSort: 'true' }), {});
 });
 
 test('retains only legacy values needed by settings migration', () => {

@@ -466,7 +466,12 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		// parse it while region latency is being measured instead of after that IPC round trip;
 		// both operations depend only on the initial candidate set. If the list fetch fails, fall
 		// back to the old sequential behavior, where the first request's result is the freshest.
-		const freshListPromise = loadMatchmakerGameList(request);
+		// Attach both handlers immediately. The refresh can fail before latency measurement
+		// finishes, so leaving rejection handling until a later await can emit an unhandled rejection.
+		const freshListPromise = loadMatchmakerGameList(request).then(
+			result => ({ result, succeeded: true as const }),
+			() => ({ succeeded: false as const })
+		);
 		let latencyResult: unknown = {};
 		try {
 			latencyResult = await waitForMatchmakerOperation(
@@ -484,13 +489,9 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		const latencies = matchmakerRegionLatencies(latencyResult);
 		const rankedCandidates = rankMatchmakerCandidates(candidates, latencies);
 
-		let freshResult: unknown;
-		try {
-			freshResult = await freshListPromise;
-		} catch (_error) {
-			assertCurrentMatchmakerRequest(request);
-			freshResult = initialResult;
-		}
+		const freshList = await freshListPromise;
+		assertCurrentMatchmakerRequest(request);
+		const freshResult = freshList.succeeded ? freshList.result : initialResult;
 		const freshCandidates = collectMatchmakerCandidates(
 			freshResult,
 			criteria,

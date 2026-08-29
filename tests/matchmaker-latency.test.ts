@@ -214,14 +214,52 @@ test('a dead port is negatively cached and skipped on later measurements', async
 	}, { cacheTtlMs: 10, deadPortTtlMs: 100 });
 
 	assert.deepEqual(await service.measure(['SYD']), { SYD: 30 });
-	now = 15;
-	// Cache expired, but the dead advertised port is skipped without a probe; only the fallback
+	now = 1_011;
+	// The ordinary latency cache expired, but the dead advertised port is skipped without a probe;
+	// only the fallback
 	// port pays for a fresh sample.
 	assert.deepEqual(await service.measure(['SYD']), { SYD: 30 });
-	assert.deepEqual(attempted, [3000, MATCHMAKER_LATENCY_FALLBACK_PORT, MATCHMAKER_LATENCY_FALLBACK_PORT]);
+	assert.deepEqual(attempted, [
+		3000,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT
+	]);
 
 	// After the dead-port window the advertised port is retried, so a future fix upstream is picked up.
 	now = 2_000;
 	assert.deepEqual(await service.measure(['SYD']), { SYD: 30 });
-	assert.deepEqual(attempted, [3000, MATCHMAKER_LATENCY_FALLBACK_PORT, MATCHMAKER_LATENCY_FALLBACK_PORT, 3000, MATCHMAKER_LATENCY_FALLBACK_PORT, MATCHMAKER_LATENCY_FALLBACK_PORT]);
+	assert.deepEqual(attempted, [
+		3000,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		3000,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT
+	]);
+});
+
+test('a transient fallback-port failure is retried after the ordinary latency cache expires', async () => {
+	const attempted: number[] = [];
+	let now = 1_000;
+	const service = new MatchmakerRegionLatencyService({
+		loadTargets: () => Promise.resolve({ 'au-syd': 'lobby-a.sydney.krunker.io:3000' }),
+		now: () => now,
+		probeTarget: target => {
+			attempted.push(target.port);
+			return Promise.resolve(undefined);
+		}
+	}, { cacheTtlMs: 10, deadPortTtlMs: 100 });
+
+	assert.deepEqual(await service.measure(['SYD']), {});
+	now = 1_011;
+	assert.deepEqual(await service.measure(['SYD']), {});
+	assert.deepEqual(attempted, [
+		3000,
+		MATCHMAKER_LATENCY_FALLBACK_PORT,
+		MATCHMAKER_LATENCY_FALLBACK_PORT
+	]);
 });

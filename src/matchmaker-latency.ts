@@ -242,7 +242,7 @@ export class MatchmakerRegionLatencyService {
 			return;
 		}
 
-			const pending = regions.map(region => ({ region, target: targets.get(region) }));
+		const pending = regions.map(region => ({ region, target: targets.get(region) }));
 		let nextIndex = 0;
 		const worker = async () => {
 			while (nextIndex < pending.length) {
@@ -261,7 +261,12 @@ export class MatchmakerRegionLatencyService {
 						: [item.target.port, MATCHMAKER_LATENCY_FALLBACK_PORT];
 					for (const port of candidatePorts) {
 						const target = { host: item.target.host, port };
-						if ((this.deadPorts.get(`${target.host}:${port}`) ?? 0) > nowMs) continue;
+						// Long-cache only the advertised game port. Port 443 is the recovery path and
+						// must be retried after a transient failure on the ordinary latency-cache cadence.
+						const deadPortKey = port === MATCHMAKER_LATENCY_FALLBACK_PORT
+							? undefined
+							: `${target.host}:${port}`;
+						if (deadPortKey && (this.deadPorts.get(deadPortKey) ?? 0) > nowMs) continue;
 						let portAnswered = false;
 						for (let attempt = 0; attempt < MATCHMAKER_LATENCY_PROBE_ATTEMPTS; attempt++) {
 							try {
@@ -278,7 +283,7 @@ export class MatchmakerRegionLatencyService {
 								break; // An unavailable port or region is omitted while other probes continue.
 							}
 						}
-						if (!portAnswered) this.deadPorts.set(`${target.host}:${port}`, this.now() + this.deadPortTtlMs);
+						if (!portAnswered && deadPortKey) this.deadPorts.set(deadPortKey, this.now() + this.deadPortTtlMs);
 						if (latencyMs !== undefined) break;
 					}
 				}

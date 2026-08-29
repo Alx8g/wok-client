@@ -1,5 +1,34 @@
 WOK CLIENT PATCHED ELECTRON PROVENANCE
-Last verified: 2026-07-30
+Last verified: 2026-08-29
+
+LOCALLY QUALIFIED WOK CHROMIUM 152 WINDOWS RUNTIME
+
+The locally installed Windows x64 performance build uses:
+  Archive: electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip
+  Release: https://github.com/nzalexgarciagil-ctrl/wok-client/releases/tag/wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54
+  SHA-256: 20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0
+  Electron: 44.0.0-nightly.20260522
+  Chromium: 152
+  Electron patch commits:
+    8c5f55ba7  fix: preserve IPC under uncapped mouse input
+    d62cccc07  fix: bound uncapped compositor submissions
+  Chromium source commit: 68bf21f4e1edf
+  Build configuration: official static release build, PGO phase 2, ThinLTO,
+    V8 builtins PGO, and stripped Chromium, Blink, and V8 symbols
+
+The archive passed ZIP integrity, extracted launch, synthetic 2560x1440, and
+13x10-second real-game qualification. Against official Electron 44 stable on
+the same machine and workload, it measured:
+  Synthetic paired geometric mean FPS gain: 6.69%
+  Real-game average FPS mean gain: 7.46%
+  Real-game 1% low mean gain: 9.56%
+  Real-game p95 frame-time reduction: 11.45%
+
+Local Forge builds select this archive only when WOK_QUALIFIED_ELECTRON_ZIP is
+set. forge.config.ts verifies the pinned SHA-256, stages the standard Electron
+archive name on the same volume, and passes that directory to Electron Packager
+through electronZipDir. The public cross-platform fallback documented below is
+unchanged when the environment variable is absent.
 
 WOK Client uses the npm package metadata and TypeScript API definitions from:
   electron-nightly 44.0.0-nightly.20260522

@@ -90,6 +90,18 @@ To make a local platform package after reviewing the provenance and platform pre
 pnpm run make
 ```
 
+For the qualified Windows x64 Chromium 152 runtime, point Forge at the pinned
+archive before packaging:
+
+```powershell
+$env:WOK_QUALIFIED_ELECTRON_ZIP = 'T:/wok-electron-build/package/electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip'
+pnpm run make -- --arch=x64
+```
+
+Forge rejects any archive whose SHA-256 is not
+`20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0` and gives
+Electron Packager the verified local ZIP through `electronZipDir`.
+
 There is intentionally no registry publish command in the package metadata. Pushing a reviewed version tag invokes the pinned GitHub Actions release workflow, which publishes unsigned GitHub prerelease artifacts and SHA-256 checksums.
 
 ## Windows installer

@@ -437,6 +437,29 @@ test('removes the requested Custom Games, Community, Guide, and Whats New contro
 	assert.equal(targets.has(unrelatedCampaign), false);
 });
 
+test('hides only Store promo badges and the dedicated legal footer container', () => {
+	const root = new FakeMenuElement('body');
+	const store = new FakeMenuElement('div', '', ['menuItem']);
+	const storeTitle = new FakeMenuElement('div', 'menuBtnShop', ['menuItemTitle'], 'Store');
+	const spinBadge = new FakeMenuElement('span', '', ['shop-badge'], 'Riptide spin available');
+	const saleInfo = new FakeMenuElement('span', '', ['kr-sale-info'], 'KR DISCOUNT 24:27:22');
+	store.append(storeTitle, spinBadge, saleInfo);
+	const footer = new FakeMenuElement('div', 'termsInfo');
+	footer.append(
+		new FakeMenuElement('span', '', ['terms'], 'Contact'),
+		new FakeMenuElement('span', '', ['terms'], 'Terms'),
+		new FakeMenuElement('span', '', ['terms'], 'Changelog')
+	);
+	root.append(store, footer);
+
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	assert.equal(targets.has(spinBadge), true);
+	assert.equal(targets.has(saleInfo), true);
+	assert.equal(targets.has(footer), true);
+	assert.equal(targets.has(store), false, 'Store remains visible and interactive');
+	assert.equal(targets.has(storeTitle), false, 'the Store title remains visible');
+});
+
 test('accepts exact accessible labels while rejecting partial control names', () => {
 	const root = new FakeMenuElement('body');
 	const wallet = new FakeMenuElement('div', '', ['nav-item'], 'payments 125');

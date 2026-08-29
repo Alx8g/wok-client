@@ -256,6 +256,11 @@ export function collectMenuDeclutterTargets(
 	}
 	for (const dailySpin of environment.queryAll('#dailySpinDiv')) targets.add(dailySpin);
 	for (const storePromotion of environment.queryAll('#homeStoreAd')) targets.add(storePromotion);
+	// Hide only the Store's animated promotion fragments, never the Store menu item itself.
+	for (const shopBadge of environment.queryAll('.shop-badge')) targets.add(shopBadge);
+	for (const saleInfo of environment.queryAll('.kr-sale-info')) targets.add(saleInfo);
+	// Contact, Terms, and Changelog are the only children of this dedicated footer container.
+	for (const footerLinks of environment.queryAll('#termsInfo')) targets.add(footerLinks);
 
 	const isRemovableControl = (control: MenuDeclutterElement): boolean => {
 		if (matchesAnySemanticLabel(control)) return true;

@@ -155,7 +155,7 @@ function applyThemeSelection(value: string) {
 const settingsDesc: SettingsDesc = {
 	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Measures your PC and applies the fastest graphics profile, plus lower in-game visuals for more FPS. Your Krunker settings are restored if you turn it off.', safety: 0, cat: 0 },
 	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
-	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: "Hides Wallet while preserving your KR balance, plus Custom Games, Community & Events, Guide, What's New, and selected promotional menu cards.", safety: 0, cat: 1, instant: true },
+	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: "Hides Wallet while preserving your KR balance, plus Custom Games, Community & Events, Guide, What's New, Store promo badges, and the Contact/Terms/Changelog footer.", safety: 0, cat: 1, instant: true },
 	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Pins fixed Public categories, shows numeric regional ping, and sorts measured geographic regions from lowest to highest latency.', safety: 0, cat: 1, instant: true },
 	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
 	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Uses unadjusted Pointer Lock input to avoid Windows Chromium camera jumps and OS mouse acceleration. Restart required.', safety: 0, cat: 0 },

@@ -2,8 +2,22 @@ import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerAppImage } from "@reforged/maker-appimage";
 import { MakerDMG } from "@electron-forge/maker-dmg";
 import { MakerNSIS } from "./MakerNSIS.ts";
-import { copyFileSync, existsSync, readdirSync, renameSync, rmdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { createHash } from 'node:crypto';
+import {
+    closeSync,
+    copyFileSync,
+    existsSync,
+    linkSync,
+    mkdirSync,
+    openSync,
+    readSync,
+    readdirSync,
+    renameSync,
+    rmdirSync,
+    rmSync,
+    writeFileSync
+} from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { renderLinuxLauncherScript } from './src/linux-session.ts';
 import { verifyPackagedApplication } from './scripts/verify-package.mjs';
 import { BUNDLED_THEMES, THEME_LAYER_ASSETS, themeAssetName } from './src/themes.ts';
@@ -23,6 +37,70 @@ const packagedAssetsPattern = new RegExp(
 
 export const PATCHED_ELECTRON_VERSION = "44.0.0-nightly.20260522";
 export const PATCHED_ELECTRON_RELEASE = `v${PATCHED_ELECTRON_VERSION}-patched-2`;
+export const QUALIFIED_ELECTRON_ARCHIVE_NAME =
+    `electron-v${PATCHED_ELECTRON_VERSION}-win32-x64.zip`;
+export const QUALIFIED_ELECTRON_SHA256 =
+    "20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0";
+
+function sha256File(filePath: string): string {
+    const descriptor = openSync(filePath, 'r');
+    const hash = createHash('sha256');
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    try {
+        for (let bytesRead = readSync(descriptor, buffer, 0, buffer.length, null);
+            bytesRead > 0;
+            bytesRead = readSync(descriptor, buffer, 0, buffer.length, null)) {
+            hash.update(buffer.subarray(0, bytesRead));
+        }
+    } finally {
+        closeSync(descriptor);
+    }
+    return hash.digest('hex');
+}
+
+export function resolveQualifiedElectronZipDir(
+    environment: NodeJS.ProcessEnv = process.env,
+    expectedSha256 = QUALIFIED_ELECTRON_SHA256
+): string | undefined {
+    const configuredArchive = environment.WOK_QUALIFIED_ELECTRON_ZIP?.trim();
+    if (!configuredArchive) return undefined;
+
+    const sourceArchive = resolve(configuredArchive);
+    if (!existsSync(sourceArchive)) {
+        throw new Error(`Qualified Electron archive does not exist: ${sourceArchive}`);
+    }
+    const sourceHash = sha256File(sourceArchive);
+    if (sourceHash !== expectedSha256) {
+        throw new Error(
+            `Qualified Electron archive checksum mismatch: expected ${expectedSha256}, got ${sourceHash}`
+        );
+    }
+
+    const stagingRoot = resolve(
+        environment.WOK_ELECTRON_STAGE_DIR?.trim()
+            || join(dirname(sourceArchive), '.wok-packager', expectedSha256.slice(0, 16))
+    );
+    mkdirSync(stagingRoot, { recursive: true });
+    const stagedArchive = join(stagingRoot, QUALIFIED_ELECTRON_ARCHIVE_NAME);
+    if (existsSync(stagedArchive)) {
+        const stagedHash = sha256File(stagedArchive);
+        if (stagedHash !== expectedSha256) {
+            throw new Error(
+                `Staged Electron archive checksum mismatch: ${stagedArchive}. Remove or replace it before packaging.`
+            );
+        }
+    } else {
+        try {
+            linkSync(sourceArchive, stagedArchive);
+        } catch {
+            copyFileSync(sourceArchive, stagedArchive);
+        }
+    }
+    console.log(`Using qualified Electron archive ${sourceArchive} (${sourceHash}).`);
+    return stagingRoot;
+}
+
+const qualifiedElectronZipDir = resolveQualifiedElectronZipDir();
 
 function removeEmptyDirs(dir: string): boolean {
     let hasEntries = false;
@@ -94,13 +172,17 @@ export default {
         ],
         prune: true,
         asar: true,
-        download: {
-            mirrorOptions: {
-                customDir: PATCHED_ELECTRON_RELEASE,
-                mirror: "https://github.com/thegu5/electron/releases/download/",
-                nightlyMirror: "https://github.com/thegu5/electron/releases/download/",
-            }
-        },
+        ...(qualifiedElectronZipDir
+            ? { electronZipDir: qualifiedElectronZipDir }
+            : {
+                download: {
+                    mirrorOptions: {
+                        customDir: PATCHED_ELECTRON_RELEASE,
+                        mirror: "https://github.com/thegu5/electron/releases/download/",
+                        nightlyMirror: "https://github.com/thegu5/electron/releases/download/",
+                    }
+                }
+            }),
         protocols: [
             {
                 name: "WOK Client Link",

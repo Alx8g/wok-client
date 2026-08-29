@@ -19,6 +19,7 @@ import { formatIdentityContext, formatIdentityProbe, probeIdentitySources } from
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
+import { applyMenuDeclutterSettings } from './menu-declutter.ts';
 import { applyPublicServerPingSortSettings as applyPublicServerPingSortRuntime } from './public-server-ping-sort.ts';
 import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
@@ -485,6 +486,7 @@ ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
 ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
 	applyRawMouseInputPreference(_userPrefs);
 	applyClientMotionBlurSettings(_userPrefs);
+	applyMenuDeclutterSettings(_userPrefs);
 	applyPublicServerPingSortSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
 	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
@@ -1151,6 +1153,7 @@ function beginCustomIdentityWatch() {
 				applyRawMouseInputPreference(prefs);
 				applyClientMatchmakerSettings(prefs);
 				applyClientMotionBlurSettings(prefs);
+				applyMenuDeclutterSettings(prefs);
 				applyPublicServerPingSortSettings(prefs);
 				traceStartup('authoritative preferences fetched and applied');
 				tryStart();
@@ -1212,6 +1215,7 @@ function injectKeyframeFix() {
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	latestUserPrefs = _userPrefs;
 	applyRawMouseInputPreference(_userPrefs);
+	applyMenuDeclutterSettings(_userPrefs);
 	applyPublicServerPingSortSettings(_userPrefs);
 	beginCustomIdentityWatch();
 	traceStartup(`applyClientVisuals entered; readyState=${document.readyState} body=${document.body ? 'present' : 'null'}`);

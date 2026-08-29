@@ -2,6 +2,8 @@
 type UserPrefs = {
 	/** Local-only rewritten identity styling; disabled by default. */
 	customIdentityRgbCycle?: boolean;
+	/** Hide selected menu promotions and controls without removing their DOM; enabled by default. */
+	wokMenuDeclutter?: boolean;
 	/** Sort Public server regions by measured latency and show ping; enabled by default. */
 	wokPublicServerPingSort?: boolean;
 	[preference: string]: UserPrefValue;

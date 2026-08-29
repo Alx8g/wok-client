@@ -43,6 +43,7 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'menuTimer',
 	'motionBlur',
 	'performanceOverlay',
+	'wokMenuDeclutter',
 	'wokPublicServerPingSort',
 	'quickClassPicker',
 	'rawMouseInput',

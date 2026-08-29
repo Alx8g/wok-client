@@ -366,6 +366,8 @@ const settingsSkeleton = {
 	graphicsBackend: 'auto',
 	competitiveMode: false,
 	performanceOverlay: false,
+	// Mark selected menu controls and promotions as hidden while preserving their original DOM.
+	wokMenuDeclutter: true,
 	// Public screen only: pin fixed categories, then show and sort geographic regions by ping.
 	wokPublicServerPingSort: true,
 	motionBlur: false,

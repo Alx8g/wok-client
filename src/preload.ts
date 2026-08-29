@@ -258,10 +258,15 @@ function updateAdaptiveValidationRuntime(value: unknown) {
 		.catch(error => { strippedConsole.error('Failed to start adaptive gameplay validation', error); });
 }
 
+// Set by the settings UI module when it loads; lets the hotkey handler skip the keybind-capture
+// state without a document scan on every keydown.
+let keybindCaptureActive: () => boolean = () => false;
+
 function renderSettings() {
 	if (settingsRenderPromise) return;
 	settingsRenderPromise = import('./settingsui.ts')
 		.then(async settingsUI => {
+			keybindCaptureActive = settingsUI.isKeybindCaptureActive;
 			await settingsUI.settingsReady;
 			settingsUI.renderSettings();
 		})
@@ -498,6 +503,7 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 
 	// fix fps dropping on scroll
 	// https://github.com/bigjakk/Krunker-Civilian-Client/blob/573de775d4b299db87d45d67d568264eb7d7e0f0/src/preload/index.ts#L29
+	const scrollableOverflowPattern = /^(?:auto|scroll)$/u;
 	window.addEventListener('wheel', (event: WheelEvent) => {
 		if (document.pointerLockElement) {
 			event.preventDefault();
@@ -510,7 +516,7 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 			if (!hasScrollableContent) continue;
 
 			const style = getComputedStyle(target);
-			if (/^(?:auto|scroll)$/u.test(style.overflowY) || /^(?:auto|scroll)$/u.test(style.overflowX)) return;
+			if (scrollableOverflowPattern.test(style.overflowY) || scrollableOverflowPattern.test(style.overflowX)) return;
 		}
 
 		event.preventDefault();
@@ -677,7 +683,7 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 	// the client. A matched matchmaker key is consumed before the game can treat it as an action.
 	window.addEventListener('keydown', event => {
 		if (event.code === 'Escape') document.exitPointerLock();
-		if (event.repeat || document.querySelector('.customKeybindSettingWrapper')) return;
+		if (event.repeat || keybindCaptureActive()) return;
 		const config = clientHotkeyConfig;
 		if (!config || !keyboardEventMatchesCustomSetting(config.matchmakerKey, event)) return;
 		if (config.matchmakerEnabled) {
@@ -1142,8 +1148,13 @@ function beginCustomIdentityWatch() {
 			.finally(() => { userPrefsFetchInFlight = false; });
 	};
 	fetchPrefs();
+	// Bounded: a document main never trusts would otherwise invoke IPC every 2 s for the whole
+	// session. Fifteen attempts cover the whole pre-trust window of a real launch several times
+	// over; after that, a push ('injectClientCSS') is the remaining delivery path.
+	const PREFS_POLL_MAX_ATTEMPTS = 15;
+	let prefsPollAttempts = 0;
 	const prefsPoll = window.setInterval(() => {
-		if (authoritativeUserPrefsReceived) {
+		if (authoritativeUserPrefsReceived || ++prefsPollAttempts >= PREFS_POLL_MAX_ATTEMPTS) {
 			window.clearInterval(prefsPoll);
 			return;
 		}
@@ -1382,11 +1393,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 				if (args[0] === 4) {
 					// This makes the model viewer link open in a new window. Krunker doesn't currently have it set to target _blank for some reason.
-					const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find((elem: Element) => {
-						if (elem instanceof HTMLElement) {
-							elem.innerText === "Model Viewer"
-						}
-					});
+					const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find(elem => elem instanceof HTMLElement && elem.innerText === 'Model Viewer');
 					if (modelViewerElement) modelViewerElement.setAttribute('target', '_blank');
 				}
 			});
@@ -1464,7 +1471,6 @@ function patchSettings(_userPrefs: UserPrefs) {
 			&& typeof window.showWindow === 'function'
 			&& Object.hasOwn(window, 'windows')
 			&& Array.isArray(window.windows)
-			&& window.windows.length >= 0
 			&& typeof window.windows[0] !== 'undefined'
 			&& typeof window.windows[0].changeTab === 'function'
 		) {

@@ -631,6 +631,12 @@ function updateKeybindConflictDisplay(key: string, value: KeybindUserPref, oldVa
 
 let capturingKeybindSetting: false | SettingElem = false;
 
+/**
+ * True while the keybind-capture dialog is on screen. The preload's gameplay keydown handler
+ * checks this instead of scanning the document for the dialog class on every keypress.
+ */
+export const isKeybindCaptureActive = (): boolean => capturingKeybindSetting !== false;
+
 // Construct keybind overlay
 const keybindSettingDialogElement = createElement('div', {
 	class: ['customKeybindSettingWrapper']

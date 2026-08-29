@@ -462,6 +462,11 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			return;
 		}
 
+		// The fresh list is used only to revalidate the candidates we already ranked. Fetch and
+		// parse it while region latency is being measured instead of after that IPC round trip;
+		// both operations depend only on the initial candidate set. If the list fetch fails, fall
+		// back to the old sequential behavior, where the first request's result is the freshest.
+		const freshListPromise = loadMatchmakerGameList(request);
 		let latencyResult: unknown = {};
 		try {
 			latencyResult = await waitForMatchmakerOperation(
@@ -479,7 +484,13 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		const latencies = matchmakerRegionLatencies(latencyResult);
 		const rankedCandidates = rankMatchmakerCandidates(candidates, latencies);
 
-		const freshResult = await loadMatchmakerGameList(request);
+		let freshResult: unknown;
+		try {
+			freshResult = await freshListPromise;
+		} catch (_error) {
+			assertCurrentMatchmakerRequest(request);
+			freshResult = initialResult;
+		}
 		const freshCandidates = collectMatchmakerCandidates(
 			freshResult,
 			criteria,

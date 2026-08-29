@@ -16,6 +16,7 @@ import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './setti
 import {
 	CUSTOM_CLAN_PREFERENCE_KEY,
 	isCustomIdentityPreferenceKey,
+	isCustomIdentityTextPreferenceKey,
 	REAL_CLAN_PREFERENCE_KEY,
 	sanitizeCustomClan,
 	sanitizeCustomName
@@ -494,7 +495,7 @@ class SettingElem {
 
 		// Local display identity: coerce while typing so the stored value is always one the
 		// preference loader accepts, and reflect dropped characters straight back into the input.
-		if (isCustomIdentityPreferenceKey(this.props.key)) {
+		if (isCustomIdentityTextPreferenceKey(this.props.key)) {
 			const isClanKey = this.props.key === CUSTOM_CLAN_PREFERENCE_KEY || this.props.key === REAL_CLAN_PREFERENCE_KEY;
 			const sanitized = isClanKey ? sanitizeCustomClan(dirtyValue) : sanitizeCustomName(dirtyValue);
 			if (sanitized !== target.value) target.value = sanitized;

@@ -6,6 +6,7 @@ import {
 	getCustomIdentity,
 	getCustomIdentityOverlayLines,
 	getRealIdentityForDisplay,
+	identityRgbAnimationDelayMs,
 	startRealIdentityDiscovery,
 	stopCustomIdentityDisplay,
 	withRealIdentity
@@ -31,6 +32,19 @@ function allText(node: FakeNode): string[] {
 	if (node.nodeType === TEXT_NODE) return [node.data ?? ''];
 	return node.childNodes.flatMap(allText);
 }
+
+test('RGB fragments created at different times resolve to one shared animation phase', () => {
+	const observedAt = 2_100;
+	const phaseAt = (createdAt: number) => {
+		const localAnimationTime = observedAt - createdAt - identityRgbAnimationDelayMs(createdAt);
+		return ((localAnimationTime % 500) + 500) % 500;
+	};
+
+	assert.equal(phaseAt(1_125), phaseAt(1_370));
+	assert.equal(phaseAt(1_370), phaseAt(1_999));
+	assert.equal(identityRgbAnimationDelayMs(1_500), 0);
+	assert.equal(identityRgbAnimationDelayMs(Number.NaN), 0);
+});
 
 function createEnvironment(root: FakeNode) {
 	const frames: (() => void)[] = [];

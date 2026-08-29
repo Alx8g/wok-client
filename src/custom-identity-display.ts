@@ -76,6 +76,7 @@ export const DISCOVERY_SLOW_INTERVAL_MS = 5_000;
 
 /** The cadence used by Krunker's old full-fragment RGB name treatment. */
 export const IDENTITY_RGB_CYCLE_DURATION_MS = 500;
+const IDENTITY_RGB_DELAY_PROPERTY = '--wok-identity-rgb-delay';
 const IDENTITY_RGB_STYLE_ID = 'wokIdentityRgbCycleStyle';
 const IDENTITY_RGB_STYLE = `
 @keyframes wokIdentityRgbCycle {
@@ -89,8 +90,17 @@ const IDENTITY_RGB_STYLE = `
 }
 .${IDENTITY_RGB_CLASS} {
 	animation: wokIdentityRgbCycle ${IDENTITY_RGB_CYCLE_DURATION_MS}ms linear infinite;
+	animation-delay: var(${IDENTITY_RGB_DELAY_PROPERTY}, 0ms);
 }
 `;
+
+/** Align a newly inserted fragment with one process-wide RGB timeline. */
+export function identityRgbAnimationDelayMs(nowMs = Date.now()): number {
+	if (!Number.isFinite(nowMs)) return 0;
+	const phase = ((Math.floor(nowMs) % IDENTITY_RGB_CYCLE_DURATION_MS) + IDENTITY_RGB_CYCLE_DURATION_MS)
+		% IDENTITY_RGB_CYCLE_DURATION_MS;
+	return phase === 0 ? 0 : -phase;
+}
 
 export interface RealIdentityDiscoveryOptions {
 	clearTimer(handle: number): void;
@@ -355,6 +365,7 @@ function applyIdentityRgbRewrite(
 		const marker = ownerDocument.createElement('span');
 		marker.className = IDENTITY_RGB_CLASS;
 		marker.setAttribute(IDENTITY_RGB_MARKER_ATTRIBUTE, '');
+		marker.style.setProperty(IDENTITY_RGB_DELAY_PROPERTY, `${identityRgbAnimationDelayMs()}ms`);
 		const identityText = ownerDocument.createTextNode(rewrite.text.slice(fragment.start, fragment.end));
 		marker.appendChild(identityText);
 		container.appendChild(marker);

@@ -1,3 +1,23 @@
+## WOK Client 1.1.0-rc.9 (2026-08-29)
+
+### Performance
+- Windows now ships the qualified custom Electron 44 / Chromium 152 runtime built with official-build optimization, PGO phase 2, ThinLTO and V8 builtins PGO.
+- The qualified runtime measured a 6.69% paired geometric FPS gain in the controlled workload, a 7.46% mean average-FPS gain in real gameplay, a 9.56% mean 1%-low gain and an 11.45% p95 frame-time reduction against official Electron 44 stable.
+- Isolated WOK's telemetry HUD rendering so its updates invalidate less of the page.
+
+### Diagnostics
+- Added a 10-second in-match renderer CPU profiler, available through Ctrl+Shift+F9 or `--capture-runtime-profile`.
+- Added a profile analyzer that separates page, WOK, runtime, garbage-collector, program and idle self-time and reports inclusive hot paths.
+- Kept ordinary profile capture low-overhead by leaving broad Chromium tracing disabled unless explicitly requested.
+
+### Packaging
+- Windows release builds download the qualified Chromium 152 archive from its dedicated repository release and reject any archive whose SHA-256 differs from `20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0`.
+- Added installed-runtime provenance and verified local NSIS installation, shortcuts, registry entries and live Chromium identity.
+
+### Fixed
+- Prevented graphics calibration from accepting a D3D11on12 result backed by the WARP software adapter.
+- Updated public branding links to WOK's canonical website.
+
 ## WOK Client 1.1.0-rc.8 (2026-08-17)
 
 ### Visuals

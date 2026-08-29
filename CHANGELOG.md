@@ -2,7 +2,7 @@
 
 ### Performance
 - Windows now ships the qualified custom Electron 44 / Chromium 152 runtime built with official-build optimization, PGO phase 2, ThinLTO and V8 builtins PGO.
-- The qualified runtime measured a 6.69% paired geometric FPS gain in the controlled workload, a 7.46% mean average-FPS gain in real gameplay, a 9.56% mean 1%-low gain and an 11.45% p95 frame-time reduction against official Electron 44 stable.
+- The qualified runtime measured a 6.69% paired geometric rAF callback-rate gain in the controlled workload, a 7.46% mean callback-rate gain in real gameplay, a 9.56% mean callback-rate 1%-low gain and an 11.45% p95 callback-interval reduction against official Electron 44 stable. These measurements do not establish submitted, GPU-completed or presented frame rates.
 - Isolated WOK's telemetry HUD rendering so its updates invalidate less of the page.
 
 ### Diagnostics

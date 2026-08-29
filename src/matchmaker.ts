@@ -7,7 +7,11 @@ import {
 	matchmakerCandidateRegions,
 	waitForMatchmakerOperation
 } from './matchmaker-flow.ts';
-import { MatchmakerPopupLifecycle, type MatchmakerPopupDismissal } from './matchmaker-popup-lifecycle.ts';
+import {
+	matchmakerPointerDownIsOutside,
+	MatchmakerPopupLifecycle,
+	type MatchmakerPopupDismissal
+} from './matchmaker-popup-lifecycle.ts';
 import {
 	type MatchmakerAction,
 	type MatchmakerChip,
@@ -72,15 +76,43 @@ class MatchmakerRequestSupersededError extends Error {
 // Hacky, but needed (?) until there's a better system to store state
 let openServerWindow: boolean;
 let matchmakerRequest: AbortController | undefined;
+let matchmakerRequestGeneration = 0;
 let matchmakerBindListener: AbortController | undefined;
+let matchmakerConnectionObserver: MutationObserver | undefined;
 const popupLifecycle = new MatchmakerPopupLifecycle();
+let currentPopupSession = 0;
 
 // https://greasyfork.org/en/scripts/468482-kraxen-s-krunker-utils
 
 function abortActiveMatchmakerSearch() {
+	matchmakerRequestGeneration++;
 	const request = matchmakerRequest;
 	matchmakerRequest = undefined;
 	request?.abort();
+}
+
+function detachMatchmakerPopupListeners() {
+	matchmakerBindListener?.abort();
+	matchmakerBindListener = undefined;
+}
+
+function disconnectMatchmakerConnectionObserver() {
+	matchmakerConnectionObserver?.disconnect();
+	matchmakerConnectionObserver = undefined;
+}
+
+/**
+ * Close every matchmaker-owned resource without making a sound or opening another window.
+ * This is deliberately safe to call from several independent lifecycle events.
+ */
+export function teardownMatchmakerPopup() {
+	const dismissal = popupLifecycle.teardown();
+	stopMatchmakerTicker();
+	clearMatchmakerAutoDismiss();
+	if (dismissal.abortSearch || matchmakerRequest !== undefined) abortActiveMatchmakerSearch();
+	detachMatchmakerPopupListeners();
+	disconnectMatchmakerConnectionObserver();
+	popupElement.remove();
 }
 
 function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
@@ -89,8 +121,11 @@ function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
 	stopMatchmakerTicker();
 	clearMatchmakerAutoDismiss();
 	if (dismissal.abortSearch) abortActiveMatchmakerSearch();
-	matchmakerBindListener?.abort();
-	matchmakerBindListener = undefined;
+	detachMatchmakerPopupListeners();
+	disconnectMatchmakerConnectionObserver();
+	// Remove first. Joining navigates synchronously below, and the old popup must never survive
+	// long enough to be painted over the destination page.
+	popupElement.remove();
 	if (dismissal.playSelect) window.playSelect();
 	if (dismissal.joinGame && currentMatch !== 'none') {
 		window.location.href = `https://krunker.io/?game=${currentMatch}`;
@@ -101,7 +136,6 @@ function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
 		showMatchmakerCancelledPopup();
 		return;
 	}
-	popupElement.remove();
 	if (dismissal.openServerWindow) window.openServerWindow(0);
 }
 
@@ -109,12 +143,21 @@ function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
  * Acts on the user's input for the matchmaker popup
  * @param accept whether or not the new game was accepted
  */
-function decideMatchmakerDecision(accept: boolean) {
-	applyMatchmakerPopupDismissal(popupLifecycle.decide(accept, openServerWindow));
+function decideMatchmakerDecision(session: number, accept: boolean) {
+	applyMatchmakerPopupDismissal(
+		popupLifecycle.decide(session, accept, openServerWindow)
+	);
 }
 
+/** Replace the popup and invalidate the old request as one synchronous transition. */
 function replaceMatchmakerPopup() {
-	applyMatchmakerPopupDismissal(popupLifecycle.replace());
+	popupLifecycle.replace();
+	stopMatchmakerTicker();
+	clearMatchmakerAutoDismiss();
+	abortActiveMatchmakerSearch();
+	detachMatchmakerPopupListeners();
+	disconnectMatchmakerConnectionObserver();
+	popupElement.remove();
 }
 
 // ID of the container element, used to construct and to check if it's attached to the DOM.
@@ -166,7 +209,43 @@ function createMatchmakerButton(id: string, accept: boolean): MatchmakerPopupBut
 	const hotkey = createElement('kbd', { class: "matchmakerButtonHotkey" });
 	button.appendChild(label);
 	button.appendChild(hotkey);
-	button.addEventListener('click', () => { decideMatchmakerDecision(accept); });
+
+	// Keep each pointer's originating session. A replacement view or another simultaneous pointer
+	// cannot turn an old Cancel/Join interaction into an action on the current popup.
+	const pointerSessions = new Map<number, number>();
+	button.addEventListener('pointerdown', event => {
+		if (
+			event.button === 0
+			&& popupLifecycle.isCurrent(currentPopupSession)
+		) {
+			pointerSessions.set(event.pointerId, currentPopupSession);
+		}
+	});
+	const forgetPointer = (event: PointerEvent) => {
+		pointerSessions.delete(event.pointerId);
+	};
+	button.addEventListener('pointercancel', forgetPointer);
+	button.addEventListener('pointerleave', forgetPointer);
+	button.addEventListener('pointerup', event => {
+		const session = pointerSessions.get(event.pointerId);
+		pointerSessions.delete(event.pointerId);
+		if (event.button !== 0 || session === undefined) return;
+		if (!popupElement.isConnected) {
+			teardownMatchmakerPopup();
+			return;
+		}
+		decideMatchmakerDecision(session, accept);
+	});
+	button.addEventListener('click', event => {
+		// Physical pointer activation was handled above with a pointer-specific session. Keep the
+		// zero-detail path for accessibility/programmatic activation, scoped to the visible view.
+		if (event.detail !== 0) return;
+		if (!popupElement.isConnected) {
+			teardownMatchmakerPopup();
+			return;
+		}
+		decideMatchmakerDecision(currentPopupSession, accept);
+	});
 	return { button, hotkey, label };
 }
 
@@ -214,6 +293,36 @@ function clearMatchmakerAutoDismiss() {
 	popupAutoDismiss = undefined;
 }
 
+function handleMatchmakerPointerLockChange() {
+	if (document.pointerLockElement) teardownMatchmakerPopup();
+}
+
+function handleMatchmakerPageTeardown() {
+	teardownMatchmakerPopup();
+}
+
+function observeMatchmakerPopupConnection(session: number) {
+	disconnectMatchmakerConnectionObserver();
+	const root = document.documentElement;
+	if (!root) return;
+
+	const observer = new MutationObserver(() => {
+		if (
+			popupLifecycle.isCurrent(session)
+			&& !popupElement.isConnected
+		) {
+			teardownMatchmakerPopup();
+		}
+	});
+	observer.observe(root, { childList: true, subtree: true });
+	matchmakerConnectionObserver = observer;
+}
+
+document.addEventListener('pointerlockchange', handleMatchmakerPointerLockChange, { capture: true });
+// pagehide only fires once navigation is actually proceeding; beforeunload can be cancelled.
+window.addEventListener('pagehide', handleMatchmakerPageTeardown);
+window.addEventListener('wok-matchmaker-disabled', handleMatchmakerPageTeardown);
+
 function applyMatchmakerChipTone(value: HTMLElement, chip: MatchmakerChip) {
 	if (chip.tone) value.dataset.tone = chip.tone;
 	else delete value.dataset.tone;
@@ -259,31 +368,76 @@ function renderMatchmakerView(view: MatchmakerView) {
  * Handles keyboard input for the matchmaker
  * @param event The keyboard event that initiated the handler
  */
-function handleMatchmakerBind(event: KeyboardEvent) {
-	if (document.pointerLockElement) return; // Don't fire while in-game
+function handleMatchmakerBind(event: KeyboardEvent, session: number) {
+	if (!popupLifecycle.isCurrent(session)) return;
+	if (!popupElement.isConnected || document.pointerLockElement) {
+		teardownMatchmakerPopup();
+		return; // Don't fire for a detached popup or while in-game
+	}
 	const matchesAcceptKey = keyboardEventMatchesCustomSetting(confirmKey, event);
 	const matchesCancelKey = keyboardEventMatchesCustomSetting(cancelKey, event);
-	if (matchesAcceptKey || matchesCancelKey) decideMatchmakerDecision(matchesAcceptKey);
+	if (!matchesAcceptKey && !matchesCancelKey) return;
+	// The popup owns these keys. Do not let Krunker's menu/game handlers also act on the same press.
+	event.preventDefault();
+	event.stopImmediatePropagation();
+	// A held cancel key must not immediately dismiss the short cancellation confirmation.
+	if (event.repeat) return;
+	decideMatchmakerDecision(session, matchesAcceptKey);
 }
 
-function showMatchmakerPopup(view: MatchmakerView): boolean {
+function handleMatchmakerPointerDown(event: PointerEvent, session: number) {
+	if (!popupLifecycle.isCurrent(session)) return;
+	if (!popupElement.isConnected) {
+		teardownMatchmakerPopup();
+		return;
+	}
+	const target = event.target instanceof Node ? event.target : null;
+	if (!matchmakerPointerDownIsOutside(popupElement, target)) return;
+	// An outside press means the player chose the game/menu rather than the popup. Tear down silently
+	// and let that same press continue, so entering gameplay never requires a second click.
+	teardownMatchmakerPopup();
+}
+
+function showMatchmakerPopup(view: MatchmakerView): number | undefined {
 	stopMatchmakerTicker();
 	clearMatchmakerAutoDismiss();
-	renderMatchmakerView(view);
+	// A result replaces the previous view synchronously. Taking the old state here prevents a late
+	// input callback from applying the previous view's action to the newly rendered one.
+	popupLifecycle.replace();
+	detachMatchmakerPopupListeners();
+	disconnectMatchmakerConnectionObserver();
+	popupElement.remove();
+
+	if (document.pointerLockElement) {
+		teardownMatchmakerPopup();
+		return undefined;
+	}
 
 	const uiBase = document.getElementById("uiBase");
 	if (!uiBase) {
 		currentMatch = '';
-		popupElement.remove();
-		return false;
+		teardownMatchmakerPopup();
+		return undefined;
 	}
 
+	renderMatchmakerView(view);
+	const session = popupLifecycle.show(view.state);
+	currentPopupSession = session;
+	const listener = new AbortController();
+	matchmakerBindListener = listener;
+	document.addEventListener(
+		'keydown',
+		event => handleMatchmakerBind(event, session),
+		{ capture: true, signal: listener.signal }
+	);
+	document.addEventListener(
+		'pointerdown',
+		event => handleMatchmakerPointerDown(event, session),
+		{ capture: true, signal: listener.signal }
+	);
 	uiBase.appendChild(popupElement);
-	popupLifecycle.show(view.state);
-	matchmakerBindListener?.abort();
-	matchmakerBindListener = new AbortController();
-	document.addEventListener('keydown', handleMatchmakerBind, { capture: true, signal: matchmakerBindListener.signal });
-	return true;
+	observeMatchmakerPopupConnection(session);
+	return session;
 }
 
 /**
@@ -335,15 +489,22 @@ function holdSearchingViewUntilReadable(shownAt: number, request: AbortControlle
 	});
 }
 
-function showMatchmakerSearchingPopup(criteria: IMatchmakerCriteria): boolean {
+function showMatchmakerSearchingPopup(
+	criteria: IMatchmakerCriteria
+): { session: number; shownAt: number } | undefined {
 	popupElement.style.backgroundImage = '';
-	if (!showMatchmakerPopup(matchmakerSearchingView(criteria, hotkeyLabels))) return false;
+	const session = showMatchmakerPopup(
+		matchmakerSearchingView(criteria, hotkeyLabels)
+	);
+	if (session === undefined) return undefined;
 
-	const startedAt = Date.now();
+	const shownAt = Date.now();
 	startMatchmakerTicker(() => {
-		popupTimer.textContent = matchmakerDurationLabel(Math.floor((Date.now() - startedAt) / 1_000));
+		popupTimer.textContent = matchmakerDurationLabel(
+			Math.floor((Date.now() - shownAt) / 1_000)
+		);
 	});
-	return true;
+	return { session, shownAt };
 }
 
 function showMatchmakerErrorPopup(message: string) {
@@ -355,10 +516,14 @@ function showMatchmakerErrorPopup(message: string) {
 function showMatchmakerCancelledPopup() {
 	// currentMatch is left alone: a cancelled search should not un-reject the lobby the user last skipped.
 	popupElement.style.backgroundImage = '';
-	if (!showMatchmakerPopup(matchmakerCancelledView(hotkeyLabels))) return;
+	const session = showMatchmakerPopup(
+		matchmakerCancelledView(hotkeyLabels)
+	);
+	if (session === undefined) return;
 
 	popupAutoDismiss = window.setTimeout(() => {
 		popupAutoDismiss = undefined;
+		if (!popupLifecycle.isCurrent(session)) return;
 		applyMatchmakerPopupDismissal(popupLifecycle.replace());
 	}, MATCHMAKER_CANCELLED_POPUP_MS);
 }
@@ -369,16 +534,36 @@ function showMatchmakerCancelledPopup() {
  */
 let currentMatch = '';
 
-function assertCurrentMatchmakerRequest(request: AbortController): void {
-	if (matchmakerRequest !== request) throw new MatchmakerRequestSupersededError();
+function assertCurrentMatchmakerRequest(
+	request: AbortController,
+	generation: number,
+	popupSession: number
+): void {
+	if (
+		matchmakerRequest !== request
+		|| matchmakerRequestGeneration !== generation
+	) {
+		throw new MatchmakerRequestSupersededError();
+	}
+	if (
+		!popupLifecycle.isCurrent(popupSession)
+		|| !popupElement.isConnected
+	) {
+		teardownMatchmakerPopup();
+		throw new MatchmakerRequestSupersededError();
+	}
 	if (request.signal.aborted) throw new DOMException('Matchmaker request was aborted.', 'AbortError');
 }
 
-async function loadMatchmakerGameList(request: AbortController): Promise<unknown> {
+async function loadMatchmakerGameList(
+	request: AbortController,
+	generation: number,
+	popupSession: number
+): Promise<unknown> {
 	const response = await fetch(`${MATCHMAKER_GAME_LIST_URL}?hostname=${window.location.hostname}`, {
 		signal: request.signal
 	});
-	assertCurrentMatchmakerRequest(request);
+	assertCurrentMatchmakerRequest(request, generation, popupSession);
 	if (!response.ok) {
 		throw new MatchmakerHttpError(
 			response.status,
@@ -387,7 +572,7 @@ async function loadMatchmakerGameList(request: AbortController): Promise<unknown
 	}
 
 	const result = await readBoundedMatchmakerJson(response);
-	assertCurrentMatchmakerRequest(request);
+	assertCurrentMatchmakerRequest(request, generation, popupSession);
 	return result;
 }
 
@@ -409,6 +594,10 @@ function matchmakerHotkeyLabel(value: unknown, fallback: string): string {
  * @param _userPrefs User Preferences Object
  */
 export async function fetchGame(_userPrefs: UserPrefs) {
+	if (_userPrefs.matchmaker !== true) {
+		teardownMatchmakerPopup();
+		return;
+	}
 	openServerWindow = _userPrefs.matchmaker_openServerWindow as boolean;
 	confirmKey = _userPrefs.matchmakerAcceptKey as KeybindUserPref;
 	cancelKey = _userPrefs.matchmakerCancelKey as KeybindUserPref;
@@ -434,14 +623,18 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		currentUrl: window.location.href
 	};
 
-	matchmakerRequest?.abort();
 	const request = new AbortController();
+	const requestGeneration = ++matchmakerRequestGeneration;
 	matchmakerRequest = request;
-	if (!showMatchmakerSearchingPopup(criteria)) {
+	const searchingPopup = showMatchmakerSearchingPopup(criteria);
+	if (!searchingPopup) {
 		abortActiveMatchmakerSearch();
 		return;
 	}
-	const searchingShownAt = Date.now();
+	const {
+		session: searchingPopupSession,
+		shownAt: searchingShownAt
+	} = searchingPopup;
 
 	let timedOut = false;
 	const timeoutHandle = window.setTimeout(() => {
@@ -450,7 +643,11 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 	}, MATCHMAKER_REQUEST_TIMEOUT_MS);
 
 	try {
-		const initialResult = await loadMatchmakerGameList(request);
+		const initialResult = await loadMatchmakerGameList(
+			request,
+			requestGeneration,
+			searchingPopupSession
+		);
 		const candidates = collectMatchmakerCandidates(
 			initialResult,
 			criteria,
@@ -468,7 +665,11 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		// back to the old sequential behavior, where the first request's result is the freshest.
 		// Attach both handlers immediately. The refresh can fail before latency measurement
 		// finishes, so leaving rejection handling until a later await can emit an unhandled rejection.
-		const freshListPromise = loadMatchmakerGameList(request).then(
+		const freshListPromise = loadMatchmakerGameList(
+			request,
+			requestGeneration,
+			searchingPopupSession
+		).then(
 			result => ({ result, succeeded: true as const }),
 			() => ({ succeeded: false as const })
 		);
@@ -481,16 +682,28 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 					matchmakerCandidateRegions(candidates)
 				)
 			);
-			assertCurrentMatchmakerRequest(request);
+			assertCurrentMatchmakerRequest(
+				request,
+				requestGeneration,
+				searchingPopupSession
+			);
 		} catch (error) {
-			assertCurrentMatchmakerRequest(request);
+			assertCurrentMatchmakerRequest(
+				request,
+				requestGeneration,
+				searchingPopupSession
+			);
 			console.warn('Failed to measure matchmaker region latency', error);
 		}
 		const latencies = matchmakerRegionLatencies(latencyResult);
 		const rankedCandidates = rankMatchmakerCandidates(candidates, latencies);
 
 		const freshList = await freshListPromise;
-		assertCurrentMatchmakerRequest(request);
+		assertCurrentMatchmakerRequest(
+			request,
+			requestGeneration,
+			searchingPopupSession
+		);
 		const freshResult = freshList.succeeded ? freshList.result : initialResult;
 		const freshCandidates = collectMatchmakerCandidates(
 			freshResult,
@@ -503,11 +716,24 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			freshCandidates
 		);
 		await holdSearchingViewUntilReadable(searchingShownAt, request);
-		assertCurrentMatchmakerRequest(request);
+		assertCurrentMatchmakerRequest(
+			request,
+			requestGeneration,
+			searchingPopupSession
+		);
 		if (selectedGame) showMatchmakerLobbyPopup(selectedGame, matchmakerRegionLatency(latencies, selectedGame.region));
 		else showMatchmakerNoGamesPopup(criteria);
 	} catch (error) {
-		if (matchmakerRequest !== request || error instanceof MatchmakerRequestSupersededError) return;
+		if (!popupLifecycle.isCurrent(searchingPopupSession)) return;
+		if (!popupElement.isConnected) {
+			teardownMatchmakerPopup();
+			return;
+		}
+		if (
+			matchmakerRequest !== request
+			|| matchmakerRequestGeneration !== requestGeneration
+			|| error instanceof MatchmakerRequestSupersededError
+		) return;
 		if (timedOut) {
 			showMatchmakerErrorPopup('The matchmaker timed out.');
 			return;
@@ -521,6 +747,8 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 				: "The server list couldn't be loaded.");
 	} finally {
 		window.clearTimeout(timeoutHandle);
-		if (matchmakerRequest === request) matchmakerRequest = undefined;
+		if (matchmakerRequest === request && matchmakerRequestGeneration === requestGeneration) {
+			matchmakerRequest = undefined;
+		}
 	}
 }

@@ -25,6 +25,7 @@ import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
 import { HUD_CONTAINMENT_CSS } from './hud-containment.ts';
 import { captureIdentityDiagnostic } from './preload-diagnostics.ts';
+import { installGameplayBranding } from './gameplay-branding.ts';
 import { renameClientSettingsTabs } from './settings-tab-label.ts';
 import type { MotionBlurController } from './motion-blur.ts';
 
@@ -47,6 +48,10 @@ const rawPointerLockController = installRawPointerLock(
 	Element.prototype,
 	wokBootPayload?.userPrefs.rawMouseInput !== false
 );
+
+// Static HUD branding mounts once when Krunker's top-left shell is parsed, then disconnects its
+// short-lived observer. No timer, animation frame, or gameplay mutation work remains afterward.
+installGameplayBranding();
 
 // Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
 // Measures what a real Krunker frame issues so the calibration workload can be anchored to the

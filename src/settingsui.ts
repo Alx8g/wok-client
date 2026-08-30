@@ -14,6 +14,7 @@ import {
 	MATCHMAKER_REGIONS
 } from './matchmaker-data.ts';
 import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
+import { SETTINGS_VISIBILITY_CONTROLLER_KEYS, settingIsVisible } from './settings-visibility.ts';
 import {
 	CUSTOM_CLAN_PREFERENCE_KEY,
 	isCustomIdentityPreferenceKey,
@@ -195,13 +196,13 @@ const settingsDesc: SettingsDesc = {
 
 	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On laptops with two GPUs, uses the fast one. If diagnostics still show integrated graphics, set it for WOK in your OS graphics settings too.', safety: 1, cat: 4 },
 	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Uses more power, avoids catch-up when you return.', safety: 2, cat: 4 },
-	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Only forces it where your driver disabled it for safety. Leave off.', safety: 3, cat: 4 },
-	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Linux only. No proven benefit; may reduce stability.', safety: 4, cat: 4 },
-	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Disables the fallback that opens DevTools in a separate window.', safety: 3, cat: 4 },
-	overrideURL: { title: 'Override URL', desc: 'Testing only. HTTPS krunker.io addresses only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4 },
+	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Only forces it where your driver disabled it for safety. Leave off.', safety: 3, cat: 5 },
+	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Linux only. No proven benefit; may reduce stability.', safety: 4, cat: 5 },
+	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Disables the fallback that opens DevTools in a separate window.', safety: 3, cat: 5 },
+	overrideURL: { title: 'Override URL', desc: 'Testing only. HTTPS krunker.io addresses only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 5 },
 
 	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has official mod support; prefer that. May conflict with game rules.', safety: 3, cat: 5 },
-	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks ads. May conflict with game rules. Restart required.', safety: 4, cat: 5, opts: ['off', 'hide', 'block'] },
+	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks ads. May conflict with game rules. Restart required.', safety: 4, cat: 4, opts: ['off', 'hide', 'block'] },
 	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Your own rules can change or cancel game requests. May conflict with game rules. Restart required.', safety: 4, cat: 5 },
 	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. May conflict with game rules.', safety: 4, cat: 5, refreshOnly: true }
 };
@@ -222,7 +223,7 @@ const categoryNames: CategoryName[] = [
 	{ name: 'Visuals', cat: 'styleSettings' },
 	{ name: 'Matchmaker', cat: 'matchmakerSettings' },
 	{ name: 'Advanced', cat: 'advSettings' },
-	{ name: 'Legacy', cat: 'legacySettings' },
+	{ name: 'Developer', cat: 'developerSettings' },
 	{ name: 'About', cat: 'aboutSettings' }
 ];
 
@@ -541,6 +542,7 @@ class SettingElem {
 			}
 			updateRefreshNeededForKey(this.props.key);
 			updateRefreshNotification();
+			if (SETTINGS_VISIBILITY_CONTROLLER_KEYS.has(this.props.key)) queueMicrotask(renderSettings);
 		} else {
 			callback(value);
 		}
@@ -891,6 +893,7 @@ export function renderSettings() {
 	settingElementPairs = {};
 
 	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
+		.filter(setting => settingIsVisible(setting.key, userPrefs))
 		.filter(setting => settingSearchFilter(setting, filter));
 	const categoryBodies = new Map<number, HTMLElement>();
 	const categorySections = new Map<number, HTMLElement>();

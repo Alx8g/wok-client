@@ -55,6 +55,14 @@ Runtime profiles are written beneath the app's `config/runtime-profiles/` direct
 node scripts/analyze-runtime-profile.mjs "/path/to/renderer.cpuprofile"
 ```
 
+For a diagnostic Chromium trace, keep callback, commit, present-call, and presentation-feedback rates separate with:
+
+```sh
+node scripts/analyze-frame-trace.mjs "/path/to/chromium-trace.json" "/path/to/report.json"
+```
+
+The frame-trace report also includes queue depth and p50/p95/p99 stage durations. Trace throughput is diagnostic only because tracing can reduce frame cadence.
+
 ## Build and validation
 
 Requirements:

@@ -24,7 +24,10 @@ export interface FrameTraceReport {
 		presentation_reporter_spans: number;
 		presentation_feedbacks: number;
 		ledger_submitted_frames: number;
+		ledger_gpu_complete_frames: number;
+		ledger_presentation_feedback_frames: number;
 		ledger_terminal_frames: number;
+		ledger_feedback_flags: Record<'failure' | 'hw_clock' | 'hw_completion' | 'vsync' | 'zero_copy', number>;
 		ledger_outcomes: Record<'not_presented' | 'presented' | 'unknown', number>;
 	};
 	queue: {

@@ -28,6 +28,19 @@ test('separates callback, present-call, and presentation-feedback rates', async 
 			event({ ph: 'e', name: 'SubmitCompositorFrameToPresentationCompositorFrame', pid: 10, tid: 2, ts: timestamp + 500, id2: { local: `main-${index}` }, args: {} }),
 			event({ ph: 'e', name: 'SubmitCompositorFrameToPresentationCompositorFrame', pid: 10, tid: 2, ts: timestamp + 500, id2: { local: `impl-${index}` }, args: {} }),
 			event({ ph: 'I', name: 'WokFrameSubmitted', pid: 10, tid: 2, ts: timestamp + 510, args: { frame_token: index + 1 } }),
+			event({
+				ph: 'I',
+				name: 'WokFramePresentationFeedback',
+				pid: 10,
+				tid: 2,
+				ts: timestamp + 500,
+				args: {
+					feedback_flags: index === 0 ? 15 : index === 1 ? 16 : 1,
+					frame_token: index + 1,
+					swap_start_timestamp_us: timestamp + 200,
+					writes_done_timestamp_us: index === 1 ? 0 : timestamp + 350
+				}
+			}),
 			event({ ph: 'I', name: 'WokFrameTerminal', pid: 10, tid: 2, ts: timestamp + 500, args: { frame_token: index + 1, status: index === 1 ? 'not_presented' : 'presented' } })
 		])),
 		event({ ph: 'I', name: 'Swap throttled', pid: 20, tid: 3, ts: 3_600, args: { pending_swaps: 1 } }),
@@ -47,15 +60,27 @@ test('separates callback, present-call, and presentation-feedback rates', async 
 		assert.equal(report.counts.presentation_reporter_spans, 6);
 		assert.equal(report.counts.presentation_feedbacks, 3, 'main and impl reporters deduplicate by feedback timestamp');
 		assert.equal(report.counts.ledger_submitted_frames, 3);
+		assert.equal(report.counts.ledger_gpu_complete_frames, 2);
+		assert.equal(report.counts.ledger_presentation_feedback_frames, 3);
+		assert.deepEqual(report.counts.ledger_feedback_flags, {
+			failure: 1,
+			hw_clock: 1,
+			hw_completion: 1,
+			vsync: 2,
+			zero_copy: 1
+		});
 		assert.deepEqual(report.counts.ledger_outcomes, { not_presented: 1, presented: 2, unknown: 0 });
 		assert.equal(report.rates.callback_fps, 1_200);
 		assert.equal(report.rates.presentation_feedback_fps, 1_200);
+		assert.equal(report.rates.ledger_gpu_complete_fps, 800);
+		assert.equal(report.rates.ledger_presentation_feedback_fps, 1_200);
 		assert.equal(report.rates.ledger_presented_fps, 800);
 		assert.equal(report.queue.swap_throttled_count, 1);
 		assert.equal(report.queue.maximum_pending_swaps, 1);
 		assert.equal(report.queue.maximum_dcomp_pending_frames, 2);
 		assert.equal(report.stages.callback.p95_us, 600);
 		assert.equal(report.stages.dxgi_present.p99_us, 140);
+		assert.equal(report.stages.swap_start_to_gpu_writes_done.p95_us, 150);
 	} finally {
 		await rm(directory, { force: true, recursive: true });
 	}

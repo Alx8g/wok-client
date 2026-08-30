@@ -154,8 +154,8 @@ function applyThemeSelection(value: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: "Hides Wallet while preserving your KR balance, plus Custom Games, Community & Events, Guide, What's New, Store promo badges, and the Contact/Terms/Changelog footer.", safety: 0, cat: 1, instant: true },
-	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Pins fixed Public categories, shows numeric regional ping, and sorts measured geographic regions from lowest to highest latency.', safety: 0, cat: 1, instant: true },
+	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: "Hides Wallet while preserving your KR balance, plus Custom Games, Community & Events, Guide, What's New, Store promo badges, and the Contact/Terms/Changelog footer.", safety: 0, cat: 2, instant: true },
+	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Pins fixed Public categories, shows numeric regional ping, and sorts measured geographic regions from lowest to highest latency.', safety: 0, cat: 3, instant: true },
 	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as the current system allows.', safety: 0, cat: 0 },
 	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Uses unadjusted Pointer Lock input to avoid Windows Chromium camera jumps and OS mouse acceleration. Restart required.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto or use Run calibration to measure the available renderer profiles.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
@@ -164,10 +164,10 @@ const settingsDesc: SettingsDesc = {
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Shows every class icon above the play buttons for one-click class switching.', safety: 0, cat: 1, instant: true },
-	customName: { title: 'Custom Name', type: 'text', desc: 'Shows this name instead of yours in chat, the scoreboard, the kill feed and the menu. Only on your screen; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
-	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
-	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Cycles your whole local name and clan through fast RGB colours. Custom Name and Clan override the text; blank fields keep your real identity. Only visible on your screen.', safety: 0, cat: 1, instant: true },
-	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
+	customName: { title: 'Custom Name', type: 'text', desc: 'Shows this name instead of yours in chat, the scoreboard, the kill feed and the menu. Only on your screen; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 2, instant: true },
+	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 2, instant: true },
+	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Cycles your whole local name and clan through fast RGB colours. Custom Name and Clan override the text; blank fields keep your real identity. Only visible on your screen.', safety: 0, cat: 2, instant: true },
+	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 3, refreshOnly: true },
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },
 
@@ -194,17 +194,17 @@ const settingsDesc: SettingsDesc = {
 	matchmaker_minRemainingTime: { title: 'Minimum Time Left', type: 'num', min: 0, max: 480, desc: 'Seconds remaining in the match.', safety: 0, cat: 3, instant: true },
 	matchmaker_openServerWindow: { title: 'Open Servers On Cancel', type: 'bool', safety: 0, cat: 3, instant: true },
 
-	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On laptops with two GPUs, uses the fast one. If diagnostics still show integrated graphics, set it for WOK in your OS graphics settings too.', safety: 1, cat: 4 },
-	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Uses more power, avoids catch-up when you return.', safety: 2, cat: 4 },
-	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Only forces it where your driver disabled it for safety. Leave off.', safety: 3, cat: 5 },
-	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Linux only. No proven benefit; may reduce stability.', safety: 4, cat: 5 },
-	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Disables the fallback that opens DevTools in a separate window.', safety: 3, cat: 5 },
-	overrideURL: { title: 'Override URL', desc: 'Testing only. HTTPS krunker.io addresses only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 5 },
+	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On laptops with two GPUs, uses the fast one. If diagnostics still show integrated graphics, set it for WOK in your OS graphics settings too.', safety: 1, cat: 0 },
+	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Uses more power, avoids catch-up when you return.', safety: 2, cat: 0 },
+	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Only forces it where your driver disabled it for safety. Leave off.', safety: 3, cat: 4 },
+	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Linux only. No proven benefit; may reduce stability.', safety: 4, cat: 4 },
+	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Disables the fallback that opens DevTools in a separate window.', safety: 3, cat: 4 },
+	overrideURL: { title: 'Override URL', desc: 'Testing only. HTTPS krunker.io addresses only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4 },
 
-	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has official mod support; prefer that. May conflict with game rules.', safety: 3, cat: 5 },
-	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks ads. May conflict with game rules. Restart required.', safety: 4, cat: 4, opts: ['off', 'hide', 'block'] },
-	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Your own rules can change or cancel game requests. May conflict with game rules. Restart required.', safety: 4, cat: 5 },
-	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. May conflict with game rules.', safety: 4, cat: 5, refreshOnly: true }
+	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has official mod support; prefer that. May conflict with game rules.', safety: 3, cat: 4 },
+	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks ads. May conflict with game rules. Restart required.', safety: 4, cat: 1, opts: ['off', 'hide', 'block'] },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Your own rules can change or cancel game requests. May conflict with game rules. Restart required.', safety: 4, cat: 4 },
+	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. May conflict with game rules.', safety: 4, cat: 4, refreshOnly: true }
 };
 
 /** index-based safety descriptions. goes in title attribute */
@@ -222,7 +222,6 @@ const categoryNames: CategoryName[] = [
 	{ name: 'Game', cat: 'gameSettings' },
 	{ name: 'Visuals', cat: 'styleSettings' },
 	{ name: 'Matchmaker', cat: 'matchmakerSettings' },
-	{ name: 'Advanced', cat: 'advSettings' },
 	{ name: 'Developer', cat: 'developerSettings' },
 	{ name: 'About', cat: 'aboutSettings' }
 ];

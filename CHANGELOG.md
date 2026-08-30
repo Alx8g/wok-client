@@ -1,3 +1,14 @@
+## WOK Client 1.1.0-rc.11 (2026-08-30)
+
+### Branding
+- Added plain white `WOK.SOCIAL` branding between the gameplay timer and mode/map details so recordings and streams identify where to get the client.
+- Kept the watermark click-through and static. Its temporary parser observer disconnects after mounting; no timer, animation frame or per-frame JavaScript remains.
+
+### Runtime
+- Restored Windows releases to WOK's default patched Electron 44 nightly runtime after real-play A/B testing reproduced the reported network-latency issue only with the optimized qualified Chromium runtime.
+- Verified all 17 compared Chromium payload files in the accepted isolated build are byte-identical to the default patched nightly payload.
+- Retained the optimized qualified Chromium archive as an explicit local diagnostic override only.
+
 ## WOK Client 1.1.0-rc.10 (2026-08-30)
 
 ### Added

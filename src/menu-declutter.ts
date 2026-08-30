@@ -20,6 +20,7 @@ export const MENU_DECLUTTER_STATIC_CSS = `
 #signedInHeaderBar > .verticalSeparator { display: none !important; }
 #mapInfoHld { font-size: 0 !important; }
 #mapInfoHld > #mapInfo { font-size: 20px !important; }
+.stream-card.promo-card { display: none !important; }
 `;
 export const STREAM_PROMOTION_TEXT = 'Stream Krunker and get featured!';
 

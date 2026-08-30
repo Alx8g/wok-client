@@ -316,6 +316,11 @@ test('matches only the exact Krunker self-promotion label', () => {
 	assert.equal(isKrunkerStreamPromotionText('Stream Krunker and get featured creators!'), false);
 });
 
+test('keeps a CSS fallback scoped to Krunker promotion cards', () => {
+	assert.match(MENU_DECLUTTER_STATIC_CSS, /\.stream-card\.promo-card\s*\{\s*display:\s*none\s*!important/iu);
+	assert.doesNotMatch(MENU_DECLUTTER_STATIC_CSS, /(?:^|[},])\s*\.stream-card\s*\{/iu);
+});
+
 test('collects stable menu promotions without hiding real stream cards', () => {
 	const root = new FakeMenuElement('body');
 	const battlePass = new FakeMenuElement('div', '', ['menuItem', 'bpItem']);

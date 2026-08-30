@@ -123,16 +123,6 @@
 	align-items: center;
 }
 
-.Crankshaft-settings .setting .desc-icon.instant {
-	background-color: rgba(1, 89, 220, 0.16);
-	border: 2px solid rgba(3, 133, 255, 0.81);
-}
-
-.Crankshaft-settings .setting .desc-icon.instant svg path {
-	color: #0385ff;
-	fill: currentColor;
-}
-
 .Crankshaft-settings .setting.settName .inputGrey2,
 .Crankshaft-settings .setting.settName .switch,
 .Crankshaft-settings .setting.settName .crankshaft-multisel-parent,
@@ -204,10 +194,6 @@
 .Crankshaft-settings .setting-desc-new a {
 	font-size: inherit !important;
 	font-family: inherit !important;
-}
-
-.Crankshaft-settings .setting-category-collapsed {
-	display: none;
 }
 
 .setBodH.safetyLegend {
@@ -501,16 +487,6 @@ input:checked+.advancedSlider:hover {
 
 .Crankshaft-settings-section.hidden {
 	display: none;
-}
-
-/* The section title is redundant with the highlighted nav item, so keep it quiet. */
-.Crankshaft-settings-section .Crankshaft-setHed {
-	cursor: default;
-	margin-top: 0;
-	opacity: .55;
-	font-size: 13px;
-	letter-spacing: .08em;
-	text-transform: uppercase;
 }
 
 /* Group headings inside a section. */

@@ -145,10 +145,10 @@ function applyThemeSelection(value: string) {
  * optional props and their defaults:
  * desc (description): omitting it or leaving it "" will not render any description
  * cat (category): omitting will put the setting in the first (0th) category
- * instant: ommiting will not render an instant icon.
- * refreshOnly: ommiting will not render a refresh-only icon
+ * instant: true means the setting applies immediately.
+ * refreshOnly: true means the setting requires a page reload.
  *
- * note: instant and refreshOnly are exclusive. only use one at a time
+ * Neither flag means a full client restart. The flags are exclusive.
  *
  * note: settings will get rendered in the order you define them.
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
@@ -156,7 +156,7 @@ function applyThemeSelection(value: string) {
 const settingsDesc: SettingsDesc = {
 	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: 'Removes promotions, Manage Ads, and low-value menu items while keeping balances and core controls.', safety: 0, cat: 2, instant: true },
 	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Shows each Public region’s ping and puts the fastest regions first. Fixed categories stay pinned.', safety: 0, cat: 3, instant: true },
-	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Removes the frame cap so WOK can run as fast as the system allows.', safety: 0, cat: 0 },
+	fpsUncap: { title: 'Uncap FPS', type: 'bool', desc: 'Removes the frame cap so WOK can run as fast as the system allows.', safety: 0, cat: 0 },
 	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Prevents camera jumps on high-polling mice and ignores Windows mouse acceleration. Restart required.', safety: 0, cat: 0 },
 	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Auto is recommended. Run calibration to measure which graphics option is fastest.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
 	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Chooses how WOK fills the screen. Fullscreen usually gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
@@ -353,9 +353,10 @@ class SettingElem {
 
 		this.#disabled = false;
 
-		// general stuff that every setting has
+		// Warnings and reload requirements need visible markers. Instant changes are the normal case
+		// and do not need an icon on every row.
 		if (this.props.safety > 0) this.HTML += skeleton.safetyIcon(safetyDesc[this.props.safety]);
-		else if (this.props.instant || this.props.refreshOnly) this.HTML += skeleton.refreshIcon(this.props.instant ? 'instant' : 'refresh-icon');
+		else if (this.props.refreshOnly) this.HTML += skeleton.refreshIcon();
 
 		if (this.props.key === 'matchmaker_regions' && userPrefs.regionTimezones) {
 			this.props.cols = 8;
@@ -774,13 +775,6 @@ function triggerKeybindSettingDialog(element: SettingElem) {
 
 /** a settings generation helper. has some skeleton elements and methods that make them. purpose: prevents code duplication */
 const skeleton = {
-	/** make a setting cateogry */
-	category: (title: string, innerHTML: string, elemClass = 'mainSettings') => `
-	<div class="setHed Crankshaft-setHed"><span class="material-icons plusOrMinus">keyboard_arrow_down</span> ${title}</div>
-	<div class="setBodH Crankshaft-setBodH ${elemClass}">
-			${innerHTML}
-	</div>`,
-
 	/**
 	 * make a setting with some text (notice)
 	 * @param desc description of the notice
@@ -800,16 +794,10 @@ const skeleton = {
 	</span>`,
 
 	/** wrapped refresh icon (color gets applied through css) */
-	refreshIcon: (mode: 'instant' | 'refresh-icon') => `
-	<span class="desc-icon ${mode}" title="${mode === 'instant' ? 'Applies instantly! (No refresh of page required)' : 'Refresh page to see changes'}">
+	refreshIcon: () => `
+	<span class="desc-icon refresh-icon" title="Refresh page to see changes">
 		<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#000000"><path d="M12 6v1.79c0 .45.54.67.85.35l2.79-2.79c.2-.2.2-.51 0-.71l-2.79-2.79c-.31-.31-.85-.09-.85.36V4c-4.42 0-8 3.58-8 8 0 1.04.2 2.04.57 2.95.27.67 1.13.85 1.64.34.27-.27.38-.68.23-1.04C6.15 13.56 6 12.79 6 12c0-3.31 2.69-6 6-6zm5.79 2.71c-.27.27-.38.69-.23 1.04.28.7.44 1.46.44 2.25 0 3.31-2.69 6-6 6v-1.79c0-.45-.54-.67-.85-.35l-2.79 2.79c-.2.2-.2.51 0 .71l2.79 2.79c.31.31.85.09.85-.35V20c4.42 0 8-3.58 8-8 0-1.04-.2-2.04-.57-2.95-.27-.67-1.13-.85-1.64-.34z"/></svg>
 	</span>`,
-
-	/** make a settings category header element */
-	catHedElem: (title: string) => createElement('div', {
-		class: 'setHed Crankshaft-setHed'.split(' '),
-		innerHTML: `${title}`
-	}),
 
 	/** make a settings category body element */
 	catBodElem: (elemClass: string, content: string) => createElement('div', {
@@ -822,7 +810,7 @@ const skeleton = {
 			case RefreshEnum.reloadApp:
 				return '<span class="restart-msg">Restart client fully to see changes</span>';
 			case RefreshEnum.refresh:
-				return `<span class="reload-msg">${skeleton.refreshIcon('refresh-icon')}Reload page with <code>F5</code> or <code>${os.platform() === "darwin" ? "CMD" : "CTRL"} + R</code> to see changes</span>`;
+				return `<span class="reload-msg">${skeleton.refreshIcon()}Reload page with <code>F5</code> or <code>${os.platform() === "darwin" ? "CMD" : "CTRL"} + R</code> to see changes</span>`;
 			case RefreshEnum.notNeeded:
 			default:
 				return '';
@@ -865,24 +853,6 @@ let settingElementPairs: { [key: string]: SettingElem } = {};
 /** Sidebar section the user last opened; survives re-renders so a refresh never dumps them back to the top. */
 let activeSettingsCategory = 0;
 
-function toggleSettingsCategory(header: Element) {
-	const sibling = header.nextElementSibling;
-	if (!sibling) return;
-	sibling.classList.toggle('setting-category-collapsed');
-
-	const iconElement = header.querySelector('.material-icons');
-	if (!iconElement) return;
-	iconElement.textContent = iconElement.textContent === 'keyboard_arrow_down'
-		? 'keyboard_arrow_right'
-		: 'keyboard_arrow_down';
-}
-
-crankshaftSettingsHolder.addEventListener('click', event => {
-	if (!(event.target instanceof Element)) return;
-	const header = event.target.closest('.Crankshaft-setHed');
-	if (header && crankshaftSettingsHolder.contains(header)) toggleSettingsCategory(header);
-});
-
 export function renderSettings() {
 	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').toLowerCase();
 	Array.from(document.querySelectorAll('.setHed')).filter(element => element.innerHTML === 'No settings found').forEach(element => element.remove());
@@ -914,7 +884,7 @@ export function renderSettings() {
 		const category = categoryNames[categoryIndex];
 		const body = skeleton.catBodElem(category.cat, category.note ? skeleton.notice(category.note) : '');
 		const section = createElement('div', { class: ['Crankshaft-settings-section'] });
-		section.append(skeleton.catHedElem(category.name), body);
+		section.append(body);
 		pane.append(section);
 		const button = createElement('div', { class: ['Crankshaft-settings-navitem'], innerHTML: category.name });
 		button.addEventListener('click', () => { showCategory(categoryIndex); });
@@ -925,8 +895,12 @@ export function renderSettings() {
 		return body;
 	};
 
-	// Preserve the basic client category even when a search filters out all of its settings.
-	if (!settings.some(setting => setting.cat === 0)) ensureCategory(0);
+	// Create visible sections in the declared navigation order before settings are appended. Building
+	// sections from the settings object instead made the first setting in each category control the UI order.
+	for (const categoryIndex of categoryNames.keys()) {
+		const hasVisibleSetting = settings.some(setting => (setting.cat ?? 0) === categoryIndex);
+		if (hasVisibleSetting || categoryIndex === 0 || categoryIndex === ABOUT_CATEGORY_INDEX) ensureCategory(categoryIndex);
+	}
 
 	for (const setting of settings) {
 		const settingElement = new SettingElem(setting);

@@ -1,6 +1,6 @@
 /**
  * One-time settings baselines. Existing settings.json files can carry defaults this project no
- * longer ships: product defaults inherited from legacy Crankshaft profiles, and
+ * longer ships: product defaults inherited from legacy client profiles, and
  * safeFlags_gpuRasterizing from its default-on era (--enable-gpu-rasterization is a no-op on
  * modern Chromium except for forcing past the driver blocklist, audit A5).
  *

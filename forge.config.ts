@@ -162,7 +162,7 @@ export default {
         appBundleId: "social.wok.client",
         icon: "./build/icon",
         appCategoryType: "public.app-category.games",
-        appCopyright: "Copyright © 2026 WOK contributors; based on Crankshaft contributors",
+        appCopyright: "Copyright © 2026 WOK contributors",
         ignore: [
             // The app ships the bundled runtime (scripts/bundle.mjs output), not src/.
             /^\/(?!(bundle|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,

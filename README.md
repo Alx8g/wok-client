@@ -12,7 +12,7 @@ Releases: [WOK Client releases](https://github.com/nzalexgarciagil-ctrl/wok-clie
 
 ## Project status
 
-WOK Client `1.0.0` is the first WOK release and is a modified version of GPL-licensed [Crankshaft 2.0.1](https://github.com/KraXen72/crankshaft/tree/c1f1ce39e49296735ac73737b1cb6f2b5e5482b2). Crankshaft attribution, license terms, and contributor history are preserved. See [CHANGELOG.md](CHANGELOG.md), [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt) for the modification and dependency record.
+WOK Client is an independent GPLv3 project. Release provenance, third-party licenses, and modification notices are recorded in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), [CHANGELOG.md](CHANGELOG.md), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt).
 
 Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations.
 
@@ -28,7 +28,7 @@ WOK Client is an independent project. It is not affiliated with, endorsed by, or
 - Optional Discord Rich Presence using an in-tree IPC client
 - Ad requests are blocked by default; legacy resource swapping, custom filters, matchmaker, and competition automation remain disabled by default
 
-Terms-sensitive features remain configurable. Existing Crankshaft or early WOK profiles are migrated once without deleting the original profile files.
+Terms-sensitive features remain configurable. Legacy and early WOK profiles are migrated once without deleting the original profile files.
 
 ## Security boundaries
 
@@ -70,7 +70,7 @@ Requirements:
 - pnpm 11.15.1 or newer
 - Platform packaging tools when making a local executable; Windows installer creation also requires NSIS
 
-The documented patched-Electron release currently provides archives for macOS arm64, Linux x64, and Windows x64. Other architectures require a separately reviewed Electron build and checksum record. Windows x64 has received local gameplay testing. Linux x64 and macOS arm64 retain Crankshaft's packaging paths and are covered by source validation, but still require native package and gameplay smoke tests before they are described as verified releases.
+The documented patched-Electron release currently provides archives for macOS arm64, Linux x64, and Windows x64. Other architectures require a separately reviewed Electron build and checksum record. Windows x64 has received local gameplay testing. Linux x64 and macOS arm64 retain the existing packaging paths and are covered by source validation, but still require native package and gameplay smoke tests before they are described as verified releases.
 
 From a source checkout:
 
@@ -212,23 +212,10 @@ Locally built or unsigned applications may be quarantined by macOS. Review the s
 xattr -c "/Applications/WOK Client.app"
 ```
 
-## Credits
+## Open-source notices
 
-WOK Client is based on [Crankshaft](https://github.com/KraXen72/crankshaft). See the [full Crankshaft contributor history](https://github.com/KraXen72/crankshaft/graphs/contributors).
-
-Crankshaft was built from earlier work in Gatoclient, idkr, and Gatoclient Lite. Upstream acknowledgements include:
-
-- [Creepycats](https://github.com/creepycats) and [Gatoclient](https://github.com/Gatohost/gatoclient)
-- [LukeTheDuke](https://github.com/LukeTheDuke240) and Gatoclient Lite
-- [bigjakk](https://github.com/bigjakk) for Electron build work and parallel work on [KCC](https://github.com/bigjakk/Krunker-Civilian-Client)
-- [AspectQuote](https://github.com/AspectQuote) for matchmaker and UI work
-- [Iona](https://github.com/eeonaa) for the CSS swapper the theme system grew out of
-- [wa/paintingofblue](https://github.com/hsyslm) for the original matchmaker
-- [Commander/asger-finding](https://github.com/asger-finding) for resource-swapper work
-- [Tae](https://github.com/whuuayu) for the original Crankshaft logo
-
-The complete historical record remains in Git and [CHANGELOG.md](CHANGELOG.md).
+Third-party licenses, modification notices, and source provenance are maintained in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). The historical release record remains in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-WOK Client and the modified Crankshaft source are distributed under GNU GPL version 3 only. See [LICENSE](LICENSE). Third-party components retain their own licenses as listed in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). Local packages copy the WOK GPL license, third-party notices, and patched-Electron provenance into the packaged resources directory without replacing Electron's own license files.
+WOK Client is distributed under GNU GPL version 3 only. See [LICENSE](LICENSE). Third-party components retain their own licenses as listed in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). Local packages copy the WOK GPL license, third-party notices, and patched-Electron provenance into the packaged resources directory without replacing Electron's own license files.

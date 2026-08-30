@@ -129,7 +129,6 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 		assert.equal(windowEvents.listenerCount(), 0);
 		assert.equal(overlayRemoved, true);
 		assert.equal(fakeWindow.wokPerformance, undefined);
-		assert.equal(fakeWindow.crankshaftPerformance, undefined);
 	} finally {
 		stopPerformanceMonitor();
 		restoreGlobals();
@@ -257,7 +256,6 @@ test('network telemetry follows the overlay lifecycle and retains Krunker semant
 
 		stopPerformanceMonitor();
 		assert.equal(fakeWindow.wokPerformance, undefined);
-		assert.equal(fakeWindow.crankshaftPerformance, undefined);
 	} finally {
 		stopPerformanceMonitor();
 		restoreGlobals();

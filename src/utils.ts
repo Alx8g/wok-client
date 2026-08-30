@@ -1,10 +1,7 @@
 import { webFrame } from 'electron';
 import { strippedConsole } from './preload.ts';
 import * as os from "os";
-import { UPSTREAM_REPO_ID } from './branding.ts';
 import { keyboardEventMatchesKeybind } from './keybind-matching.ts';
-
-export const upstreamRepoID = UPSTREAM_REPO_ID;
 
 // create element util function. source is my utils lib: https://github.com/KraXen72/roseboxlib/blob/master/esm/lib.js
 /**

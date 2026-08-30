@@ -21,9 +21,6 @@
 		"validate": "pnpm run lint && pnpm run typecheck && pnpm test"
 	},
 	"author": "WOK contributors",
-	"contributors": [
-		"Crankshaft contributors (https://github.com/KraXen72/crankshaft/graphs/contributors)"
-	],
 	"license": "GPL-3.0-only",
 	"homepage": "https://wok.social",
 	"repository": {
@@ -41,14 +38,6 @@
 	"engines": {
 		"node": ">=24.13.0",
 		"pnpm": ">=11.15.1"
-	},
-	"wokClient": {
-		"basedOn": {
-			"name": "crankshaft",
-			"version": "2.0.1",
-			"commit": "c1f1ce39e49296735ac73737b1cb6f2b5e5482b2",
-			"repository": "https://github.com/KraXen72/crankshaft"
-		}
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.5",

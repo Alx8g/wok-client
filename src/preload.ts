@@ -1,4 +1,4 @@
-﻿import { readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join as pathJoin, resolve as pathResolve } from 'path';
 import { ipcRenderer, webFrame } from 'electron';
@@ -891,7 +891,7 @@ async function mountClientSplash(
 
 	const splashBackground = createElement(
 		'div',
-		{ class: ['crankshaft-loading-background'] }
+		{ class: ['wok-loading-background'] }
 	);
 	splashBackground.setAttribute(
 		'aria-label',
@@ -1022,7 +1022,7 @@ function ensureThemeElements(): boolean {
 	if (!document.body) return false;
 	themeBaseElement = createElement('style', { id: 'wokThemeBase' });
 	// Keeps the historical id: user CSS has always landed in this element.
-	themeElement = createElement('style', { id: 'crankshaftCustomCSS' });
+	themeElement = createElement('style', { id: 'wokCustomCSS' });
 	document.body.append(themeBaseElement, themeElement);
 	return true;
 }
@@ -1219,13 +1219,13 @@ function startCustomIdentity(_userPrefs: UserPrefs) {
  * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
  */
 function injectKeyframeFix() {
-	if (document.getElementById('crankshaftKeyframeFix')) return;
+	if (document.getElementById('wokKeyframeFix')) return;
 	// document.body can still be null here: whenDOMReady runs immediately whenever readyState is
 	// past 'loading', which on a fast boot is before the body element exists. An unguarded
 	// appendChild threw and killed every step queued after it in the same callback.
 	const parent = document.body ?? document.head ?? document.documentElement;
 	if (!parent) return;
-	const keyframeStyle = createElement('style', { id: 'crankshaftKeyframeFix' });
+	const keyframeStyle = createElement('style', { id: 'wokKeyframeFix' });
 	keyframeStyle.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
 	parent.appendChild(keyframeStyle);
 }

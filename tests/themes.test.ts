@@ -82,9 +82,7 @@ function hooksOf(selector: string): { classes: string[]; ids: string[] } {
  * than trusted.
  */
 const WOK_SELECTOR_TOKENS = [
-	'Crankshaft', // settings panel, toasts, splash background, performance overlay
-	'crankshaft',
-	'wok-', // splash stage and weapon loader
+	'wok-', // settings, splash stage, diagnostics, and weapon loader
 	'matchmaker', // src/matchmaker.ts builds the whole popup; Krunker has no matchmaker of its own
 	'matchResultButton', // src/preload.ts
 	'refresh-popup', // src/settingsui.ts, the settings refresh notice
@@ -537,7 +535,7 @@ test('the generated user template is a working theme plus the documented contrac
 		// Real values, not blanks: the template has to render as a theme the moment it is selected.
 		assert.match(template, new RegExp(`${variable.name}\\s*:\\s*\\S`, 'u'));
 	}
-	assert.ok(template.includes('.Crankshaft-settings'), 'the template must carry the base layer, not just describe it');
+	assert.ok(template.includes('.wok-settings'), 'the template must carry the base layer, not just describe it');
 	assert.ok(template.includes('#menuWindow'), 'the template must carry the game layer, not just describe it');
 	assert.ok(template.trimStart().startsWith('/*'));
 });

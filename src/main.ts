@@ -48,7 +48,7 @@ import {
 	type GraphicsSelection
 } from './graphics-profile.ts';
 import { createGraphicsStabilityConfirmation } from './graphics-stability.ts';
-import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
+import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, REPO_URL, WEBSITE_URL } from './branding.ts';
 import { migrateLegacyConfigsPhaseOne, migrateLegacyConfigsPhaseTwo, type LegacyConfigSource } from './config-migration.ts';
 import {
 	CALIBRATION_BENCHMARK_MS,
@@ -336,15 +336,15 @@ if (!gotTheLock) {
 let deferredMigrationSources: LegacyConfigSource[] = [];
 try {
 	const migration = migrateLegacyConfigsPhaseOne(configPath, [
-		{ label: 'Crankshaft AppData', path: legacyRoamingConfigPath },
-		{ label: 'Crankshaft Documents', path: legacyDocumentsConfigPath }
+		{ label: 'Legacy AppData profile', path: legacyRoamingConfigPath },
+		{ label: 'Legacy Documents profile', path: legacyDocumentsConfigPath }
 	]);
 	deferredMigrationSources = migration.deferredSources;
 	if (migration.foundSources.length > 0) {
 		console.log(`Migrated ${migration.copiedFiles} startup-critical legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files. Remaining files migrate in the background after the game window opens.`);
 	}
 } catch (error) {
-	console.error('Failed to migrate legacy Crankshaft configuration. The original files were left untouched.', error);
+	console.error('Failed to migrate legacy client configuration. The original files were left untouched.', error);
 }
 
 const swapperPath = pathJoin(configPath, 'swapper');
@@ -802,7 +802,7 @@ if (typeof userPrefs.hideAds === 'boolean') {
 	if (userPrefs.hideAds === true) userPrefs.hideAds = 'hide'; else userPrefs.hideAds = 'off';
 }
 
-// Move untouched Crankshaft splash defaults to the WOK palette while preserving custom colours.
+// Move untouched legacy splash defaults to the WOK palette while preserving custom colours.
 if (userPrefs.immersiveSplashBackgroundColor === '#171717') {
 	userPrefs.immersiveSplashBackgroundColor = '#0A0A0A';
 	modifiedSettings = true;
@@ -2229,7 +2229,7 @@ app.on('ready', async () => {
 	if (deferredMigrationSources.length > 0) {
 		const migrationSources = deferredMigrationSources;
 		deferredMigrationSources = [];
-		console.log(`Migrating remaining legacy Crankshaft configuration from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
+		console.log(`Migrating remaining legacy client configuration from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
 		void migrateLegacyConfigsPhaseTwo(configPath, migrationSources).then(migration => {
 			if (!migration.completed) {
 				console.error('Legacy configuration migration did not finish cleanly; it will resume on the next launch.');
@@ -2239,7 +2239,7 @@ app.on('ready', async () => {
 			if (requestHandlerStarted && migration.copiedFiles > 0) {
 				console.log('Migration finished after resource indexing; any migrated swapped resources and CSS files appear after the next launch.');
 			}
-		}).catch(error => { console.error('Failed to migrate remaining legacy Crankshaft configuration. The original files were left untouched.', error); });
+		}).catch(error => { console.error('Failed to migrate remaining legacy client configuration. The original files were left untouched.', error); });
 	}
 
 	let discordRPCReady = false;
@@ -2292,7 +2292,7 @@ app.on('ready', async () => {
 				if (userPrefs.extendedRPC) {
 					data.buttons = [
 						{ label: 'WOK Client', url: WEBSITE_URL },
-						{ label: 'Crankshaft upstream', url: UPSTREAM_REPO_URL }
+						{ label: 'WOK source', url: REPO_URL }
 					];
 				}
 				void rpc.setActivity(data).catch(console.error);

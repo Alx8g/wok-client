@@ -1,15 +1,13 @@
 import { shell, type MenuItemConstructorOptions, type MenuItem, app, BrowserWindow } from 'electron';
 import type { OpenDevToolsOptions } from 'electron/main';
-import { APP_NAME, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
+import { APP_NAME, NOTICES_URL, WEBSITE_URL } from './branding.ts';
 
 // Menu
 /** submenu to replace the About screen */
 export const aboutSubmenu: MenuItemConstructorOptions[] = [
 	{ label: APP_NAME, enabled: false },
 	{ label: 'Website', registerAccelerator: false, click: () => shell.openExternal(WEBSITE_URL) },
-	{ type: 'separator' },
-	{ label: 'Based on the open-source Crankshaft client', enabled: false },
-	{ label: 'Crankshaft upstream source', registerAccelerator: false, click: () => shell.openExternal(UPSTREAM_REPO_URL) }
+	{ label: 'Open-source notices', registerAccelerator: false, click: () => shell.openExternal(NOTICES_URL) }
 ];
 
 /** the menu with the app name on mac (array, to be spread) */

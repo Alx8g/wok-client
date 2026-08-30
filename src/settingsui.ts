@@ -2,7 +2,7 @@ import { readdirSync } from 'fs';
 import { DISPLAY_PREFERENCE_AUTO, type DisplayOption } from './display-selection.ts';
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
-import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
+import { NOTICES_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
 import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyPublicServerPingSortSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
 import { applyMenuDeclutterSettings } from './menu-declutter.ts';
 import { buildThemeOptions, normalizeThemeSelection } from './themes.ts';
@@ -306,7 +306,7 @@ function updateRefreshNotification() {
 
 	if (!refreshNotifElement) {
 		refreshNotifElement = createElement('div', {
-			class: ['crankshaft-holder-update', 'refresh-popup']
+			class: ['wok-holder-update', 'refresh-popup']
 		});
 		document.body.appendChild(refreshNotifElement);
 		renderRefreshNotification();
@@ -435,7 +435,7 @@ class SettingElem {
 				const hasValidDescriptions = Object.hasOwn(this.props, 'optDescriptions') && this.props.opts.length === this.props.optDescriptions.length;
 				if (Object.hasOwn(this.props, 'optDescriptions') && !hasValidDescriptions) throw new Error(`Setting '${this.props.key}' declared 'optDescriptions', but a different amount than 'opts'!`);
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
-					<div class="crankshaft-multisel-parent s-update" ${props?.cols ? `style="grid-template-columns:repeat(${props.cols}, 1fr)"` : ''}>
+					<div class="wok-multiselect s-update" ${props?.cols ? `style="grid-template-columns:repeat(${props.cols}, 1fr)"` : ''}>
 						${props.opts.map((opt, i) => `<label class="hostOpt">
 							<span class="optName">${sanitize(opt)}</span>
 							${hasValidDescriptions ? `<span class="optDescription">${sanitize(this.props.optDescriptions[i])}</span>` : ''}
@@ -457,11 +457,11 @@ class SettingElem {
 				break;
 			case 'keybind':
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
-					<label class="setting-input-wrapper crankshaftKeybindSettingWrapper">
+					<label class="setting-input-wrapper wok-keybind-setting">
 							<input class="s-update keybinddummyinput" type="text" />
-							<span class="material-icons crankshaftKeybindConflict" title="This keybind conflicts with '_'.">warning</span>
-							<span class="keyIcon crankshaftKeyIcon">${ parseKeybindSettingDisplay(props.value as KeybindUserPref) }</span>
-							<span class="material-icons crankshaftUnbindButton">delete_forever</span>
+							<span class="material-icons wok-keybind-conflict" title="This keybind conflicts with '_'.">warning</span>
+							<span class="keyIcon wok-key-icon">${ parseKeybindSettingDisplay(props.value as KeybindUserPref) }</span>
+							<span class="material-icons wok-unbind-button">delete_forever</span>
 					</label>`;
 				this.updateKey = 'value';
 				this.updateMethod = 'onchange';
@@ -521,7 +521,7 @@ class SettingElem {
 			elem.querySelector('.keyIcon').innerHTML = parseKeybindSettingDisplay(value);
 
 			// Calculate whether or not this conflicts with any other keybinds
-			if (callback === "normal") {				const warningElement = elem.querySelector('.crankshaftKeybindConflict');
+			if (callback === "normal") {				const warningElement = elem.querySelector('.wok-keybind-conflict');
 				updateKeybindConflictDisplay(this.props.key, value, userPrefs[this.props.key] as KeybindUserPref, warningElement);
 			}
 		}
@@ -590,7 +590,7 @@ class SettingElem {
 			// The reason we do this is to transmit the value when updating the value, since there's no <input> for JS objects themselves.
 			wrapper.querySelector('input').setAttribute("value", JSON.stringify(this.props.value));
 
-			wrapper.querySelector('.crankshaftUnbindButton').addEventListener('mousedown', () => {
+			wrapper.querySelector('.wok-unbind-button').addEventListener('mousedown', () => {
 				setKeybindSetting(this, {
 					shift: false,
 					alt: false,
@@ -599,7 +599,7 @@ class SettingElem {
 				})
 			})
 
-			const warningElement = wrapper.querySelector('.crankshaftKeybindConflict') as HTMLElement;
+			const warningElement = wrapper.querySelector('.wok-keybind-conflict') as HTMLElement;
 			if (this.props.callback === "normal") {				updateKeybindConflictDisplay(this.props.key, this.props.value as KeybindUserPref, this.props.value as KeybindUserPref, warningElement);
 			} else {
 				warningElement.style.display = "none";
@@ -632,7 +632,7 @@ function updateKeybindConflictDisplay(key: string, value: KeybindUserPref, oldVa
 	Object.keys(settingsDesc).forEach((settingKey: keyof typeof settingsDesc) => {
 		// If the setting type is a keybind, and the setting isn't the initiator, and the keybind change matches another setting before/after the change
 		if (settingsDesc[settingKey].type === "keybind" && settingKey !== key && (objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, value) || objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, oldValue))) {
-			if (settingElementPairs[settingKey]) warningElementsToModify.push(settingElementPairs[settingKey].elem.querySelector('.crankshaftKeybindConflict'));
+			if (settingElementPairs[settingKey]) warningElementsToModify.push(settingElementPairs[settingKey].elem.querySelector('.wok-keybind-conflict'));
 			if (objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, value)) conflictingOptions.push(settingsDesc[settingKey].title);
 		}
 	})
@@ -797,7 +797,7 @@ const skeleton = {
 	notice: (notice: string, opts?: { desc?: string, iconHTML?: string }) => `
 	<div class="settName setting">
 		${(opts?.iconHTML ?? false) ? opts.iconHTML : ''}
-		<span class="setting-title crankshaft-gray">${notice}</span>
+		<span class="setting-title wok-muted">${notice}</span>
 		${(opts?.desc ?? false) ? `<div class="setting-desc-new">${opts.desc}</div>` : ''}
 	</div>`,
 
@@ -815,7 +815,7 @@ const skeleton = {
 
 	/** make a settings category body element */
 	catBodElem: (elemClass: string, content: string) => createElement('div', {
-		class: `setBodH Crankshaft-setBodH ${elemClass}`.split(' '),
+		class: `setBodH wok-set-body ${elemClass}`.split(' '),
 		innerHTML: content
 	}),
 
@@ -853,10 +853,10 @@ function settingSearchFilter(setting: RenderReadySetting, query: string) {
 }
 
 /**
- * HTML Element that holds all of crankshaft's setting elements
+ * HTML element that holds WOK's settings.
  */
-const crankshaftSettingsHolder = createElement('div', {
-	class: ['Crankshaft-settings']
+const wokSettingsHolder = createElement('div', {
+	class: ['wok-settings']
 })
 
 /**
@@ -877,8 +877,8 @@ export function renderSettings() {
 	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').trim().toLowerCase();
 	Array.from(document.querySelectorAll('.setHed')).filter(element => element.innerHTML === 'No settings found').forEach(element => element.remove());
 
-	crankshaftSettingsHolder.remove();
-	crankshaftSettingsHolder.replaceChildren();
+	wokSettingsHolder.remove();
+	wokSettingsHolder.replaceChildren();
 	settingElementPairs = {};
 
 	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
@@ -892,9 +892,9 @@ export function renderSettings() {
 	// Sidebar layout: sections are chosen from a persistent nav rather than hunted for by
 	// scrolling through stacked collapsibles. One section is visible at a time, so the list the
 	// user is reading is never buried under the ones they are not.
-	const nav = createElement('div', { class: ['Crankshaft-settings-nav'] });
-	const pane = createElement('div', { class: ['Crankshaft-settings-pane'] });
-	crankshaftSettingsHolder.append(nav, pane);
+	const nav = createElement('div', { class: ['wok-settings-nav'] });
+	const pane = createElement('div', { class: ['wok-settings-pane'] });
+	wokSettingsHolder.append(nav, pane);
 	const navButtons = new Map<number, HTMLElement>();
 	const showCategory = (categoryIndex: number, remember = true) => {
 		if (remember) activeSettingsCategory = categoryIndex;
@@ -906,10 +906,10 @@ export function renderSettings() {
 		if (existing) return existing;
 		const category = categoryNames[categoryIndex];
 		const body = skeleton.catBodElem(category.cat, category.note ? skeleton.notice(category.note) : '');
-		const section = createElement('div', { class: ['Crankshaft-settings-section'] });
+		const section = createElement('div', { class: ['wok-settings-section'] });
 		section.append(body);
 		pane.append(section);
-		const button = createElement('div', { class: ['Crankshaft-settings-navitem'], innerHTML: category.name });
+		const button = createElement('div', { class: ['wok-settings-navitem'], innerHTML: category.name });
 		button.addEventListener('click', () => { showCategory(categoryIndex); });
 		nav.append(button);
 		navButtons.set(categoryIndex, button);
@@ -935,12 +935,12 @@ export function renderSettings() {
 	// came into settings to change, so they must not sit above the settings people did come for.
 	if (filter.length === 0) {
 		const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
-		const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
+		const supportHolder = createElement('div', { class: ['wok-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
 		supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
 		supportHolder.appendChild(skeleton.settingButton('code', 'WOK on GitHub', _ => shell.openExternal(REPO_URL)));
-		supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft (upstream)', _ => shell.openExternal(UPSTREAM_REPO_URL)));
+		supportHolder.appendChild(skeleton.settingButton('description', 'Open-source notices', _ => shell.openExternal(NOTICES_URL)));
 
-		const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
+		const buttonsHolder = createElement('div', { class: ['wok-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
 		buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
 		buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
 		aboutCategory.append(supportHolder, buttonsHolder);
@@ -951,5 +951,5 @@ export function renderSettings() {
 		: [...categorySections.keys()][0] ?? 0;
 	showCategory(categoryToShow, categorySections.has(activeSettingsCategory));
 
-	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder);
+	document.getElementById('settHolder').appendChild(wokSettingsHolder);
 }

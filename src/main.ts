@@ -1,4 +1,4 @@
-﻿import { createHash } from 'crypto';
+import { createHash } from 'crypto';
 import { isAbsolute as pathIsAbsolute, join as pathJoin, resolve as pathResolve } from 'path';
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
@@ -56,19 +56,15 @@ import {
 	CALIBRATION_LOW_CONFIDENCE_REASONS,
 	CALIBRATION_MIN_SAMPLES,
 	CALIBRATION_TRIAL_REJECTION_REASONS,
-	CALIBRATION_VERSION,
 	calibrationCandidateId,
 	calibrationProvisionalExpired,
 	clampCalibrationTrialDeadline,
 	calibrationResumeRequired,
-	canAutoRollbackCalibration,
 	canStartCalibrationLaunch,
 	collectStableGraphicsDriverFields,
 	completeCalibration,
-	confirmCalibration,
 	createCalibrationCandidates,
 	createCalibrationSignature,
-	declineCalibrationOffer,
 	finalizeCalibration,
 	getPendingCalibrationCandidate,
 	getPendingLaunchSlotIndices,
@@ -80,7 +76,6 @@ import {
 	prepareCalibrationState,
 	recordCalibrationResult,
 	requestCalibrationRerun,
-	rollbackCalibration,
 	tryRecordCalibrationLaunch,
 	type CalibrationCandidate,
 	type CalibrationGpuTimingStatus,
@@ -123,19 +118,6 @@ import {
 	selectGameplayDisplay,
 	type DisplayOption
 } from './display-selection.ts';
-import {
-	ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION,
-	adaptiveValidationProfileIdentitiesEqual,
-	adaptiveValidationWatchesProfile,
-	dismissAdaptiveValidationRecommendation,
-	parseAdaptiveValidationProfileIdentity,
-	parseAdaptiveValidationState,
-	parseAdaptiveValidationSubmission,
-	prepareAdaptiveValidationState,
-	recordAdaptiveValidationSession,
-	type AdaptiveValidationProfileIdentity,
-	type AdaptiveValidationState
-} from './adaptive-validation.ts';
 import {
 	RUNTIME_PROFILE_DURATION_MS,
 	RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
@@ -351,7 +333,6 @@ const swapperPath = pathJoin(configPath, 'swapper');
 const settingsPath = pathJoin(configPath, 'settings.json');
 const graphicsProfilePath = pathJoin(configPath, 'graphics-profile.json');
 const calibrationPath = pathJoin(configPath, 'calibration.json');
-const adaptiveValidationPath = pathJoin(configPath, 'adaptive-validation.json');
 const competitiveModeBackupPath = pathJoin(configPath, 'competitive-mode-backup.json');
 const safetyBaselinePath = pathJoin(configPath, 'safety-baseline-v1.json');
 const filtersPath = pathJoin(configPath, 'filters.txt');
@@ -520,24 +501,6 @@ function writeCalibrationStateSync(state: CalibrationState): boolean {
 	}
 }
 
-function loadAdaptiveValidationState(): AdaptiveValidationState | undefined {
-	if (!existsSync(adaptiveValidationPath)) return undefined;
-	try {
-		return parseAdaptiveValidationState(JSON.parse(readFileSync(adaptiveValidationPath, 'utf-8')));
-	} catch (error) {
-		console.error('Failed to read adaptive gameplay validation state', error);
-		return undefined;
-	}
-}
-
-function writeAdaptiveValidationStateSync(state: AdaptiveValidationState) {
-	try {
-		writeFileSync(adaptiveValidationPath, JSON.stringify(state, null, 2), { encoding: 'utf-8' });
-	} catch (error) {
-		console.error('Failed to persist adaptive gameplay validation state', error);
-	}
-}
-
 function failedCalibrationMetrics(): CalibrationMetrics {
 	return {
 		averageFps: 0,
@@ -690,33 +653,6 @@ const effectiveFramePolicy: FramePolicy = queuedCalibrationCandidate?.framePolic
 graphicsProfileState = beginGraphicsLaunch(graphicsProfileState, graphicsSelection);
 writeGraphicsProfileSync(graphicsProfileState);
 console.log(`Graphics profile: ${graphicsSelection.reason}`);
-
-let adaptiveValidationState = loadAdaptiveValidationState();
-// Adaptive validation belonged to the removed Competitive Mode flow. Keep legacy state readable,
-// but do not collect or prompt until it is redesigned around same-visual runtime profiles.
-const adaptiveGameplayValidationEnabled = false;
-
-function getAdaptiveValidationProfileIdentity(): AdaptiveValidationProfileIdentity | undefined {
-	const calibrationSignature = calibrationState?.signature;
-	return parseAdaptiveValidationProfileIdentity({
-		activeBackend: graphicsSelection.backend,
-		benchmarkSemanticVersion: calibrationSignature?.benchmarkVersion ?? CALIBRATION_VERSION,
-		driverFingerprint: graphicsProfileState.driverFingerprint || calibrationSignature?.driverFingerprint || '',
-		electronVersion: process.versions.electron,
-		framePolicy: effectiveFramePolicy,
-		hardwareFingerprint: graphicsProfileState.hardwareFingerprint || calibrationSignature?.hardwareFingerprint || '',
-		profileSemanticVersion: ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION
-	});
-}
-
-function prepareCurrentAdaptiveValidationState(): AdaptiveValidationState | undefined {
-	const profile = getAdaptiveValidationProfileIdentity();
-	if (!profile) return undefined;
-	const preparedState = prepareAdaptiveValidationState(adaptiveValidationState, profile);
-	if (preparedState !== adaptiveValidationState) writeAdaptiveValidationStateSync(preparedState);
-	adaptiveValidationState = preparedState;
-	return preparedState;
-}
 
 function ensureFilterStorage() {
 	if (existsSync(filtersPath)) return;
@@ -1189,40 +1125,6 @@ async function requestCalibrationRunAndRelaunch(): Promise<void> {
 	relaunchClient();
 }
 
-/** One-time post-first-session offer (design §4.2.3); declining persists and never re-prompts. */
-let calibrationOfferShownThisSession = false;
-
-async function maybeOfferPostSessionCalibration(): Promise<void> {
-	if (
-		calibrationOfferShownThisSession
-		|| !adaptiveGameplayValidationEnabled
-		|| !calibrationState
-		|| calibrationState.status !== 'uncalibrated'
-		|| calibrationState.calibrationOfferDeclinedAt !== undefined
-		|| !mainWindow
-		|| mainWindow.isDestroyed()
-	) return;
-
-	calibrationOfferShownThisSession = true;
-	try {
-		const result = await dialog.showMessageBox(mainWindow, {
-			buttons: ['Calibrate on next launch', 'No thanks'],
-			cancelId: 1,
-			defaultId: 0,
-			detail: 'Calibration measures renderer profiles between launches (under a minute, a few restarts) and only ever applies a change after asking. Declining keeps the recommended settings and will not ask again.',
-			message: 'Calibrate graphics after your next launch?',
-			noLink: true,
-			title: 'WOK calibration',
-			type: 'question'
-		});
-		if (!calibrationState) return;
-		if (result.response === 0) persistCalibrationState(requestCalibrationRerun(calibrationState));
-		else persistCalibrationState(declineCalibrationOffer(calibrationState));
-	} catch (error) {
-		console.error('Failed to offer post-session calibration', error);
-	}
-}
-
 /** One-time dismissible notice for benchmark-only staleness (design §5.2). */
 async function maybeShowStaleCalibrationPrompt(): Promise<void> {
 	if (
@@ -1249,134 +1151,6 @@ async function maybeShowStaleCalibrationPrompt(): Promise<void> {
 		console.error('Failed to show the stale-calibration notice', error);
 	}
 }
-
-/**
- * Provisional confirm/rollback coordinator (design §4.4). Returns true when the completed
- * validation verdict was consumed by the confirmation loop; the caller then skips the round-1
- * recommendation dialog.
- */
-async function handleProvisionalConfirmation(validation: AdaptiveValidationState): Promise<boolean> {
-	if (calibrationState?.confirmation !== 'pending' || validation.status !== 'complete') return false;
-	const appliedSelection = calibrationState.activeSelection;
-	if (!appliedSelection || !adaptiveValidationWatchesProfile(validation, appliedSelection.candidate.backend, appliedSelection.candidate.framePolicy)) return false;
-
-	if (validation.classification === 'validated') {
-		persistCalibrationState(confirmCalibration(calibrationState));
-		console.log('Calibrated profile confirmed by three clean gameplay sessions.');
-		return true;
-	}
-
-	if (validation.classification === 'recalibration-recommended') {
-		if (!canAutoRollbackCalibration(calibrationState)) return false;
-		const beforeRollback = calibrationState;
-		const previousLabel = beforeRollback.previousSelection?.candidate.id ?? 'the automatic profile';
-		persistCalibrationState(rollbackCalibration(beforeRollback));
-		// The applied backend is also persisted as an explicit preference, so a rollback must
-		// restore that preference or the rejected backend would return after restart.
-		const restoredBackend = beforeRollback.previousSelection?.candidate.backend;
-		if (restoredBackend && userPrefs.graphicsBackend !== restoredBackend) {
-			userPrefs.graphicsBackend = restoredBackend;
-			try {
-				writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
-			} catch (error) {
-				console.error('Failed to restore the previous graphics preference after rollback', error);
-			}
-		}
-		console.log(`Calibrated profile underperformed in real play; reverting to ${previousLabel} on the next launch.`);
-		if (mainWindow && !mainWindow.isDestroyed()) {
-			void dialog.showMessageBox(mainWindow, {
-				buttons: ['OK', 'Keep new profile anyway'],
-				cancelId: 0,
-				defaultId: 0,
-				detail: `The calibrated profile underperformed across three clean play sessions, so WOK will use ${previousLabel} again after the next restart.`,
-				message: 'Reverting to the previous graphics profile.',
-				noLink: true,
-				title: 'WOK calibration rollback',
-				type: 'warning'
-			}).then(result => {
-				// "Keep anyway" cancels the staged revert and parks the new profile unwatched.
-				if (result.response === 1 && calibrationState?.confirmation === 'rolled-back') {
-					persistCalibrationState(markCalibrationUnwatched(beforeRollback));
-				}
-			}).catch(error => { console.error('Failed to show the calibration rollback notice', error); });
-		}
-		return true;
-	}
-
-	// 'inconclusive' after three sessions: the profile is kept without rollback evidence.
-	persistCalibrationState(markCalibrationUnwatched(calibrationState));
-	return true;
-}
-
-let adaptiveValidationPromptPending = false;
-
-async function maybePromptAdaptiveRecalibration(): Promise<void> {
-	const state = adaptiveValidationState;
-	if (
-		adaptiveValidationPromptPending
-		|| !adaptiveGameplayValidationEnabled
-		|| !state
-		|| state.status !== 'complete'
-		|| state.classification !== 'recalibration-recommended'
-		|| state.recommendationDismissedAt !== undefined
-		|| !mainWindow
-		|| mainWindow.isDestroyed()
-	) return;
-	// While a provisional profile is pending or freshly rolled back, the confirmation loop owns
-	// this verdict; the round-1 dialog handles only the non-provisional degradation case (§4.4).
-	if (calibrationState?.confirmation === 'pending' || calibrationState?.confirmation === 'rolled-back') return;
-
-	adaptiveValidationPromptPending = true;
-	try {
-		const result = await dialog.showMessageBox(mainWindow, {
-			buttons: ['Recalibrate now', 'Not now'],
-			cancelId: 1,
-			defaultId: 0,
-			detail: `All three clean gameplay sessions showed severe instability. Worst observed p95 frame time: ${state.summary.maximumP95FrameTimeMs.toFixed(2)} ms. Calibration will still ask before applying a different profile.`,
-			message: 'WOK recommends rerunning graphics calibration.',
-			noLink: true,
-			title: 'WOK performance recommendation',
-			type: 'warning'
-		});
-		if (adaptiveValidationState !== state) return;
-
-		if (result.response === 0) {
-			if (calibrationState) {
-				calibrationState = requestCalibrationRerun(calibrationState);
-				writeCalibrationStateSync(calibrationState);
-			}
-			relaunchClient();
-			return;
-		}
-
-		adaptiveValidationState = dismissAdaptiveValidationRecommendation(state);
-		writeAdaptiveValidationStateSync(adaptiveValidationState);
-	} catch (error) {
-		console.error('Failed to show adaptive gameplay validation recommendation', error);
-	} finally {
-		adaptiveValidationPromptPending = false;
-	}
-}
-
-ipcMain.handle('adaptiveValidation_recordSession', (event, value: unknown) => {
-	if (!adaptiveGameplayValidationEnabled || !isTrustedGameIpcSender(event)) return undefined;
-	const currentState = prepareCurrentAdaptiveValidationState();
-	if (!currentState) return undefined;
-	const submission = parseAdaptiveValidationSubmission(value);
-	if (!submission || !adaptiveValidationProfileIdentitiesEqual(submission.profile, currentState.profile)) return currentState;
-
-	const nextState = recordAdaptiveValidationSession(currentState, submission.session);
-	if (nextState !== currentState) writeAdaptiveValidationStateSync(nextState);
-	adaptiveValidationState = nextState;
-	void handleProvisionalConfirmation(nextState).then(consumed => {
-		if (!consumed) void maybePromptAdaptiveRecalibration();
-	});
-	// After the first clean pointer-locked session on an uncalibrated install, offer calibration once (§4.2.3).
-	if (nextState !== currentState && nextState.sessions.length === 1 && nextState.sessions[0].lowConfidenceReasons.length === 0) {
-		void maybeOfferPostSessionCalibration();
-	}
-	return nextState;
-});
 
 /**
  * Let the renderer ask for preferences rather than only receiving them.
@@ -2423,12 +2197,9 @@ app.on('ready', async () => {
 			traceScheduled = true;
 			setTimeout(() => { void runDiagnosticTrace(); }, traceDelayMs);
 		}
-		const currentAdaptiveValidationState: AdaptiveValidationState | undefined = undefined;
 		mainWindow.webContents.send('main_did-finish-load', userPrefs, getGraphicsRuntimeInfo(), {
-			adaptiveValidationState: currentAdaptiveValidationState,
 			hasGameSettingsBackup: Boolean(loadCompetitiveModeBackup())
 		});
-		if (currentAdaptiveValidationState) void maybePromptAdaptiveRecalibration();
 		mainWindow.webContents.send('injectClientCSS', userPrefs, app.getVersion(), cssPath);
 
 		if (clientUrlStartup) {
@@ -2469,8 +2240,7 @@ app.on('ready', async () => {
 						graphicsSelection,
 						osVersion: process.getSystemVersion(),
 						platform: process.platform,
-						preferences: userPrefs,
-						...(adaptiveValidationState ? { adaptiveValidation: adaptiveValidationState } : {})
+						preferences: userPrefs
 					}));
 				}
 			},
@@ -2581,11 +2351,6 @@ app.on('ready', async () => {
 						// no live complete query is needed to retain its one-time prompt (§5.2).
 						void maybeShowStaleCalibrationPrompt();
 					}
-					const currentAdaptiveValidationState: AdaptiveValidationState | undefined = undefined;
-					if (!mainWindow.isDestroyed()) {
-						mainWindow.webContents.send('adaptiveValidation_stateUpdated', currentAdaptiveValidationState);
-					}
-					if (currentAdaptiveValidationState) void maybePromptAdaptiveRecalibration();
 				});
 			}, GPU_IDENTITY_REFRESH_DELAY_MS);
 		});

@@ -714,8 +714,3 @@ export function applyMenuDeclutterSettings(
 	browserController ??= new MenuDeclutterController(createBrowserEnvironment());
 	browserController.apply(true);
 }
-
-export function stopMenuDeclutter(): void {
-	browserController?.stop();
-	browserController = undefined;
-}

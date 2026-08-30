@@ -42,9 +42,6 @@ const DEFAULT_FIXED_CATEGORY_LABELS = [
 	'sss'
 ] as const;
 
-/** The labels that stay ahead of geographic rows when no screen-specific labels are supplied. */
-export const PUBLIC_SERVER_FIXED_CATEGORIES: readonly string[] = DEFAULT_FIXED_CATEGORY_LABELS;
-
 const ADDITIONAL_REGION_ALIASES: Readonly<Record<string, readonly string[]>> = {
 	AFR: ['za-cpt', 'cape town', 'south africa'],
 	BHN: ['me-bhn', 'middle east'],

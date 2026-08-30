@@ -328,12 +328,3 @@
 	position: absolute;
 	right: 0;
 }
-
-/* --- performance overlay --------------------------------------------------------------------- */
-
-/*
- * No rule here on purpose. The overlay's colours, radius and font are set inline by
- * src/performance-monitor.ts, which reads --wok-overlay-bg, --wok-overlay-border,
- * --wok-overlay-text, --wok-radius and --wok-font-mono directly with the stock values as
- * var() fallbacks. A stylesheet could only reach them with !important.
- */

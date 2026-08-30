@@ -267,10 +267,7 @@ test('the shared layers only read variables the contract documents', () => {
 
 test('every documented variable is actually consumed by a shared layer', () => {
 	const layers = THEME_LAYER_ASSETS.map(asset => readAsset(asset)).join('\n');
-	// The overlay variables are read from inline styles in src/performance-monitor.ts instead.
-	const consumedElsewhere = new Set(['--wok-overlay-bg', '--wok-overlay-border', '--wok-overlay-text']);
 	for (const variable of THEME_VARIABLES) {
-		if (consumedElsewhere.has(variable.name)) continue;
 		assert.ok(layers.includes(`var(${variable.name}`),
 			`${variable.name} is documented but nothing reads it`);
 	}
@@ -410,8 +407,7 @@ test('every palette keeps its text readable on the surface it is drawn on', () =
 			['--wok-accent on --wok-surface', over(colour('--wok-accent'), surface), surface, 2.5],
 			['--wok-hud-text on --wok-hud-bg', over(colour('--wok-hud-text'), hud), hud, 4.5],
 			['--wok-hud-text on --wok-hud-bg-inner', over(colour('--wok-hud-text'), hudInner), hudInner, 4],
-			['--wok-text-on-art on its outline', over(colour('--wok-text-on-art'), ART_OUTLINE), ART_OUTLINE, 4.5],
-			['--wok-overlay-text on --wok-overlay-bg', over(colour('--wok-overlay-text'), over(colour('--wok-overlay-bg'), GAMEPLAY_STAND_IN)), over(colour('--wok-overlay-bg'), GAMEPLAY_STAND_IN), 4.5]
+			['--wok-text-on-art on its outline', over(colour('--wok-text-on-art'), ART_OUTLINE), ART_OUTLINE, 4.5]
 		];
 
 		for (const [label, foreground, background, minimum] of pairs) {

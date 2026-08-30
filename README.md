@@ -96,8 +96,13 @@ To make a local platform package after reviewing the provenance and platform pre
 pnpm run make
 ```
 
-For the qualified Windows x64 Chromium 152 runtime, point Forge at the pinned
-archive before packaging:
+Tagged releases use the default patched Electron 44 nightly runtime documented in
+[PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). The optimized qualified Chromium 152
+archive remains an explicit local diagnostic override; it is not the current production
+runtime because real-play testing found a network-latency regression.
+
+To reproduce that diagnostic runtime locally, point Forge at the pinned archive before
+packaging:
 
 ```powershell
 $env:WOK_QUALIFIED_ELECTRON_ZIP = 'T:/wok-electron-build/package/electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip'

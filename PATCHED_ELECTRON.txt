@@ -1,7 +1,19 @@
 WOK CLIENT PATCHED ELECTRON PROVENANCE
-Last verified: 2026-08-29
+Last verified: 2026-08-30
 
-LOCALLY QUALIFIED WOK CHROMIUM 152 WINDOWS RUNTIME
+CURRENT RELEASE RUNTIME
+
+Tagged releases use the default patched Electron 44 nightly archives from
+thegu5/electron documented below. The Windows x64 archive SHA-256 is:
+  b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e
+
+The optimized qualified Chromium 152 Windows archive remains available only as
+an explicit WOK_QUALIFIED_ELECTRON_ZIP diagnostic override. Real-play A/B
+testing found the user-reported network-latency regression in that runtime and
+not in the default patched nightly payload, whose 17 compared Chromium files
+matched the no-regression isolated build byte-for-byte.
+
+LOCALLY QUALIFIED WOK CHROMIUM 152 WINDOWS RUNTIME (DIAGNOSTIC OVERRIDE)
 
 The locally installed Windows x64 performance build uses:
   Archive: electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip

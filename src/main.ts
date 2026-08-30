@@ -1153,7 +1153,12 @@ async function persistSettingsAndRelaunch(reopenSettingsCategory?: number): Prom
 		enqueueSettingsWrite();
 	}
 	await settingsWriteQueue;
-	relaunchClient(reopenSettingsCategory);
+	const args = buildRelaunchArguments(process.argv.slice(1), reopenSettingsCategory);
+	app.relaunch({ args });
+	// User-triggered settings relaunches should run normal shutdown hooks so Discord, graphics
+	// health tracking, and any future cleanup finish cleanly. Calibration retains the immediate
+	// relaunch path above because its state machine persists each transition before calling it.
+	app.quit();
 }
 
 function persistCalibrationState(next: CalibrationState) {

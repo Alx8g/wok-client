@@ -164,10 +164,10 @@ const settingsDesc: SettingsDesc = {
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Shows the next-match countdown on the menu.', safety: 0, cat: 1, instant: true },
 	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Shows class icons above the play buttons for one-click switching.', safety: 0, cat: 1, instant: true },
-	customName: { title: 'Custom Name', type: 'text', desc: 'Replaces your name in the local UI. Other players and Krunker still receive your real name.', placeholder: 'Leave empty for your real name', safety: 0, cat: 2, instant: true },
-	customClan: { title: 'Custom Clan', type: 'text', desc: 'Replaces your clan tag in the local UI. Other players still see your real clan.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 2, instant: true },
+	customName: { title: 'Custom Name', type: 'text', desc: 'Replaces your name in the local UI. Other players and Krunker still receive your real name.', placeholder: 'Real name when empty', safety: 0, cat: 2, instant: true },
+	customClan: { title: 'Custom Clan', type: 'text', desc: 'Replaces your clan tag in the local UI. Other players still see your real clan.', placeholder: 'Real clan when empty', safety: 0, cat: 2, instant: true },
 	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Animates your local name and clan in sync. Other players still see your real identity.', safety: 0, cat: 2, instant: true },
-	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows the local time for each region.', safety: 0, cat: 3, instant: true },
+	regionTimezones: { title: 'Region Local Times', type: 'bool', desc: 'Shows the local time for each region.', safety: 0, cat: 3, instant: true },
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows your current game on your Discord profile.', safety: 0, cat: 1, instant: true },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds join and project links to your Discord activity.', safety: 0, cat: 1, instant: true },
 
@@ -874,7 +874,7 @@ export function rememberSettingsCategory(categoryIndex: number): void {
 }
 
 export function renderSettings() {
-	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').toLowerCase();
+	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').trim().toLowerCase();
 	Array.from(document.querySelectorAll('.setHed')).filter(element => element.innerHTML === 'No settings found').forEach(element => element.remove());
 
 	crankshaftSettingsHolder.remove();
@@ -884,6 +884,9 @@ export function renderSettings() {
 	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
 		.filter(setting => settingIsVisible(setting.key, userPrefs))
 		.filter(setting => settingSearchFilter(setting, filter));
+	// Krunker's own results remain in #settHolder. Add nothing when the query has no WOK match
+	// instead of showing empty Performance and About sections beside unrelated game results.
+	if (filter.length > 0 && settings.length === 0) return;
 	const categoryBodies = new Map<number, HTMLElement>();
 	const categorySections = new Map<number, HTMLElement>();
 	// Sidebar layout: sections are chosen from a persistent nav rather than hunted for by
@@ -893,8 +896,8 @@ export function renderSettings() {
 	const pane = createElement('div', { class: ['Crankshaft-settings-pane'] });
 	crankshaftSettingsHolder.append(nav, pane);
 	const navButtons = new Map<number, HTMLElement>();
-	const showCategory = (categoryIndex: number) => {
-		activeSettingsCategory = categoryIndex;
+	const showCategory = (categoryIndex: number, remember = true) => {
+		if (remember) activeSettingsCategory = categoryIndex;
 		for (const [index, button] of navButtons) button.classList.toggle('active', index === categoryIndex);
 		for (const [index, section] of categorySections) section.classList.toggle('hidden', index !== categoryIndex);
 	};
@@ -919,7 +922,7 @@ export function renderSettings() {
 	// sections from the settings object instead made the first setting in each category control the UI order.
 	for (const categoryIndex of categoryNames.keys()) {
 		const hasVisibleSetting = settings.some(setting => (setting.cat ?? 0) === categoryIndex);
-		if (hasVisibleSetting || categoryIndex === 0 || categoryIndex === ABOUT_CATEGORY_INDEX) ensureCategory(categoryIndex);
+		if (hasVisibleSetting || (filter.length === 0 && categoryIndex === ABOUT_CATEGORY_INDEX)) ensureCategory(categoryIndex);
 	}
 
 	for (const setting of settings) {
@@ -930,18 +933,23 @@ export function renderSettings() {
 
 	// Links and file shortcuts live in About: they are reference material, not things anyone
 	// came into settings to change, so they must not sit above the settings people did come for.
-	const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
-	const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
-	supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
-	supportHolder.appendChild(skeleton.settingButton('code', 'WOK on GitHub', _ => shell.openExternal(REPO_URL)));
-	supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft (upstream)', _ => shell.openExternal(UPSTREAM_REPO_URL)));
+	if (filter.length === 0) {
+		const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
+		const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
+		supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
+		supportHolder.appendChild(skeleton.settingButton('code', 'WOK on GitHub', _ => shell.openExternal(REPO_URL)));
+		supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft (upstream)', _ => shell.openExternal(UPSTREAM_REPO_URL)));
 
-	const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
-	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
-	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
-	aboutCategory.append(supportHolder, buttonsHolder);
+		const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
+		buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
+		buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
+		aboutCategory.append(supportHolder, buttonsHolder);
+	}
 
-	showCategory(categorySections.has(activeSettingsCategory) ? activeSettingsCategory : [...categorySections.keys()][0] ?? 0);
+	const categoryToShow = categorySections.has(activeSettingsCategory)
+		? activeSettingsCategory
+		: [...categorySections.keys()][0] ?? 0;
+	showCategory(categoryToShow, categorySections.has(activeSettingsCategory));
 
 	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder);
 }

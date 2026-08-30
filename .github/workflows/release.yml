@@ -143,9 +143,19 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          : > SHA256SUMS.txt
+          declare -A checksum_names=()
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            if [[ -n "${checksum_names[$name]:-}" ]]; then
+              echo "Duplicate release asset name: $name" >&2
+              exit 1
+            fi
+            checksum_names[$name]=1
+            printf '%s  %s\n' "$(sha256sum "$file" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
+          done < <(find artifacts -type f -print0 | sort -z)
           cat > release-notes.txt <<EOF
-          WOK Client ${version} contains the unified WOK client, including the adaptive startup-video system, hardware calibration and graphics selection, and hardened IPC and packaging.
+          WOK Client ${version} adds RGB local identity, Public-region ping display and sorting, corrected matchmaking and preload behavior, scoped menu cleanup, clearer settings, live application for supported settings, and expanded frame-presentation diagnostics.
 
           The Windows x64 installer contains the qualified custom Electron 44 / Chromium 152 runtime. Its pinned source-archive SHA-256 is 20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0.
 
@@ -156,7 +166,7 @@ jobs:
 
           These binaries are unsigned. Windows may display a SmartScreen warning, and the Linux and macOS packages have not yet received native gameplay smoke testing. Treat this as a release candidate and verify SHA256SUMS.txt before use.
 
-          WOK Client is a GPL-3.0 project based on Crankshaft. It is not affiliated with, endorsed by, or approved by FRVR. Performance results vary by hardware, drivers, thermals, game updates, and scene complexity. Terms-sensitive legacy features remain disabled by default.
+          WOK Client is an independent GPL-3.0 project. It is not affiliated with, endorsed by, or approved by FRVR. Performance results vary by hardware, drivers, thermals, game updates, and scene complexity. Terms-sensitive legacy features remain disabled by default.
           EOF
 
       - name: Publish GitHub prerelease

@@ -25,7 +25,6 @@ test('accepts bounded WOK preference values', () => {
 		rawMouseInput: true,
 		wokPublicServerPingSort: true
 	}), {
-		competitiveMode: true,
 		customIdentityRgbCycle: true,
 		fullscreen: 'fullscreen',
 		graphicsBackend: 'd3d11on12',
@@ -67,9 +66,10 @@ test('detects parser-rejected obsolete settings for canonical rewrites', () => {
 		loadingSplashTitleCardBackgroundColor: '#363636'
 	};
 	assert.equal(containsObsoletePreferences(rawSettings), true);
-	assert.deepEqual(parseUserPreferencePatch(rawSettings), { competitiveMode: true });
+	assert.deepEqual(parseUserPreferencePatch(rawSettings), {});
 	assert.equal(containsObsoletePreferences({ motionBlurShutterAngle: 180 }), true);
-	assert.equal(containsObsoletePreferences({ competitiveMode: true }), false);
+	assert.equal(containsObsoletePreferences({ competitiveMode: true }), true);
+	assert.equal(containsObsoletePreferences({ performanceOverlay: true }), true);
 });
 
 test('rejects unsafe URLs, paths, ranges, and malformed keybinds', () => {

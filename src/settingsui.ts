@@ -99,7 +99,7 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 	refreshNotifElement?.remove();
 	refreshNotifElement = undefined;
 
-	settingsDesc.competitiveMode.button = { icon: 'speed', text: 'Run calibration', callback: () => ipcRenderer.send('calibration_request_rerun') };
+	settingsDesc.graphicsBackend.button = { icon: 'speed', text: 'Run calibration', callback: () => ipcRenderer.send('calibration_request_rerun') };
 	settingsDesc.resourceSwapper.button = { icon: 'folder', text: 'Swapper', callback: e => openPath(e, paths.swapperPath) };
 	settingsDesc.customFilters.button = { icon: 'filter_list', text: 'Filters file', callback: e => openPath(e, paths.filtersPath) };
 
@@ -153,23 +153,19 @@ function applyThemeSelection(value: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Measures your PC and applies the fastest graphics profile, plus lower in-game visuals for more FPS. Your Krunker settings are restored if you turn it off.', safety: 0, cat: 0 },
-	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
 	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: "Hides Wallet while preserving your KR balance, plus Custom Games, Community & Events, Guide, What's New, Store promo badges, and the Contact/Terms/Changelog footer.", safety: 0, cat: 1, instant: true },
 	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Pins fixed Public categories, shows numeric regional ping, and sorts measured geographic regions from lowest to highest latency.', safety: 0, cat: 1, instant: true },
-	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
+	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as the current system allows.', safety: 0, cat: 0 },
 	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Uses unadjusted Pointer Lock input to avoid Windows Chromium camera jumps and OS mouse acceleration. Restart required.', safety: 0, cat: 0 },
-	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto. Competitive Mode picks whichever measured fastest here.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
+	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto or use Run calibration to measure the available renderer profiles.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
 	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
 	display: displayOption,
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
-	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
+	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Shows every class icon above the play buttons for one-click class switching.', safety: 0, cat: 1, instant: true },
 	customName: { title: 'Custom Name', type: 'text', desc: 'Shows this name instead of yours in chat, the scoreboard, the kill feed and the menu. Only on your screen; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
 	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
 	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Cycles your whole local name and clan through fast RGB colours. Custom Name and Clan override the text; blank fields keep your real identity. Only visible on your screen.', safety: 0, cat: 1, instant: true },
-	realName: { title: 'Your Real Name', type: 'text', desc: 'Only needed if the custom name is not being applied: the exact Krunker name to replace. The client normally detects this by itself.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
-	realClan: { title: 'Your Real Clan', type: 'text', desc: 'Only needed if the custom clan tag is not being applied: your real tag, without brackets.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
 	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
 	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },

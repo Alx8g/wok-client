@@ -10,6 +10,7 @@ import {
 	MENU_DECLUTTER_GRID_COLUMNS_ATTRIBUTE,
 	MENU_DECLUTTER_STREAMS_RAISED_ATTRIBUTE,
 	MENU_DECLUTTER_STREAMS_WIDTH_ATTRIBUTE,
+	MENU_DECLUTTER_STATIC_CSS,
 	MenuDeclutterController,
 	type MenuDeclutterElement,
 	type MenuDeclutterObserver
@@ -405,6 +406,25 @@ test('removes the current Wallet control while preserving the separate KR balanc
 	assert.equal(targets.has(settings), false, 'Settings remains visible');
 	assert.equal(targets.has(junk), false, 'the unrelated JUNK counter remains visible');
 	assert.equal(targets.has(webpushTitle), false, 'only the notification surface is marked');
+});
+
+test('removes signed-in header separators and the Now Playing prefix styling only', () => {
+	const root = new FakeMenuElement('body');
+	const header = new FakeMenuElement('div', 'signedInHeaderBar');
+	const profile = new FakeMenuElement('div', '', ['ph-item'], 'Larp Lv 13');
+	const firstSeparator = new FakeMenuElement('div', '', ['verticalSeparator']);
+	const balance = new FakeMenuElement('div', '', ['ph-item'], 'KR 6495');
+	const secondSeparator = new FakeMenuElement('div', '', ['verticalSeparator']);
+	header.append(profile, firstSeparator, balance, secondSeparator);
+	root.append(header);
+
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	assert.equal(targets.has(profile), false);
+	assert.equal(targets.has(balance), false);
+	assert.equal(targets.has(firstSeparator), true);
+	assert.equal(targets.has(secondSeparator), true);
+	assert.match(MENU_DECLUTTER_STATIC_CSS, /#mapInfoHld\s*\{\s*font-size:\s*0/iu);
+	assert.match(MENU_DECLUTTER_STATIC_CSS, /#mapInfoHld\s*>\s*#mapInfo\s*\{\s*font-size:\s*20px/iu);
 });
 
 test('removes the requested Custom Games, Community, Guide, and Whats New controls', () => {

@@ -11,6 +11,10 @@ const OBSOLETE_PREFERENCE_KEYS = new Set([
 	'saveMatchResultJSONButton',
 	// Superseded by 'theme', which also selects the bundled themes. See migrateThemePreference.
 	'cssSwapper',
+	// Removed UI modes. Competitive Mode only disabled visual effects; runtime/backend tuning is
+	// independent. Krunker's own FPS counter replaces the duplicate WOK overlay.
+	'competitiveMode',
+	'performanceOverlay',
 	// Placebo-with-downside: raised a renderer-process ceiling a one-origin app never reaches.
 	'experimentalFlags_increaseLimits',
 	'inProcessGPU',
@@ -28,7 +32,6 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'alwaysWaitForDevTools',
 	'clientSplash',
 	'competitionAutomation',
-	'competitiveMode',
 	'customFilters',
 	'customIdentityRgbCycle',
 	'discordRPC',
@@ -42,7 +45,6 @@ const BOOLEAN_PREFERENCE_KEYS = new Set([
 	'matchmaker_openServerWindow',
 	'menuTimer',
 	'motionBlur',
-	'performanceOverlay',
 	'wokMenuDeclutter',
 	'wokPublicServerPingSort',
 	'quickClassPicker',

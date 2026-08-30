@@ -364,8 +364,6 @@ const settingsSkeleton = {
 	fpsUncap: true,
 	rawMouseInput: true,
 	graphicsBackend: 'auto',
-	competitiveMode: false,
-	performanceOverlay: false,
 	// Mark selected menu controls and promotions as hidden while preserving their original DOM.
 	wokMenuDeclutter: true,
 	// Public screen only: pin fixed categories, then show and sort geographic regions by ping.
@@ -429,7 +427,7 @@ const settingsSkeleton = {
 	matchmaker_minPlayers: 1,
 	matchmaker_maxPlayers: 6,
 	matchmaker_minRemainingTime: 120,
-	hideAds: 'off',
+	hideAds: 'block',
 	customFilters: false,
 	regionTimezones: false,
 	immersiveSplashBackgroundColor: '#0A0A0A'
@@ -662,7 +660,8 @@ if (calibrationState && calibrationProvisionalExpired(calibrationState)) {
 	writeCalibrationStateSync(calibrationState);
 }
 
-const activeCalibrationSelection = userPrefs.competitiveMode && calibrationState?.status === 'complete'
+// A measured backend/frame policy is useful independently of the removed visual-reduction preset.
+const activeCalibrationSelection = calibrationState?.status === 'complete'
 	? calibrationState.activeSelection
 	: undefined;
 const calibratedCandidate = queuedCalibrationCandidate ?? activeCalibrationSelection?.candidate;
@@ -679,7 +678,7 @@ const graphicsSelection: GraphicsSelection = process.argv.includes('--safe-graph
 			preference: 'auto',
 			reason: queuedCalibrationCandidate
 				? `Running calibration profile ${calibratedCandidate.id}.`
-				: `Using calibrated Competitive mode profile ${calibratedCandidate.id}.`,
+				: `Using calibrated graphics profile ${calibratedCandidate.id}.`,
 			source: 'calibration'
 		}
 		: selectGraphicsBackend(userPrefs.graphicsBackend, graphicsProfileState);
@@ -691,6 +690,9 @@ writeGraphicsProfileSync(graphicsProfileState);
 console.log(`Graphics profile: ${graphicsSelection.reason}`);
 
 let adaptiveValidationState = loadAdaptiveValidationState();
+// Adaptive validation belonged to the removed Competitive Mode flow. Keep legacy state readable,
+// but do not collect or prompt until it is redesigned around same-visual runtime profiles.
+const adaptiveGameplayValidationEnabled = false;
 
 function getAdaptiveValidationProfileIdentity(): AdaptiveValidationProfileIdentity | undefined {
 	const calibrationSignature = calibrationState?.signature;
@@ -713,8 +715,6 @@ function prepareCurrentAdaptiveValidationState(): AdaptiveValidationState | unde
 	adaptiveValidationState = preparedState;
 	return preparedState;
 }
-
-if (userPrefs.competitiveMode) prepareCurrentAdaptiveValidationState();
 
 function ensureFilterStorage() {
 	if (existsSync(filtersPath)) return;
@@ -1168,34 +1168,13 @@ async function requestCalibrationRunAndRelaunch(): Promise<void> {
 	relaunchClient();
 }
 
-/** Consent dialog shown when Competitive mode is switched on without a completed calibration (design §4.2.1). */
-async function offerCalibrationForCompetitiveEnable(): Promise<void> {
-	if (!mainWindow || mainWindow.isDestroyed()) return;
-	if (calibrationState?.status === 'complete' && !calibrationState.signatureStale) return;
-	try {
-		const result = await dialog.showMessageBox(mainWindow, {
-			buttons: ['Calibrate now', 'Use recommended settings'],
-			cancelId: 1,
-			defaultId: 0,
-			detail: 'Calibration takes under a minute and the app restarts a few times while renderer profiles are measured. Declining keeps Competitive mode on with the recommended settings; you can calibrate any time from Settings.',
-			message: 'Calibrate graphics for Competitive mode?',
-			noLink: true,
-			title: 'WOK Competitive mode',
-			type: 'question'
-		});
-		if (result.response === 0) await requestCalibrationRunAndRelaunch();
-	} catch (error) {
-		console.error('Failed to offer Competitive-mode calibration', error);
-	}
-}
-
 /** One-time post-first-session offer (design §4.2.3); declining persists and never re-prompts. */
 let calibrationOfferShownThisSession = false;
 
 async function maybeOfferPostSessionCalibration(): Promise<void> {
 	if (
 		calibrationOfferShownThisSession
-		|| !userPrefs.competitiveMode
+		|| !adaptiveGameplayValidationEnabled
 		|| !calibrationState
 		|| calibrationState.status !== 'uncalibrated'
 		|| calibrationState.calibrationOfferDeclinedAt !== undefined
@@ -1271,9 +1250,8 @@ async function handleProvisionalConfirmation(validation: AdaptiveValidationState
 		const beforeRollback = calibrationState;
 		const previousLabel = beforeRollback.previousSelection?.candidate.id ?? 'the automatic profile';
 		persistCalibrationState(rollbackCalibration(beforeRollback));
-		// The applied backend is also persisted as an explicit preference so it survives
-		// Competitive mode being switched off, so a rollback has to restore that preference too -
-		// otherwise the rejected backend would quietly come back the moment the mode was disabled.
+		// The applied backend is also persisted as an explicit preference, so a rollback must
+		// restore that preference or the rejected backend would return after restart.
 		const restoredBackend = beforeRollback.previousSelection?.candidate.backend;
 		if (restoredBackend && userPrefs.graphicsBackend !== restoredBackend) {
 			userPrefs.graphicsBackend = restoredBackend;
@@ -1315,7 +1293,7 @@ async function maybePromptAdaptiveRecalibration(): Promise<void> {
 	const state = adaptiveValidationState;
 	if (
 		adaptiveValidationPromptPending
-		|| !userPrefs.competitiveMode
+		|| !adaptiveGameplayValidationEnabled
 		|| !state
 		|| state.status !== 'complete'
 		|| state.classification !== 'recalibration-recommended'
@@ -1360,7 +1338,7 @@ async function maybePromptAdaptiveRecalibration(): Promise<void> {
 }
 
 ipcMain.handle('adaptiveValidation_recordSession', (event, value: unknown) => {
-	if (!userPrefs.competitiveMode || !isTrustedGameIpcSender(event)) return undefined;
+	if (!adaptiveGameplayValidationEnabled || !isTrustedGameIpcSender(event)) return undefined;
 	const currentState = prepareCurrentAdaptiveValidationState();
 	if (!currentState) return undefined;
 	const submission = parseAdaptiveValidationSubmission(value);
@@ -1444,13 +1422,9 @@ ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
 	);
 	if (Object.keys(validUpdates).length === 0) return;
 
-	const enablingCompetitiveMode = validUpdates.competitiveMode === true && userPrefs.competitiveMode !== true;
 	Object.assign(userPrefs, validUpdates);
 	settingsRevision++;
 	scheduleSettingsWrite();
-	// Competitive-enable is a calibration consent entry point (design §4.2.1); declining still
-	// enables Competitive mode on the heuristic recommendation with adaptive validation watching.
-	if (enablingCompetitiveMode) void offerCalibrationForCompetitiveEnable();
 });
 
 // Allow the trusted preload to quit the entire Electron process.
@@ -1648,8 +1622,7 @@ async function showCalibrationDecision(state: CalibrationState): Promise<'apply'
 		await runBeforeDeadline(() => decisionWindow.loadURL(calibrationDataUrl(buildCalibrationResultPage(
 			state.results,
 			state.recommendedSelection,
-			markSvg,
-			state.competitiveModeWasEnabled
+			markSvg
 		))), deadlineAt, 'Calibration result navigation');
 		return decisionWindow.webContents.executeJavaScript('window.wokWaitForCalibrationDecision()') as Promise<'apply' | 'keep'>;
 	} catch (error) {
@@ -1682,7 +1655,7 @@ function prepareCalibrationForGraphicsIdentity(
 		recommendedBackend: graphicsProfileState.recommendedBackend
 	});
 	const previousCalibrationState = calibrationState;
-	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, Boolean(userPrefs.competitiveMode), process.platform);
+	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, false, process.platform);
 	if (preparedState !== previousCalibrationState) {
 		writeCalibrationStateSync(preparedState);
 		// Off Windows the candidate space offers no backend comparison, so calibration completes
@@ -1922,12 +1895,8 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 		if (applyRecommendation && calibrationState.activeSelection) {
 			graphicsProfileState = clearKeptGraphicsBackend(graphicsProfileState);
 			persistGraphicsProfile();
-			userPrefs.competitiveMode = true;
-			// Persist the measured winner as an explicit preference rather than 'auto'. Competitive
-			// mode governs the in-game settings preset; it must not be the only thing keeping the
-			// graphics backend this machine was measured to be fastest on. With 'auto' the client
-			// would discover the best backend and then silently stop using it the moment the mode
-			// was switched off, falling back to a generic recommendation.
+			// Persist the measured winner as an explicit preference rather than 'auto', so the
+			// measured backend remains active independently of the removed visual-reduction preset.
 			userPrefs.graphicsBackend = calibrationState.activeSelection.candidate.backend;
 			userPrefs.fpsUncap = calibrationState.activeSelection.candidate.framePolicy === 'uncapped';
 			writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
@@ -2346,9 +2315,7 @@ app.on('ready', async () => {
 			traceScheduled = true;
 			setTimeout(() => { void runDiagnosticTrace(); }, traceDelayMs);
 		}
-		const currentAdaptiveValidationState = userPrefs.competitiveMode
-			? prepareCurrentAdaptiveValidationState()
-			: undefined;
+		const currentAdaptiveValidationState: AdaptiveValidationState | undefined = undefined;
 		mainWindow.webContents.send('main_did-finish-load', userPrefs, getGraphicsRuntimeInfo(), {
 			adaptiveValidationState: currentAdaptiveValidationState,
 			hasGameSettingsBackup: Boolean(loadCompetitiveModeBackup())
@@ -2504,9 +2471,7 @@ app.on('ready', async () => {
 						// no live complete query is needed to retain its one-time prompt (§5.2).
 						void maybeShowStaleCalibrationPrompt();
 					}
-					const currentAdaptiveValidationState = userPrefs.competitiveMode
-						? prepareCurrentAdaptiveValidationState()
-						: undefined;
+					const currentAdaptiveValidationState: AdaptiveValidationState | undefined = undefined;
 					if (!mainWindow.isDestroyed()) {
 						mainWindow.webContents.send('adaptiveValidation_stateUpdated', currentAdaptiveValidationState);
 					}

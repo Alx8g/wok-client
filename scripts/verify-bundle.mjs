@@ -24,7 +24,6 @@ const metafile = JSON.parse(readFileSync(join(rootDirectory, 'bundle', 'metafile
 const lazyBoundaries = [
 	'src/settingsui.ts',
 	'src/matchmaker.ts',
-	'src/performance-monitor.ts',
 	'src/discord-rpc.ts',
 	'src/competitive-mode.ts',
 	'src/adaptive-validation-runtime.ts',

@@ -21,15 +21,14 @@ WOK Client is an independent project. It is not affiliated with, endorsed by, or
 ## Features
 
 - Hardware-aware graphics selection with recovery and calibration safeguards
-- Optional Competitive mode with reversible Krunker setting changes
-- Performance diagnostics for FPS, frame pacing, graphics backend, and WebGL state
+- Performance diagnostics for frame pacing, graphics backend, and WebGL state
 - Bundled themes for the client's own UI, plus your own CSS files, switchable without a restart
 - Menu timer, quick class picker, and match-result export
 - Configurable matchmaker and competition-room helper
 - Optional Discord Rich Presence using an in-tree IPC client
-- Legacy resource swapping, ad controls, custom filters, matchmaker, and competition automation remain disabled by default
+- Ad requests are blocked by default; legacy resource swapping, custom filters, matchmaker, and competition automation remain disabled by default
 
-Terms-sensitive features require an explicit user choice. Existing Crankshaft or early WOK profiles are migrated once to the safe defaults without deleting the original profile files.
+Terms-sensitive features remain configurable. Existing Crankshaft or early WOK profiles are migrated once without deleting the original profile files.
 
 ## Security boundaries
 
@@ -45,7 +44,6 @@ Press `Alt` on Windows or Linux to reveal the application menu.
 - `F7`: copy the current game link
 - `Ctrl+F7` or `Cmd+F7`: join the game link from the clipboard
 - `F12` or `Ctrl+Shift+I`/`Cmd+Shift+I`: toggle Developer Tools
-- `Alt+F8`: toggle performance diagnostics when enabled
 - `Ctrl+Shift+F9` or `Cmd+Shift+F9`: capture a 10-second renderer CPU profile
 - Matchmaker accept, cancel, and launch keys are configurable; the default launch key is `F1`
 

@@ -8,11 +8,11 @@ import {
 
 const NOW = 1_750_000_000_000;
 
-test('a pre-baseline profile gets the Terms reset and the gpuRasterizing default flip together', () => {
+test('a pre-baseline profile gets current defaults and the gpuRasterizing flip together', () => {
 	const plan = planSettingsBaseline(undefined, {
 		competitionAutomation: true,
 		customFilters: true,
-		hideAds: 'block',
+		hideAds: 'off',
 		matchmaker: true,
 		resourceSwapper: true,
 		safeFlags_gpuRasterizing: true
@@ -21,7 +21,7 @@ test('a pre-baseline profile gets the Terms reset and the gpuRasterizing default
 	assert.deepEqual(plan.patch, {
 		competitionAutomation: false,
 		customFilters: false,
-		hideAds: 'off',
+		hideAds: 'block',
 		matchmaker: false,
 		resourceSwapper: false,
 		safeFlags_gpuRasterizing: false
@@ -33,7 +33,7 @@ test('a fresh install matching every baseline still records the marker with an e
 	const plan = planSettingsBaseline(undefined, {
 		competitionAutomation: false,
 		customFilters: false,
-		hideAds: 'off',
+		hideAds: 'block',
 		matchmaker: false,
 		resourceSwapper: false,
 		safeFlags_gpuRasterizing: false
@@ -43,7 +43,7 @@ test('a fresh install matching every baseline still records the marker with an e
 	assert.deepEqual(plan.marker, { appliedAt: NOW, version: SETTINGS_BASELINE_VERSION });
 });
 
-test('version 1 installs migrate only the stale gpuRasterizing default, never the Terms choices', () => {
+test('version 1 installs migrate only the stale gpuRasterizing default, never user choices', () => {
 	// The user re-enabled matchmaker after the v1 reset; that explicit choice must survive the
 	// v2 migration while the never-touched gpuRasterizing default is flipped off once.
 	const plan = planSettingsBaseline({ appliedAt: NOW - 5_000, version: 1 }, {

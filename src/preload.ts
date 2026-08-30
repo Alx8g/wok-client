@@ -238,13 +238,12 @@ window.addEventListener('beforeunload', stopMotionBlurRuntime, { once: true });
 let settingsRenderPromise: Promise<void> | undefined;
 let stopAdaptiveValidationRuntime: (() => void) | undefined;
 let adaptiveValidationLoadGeneration = 0;
-let competitiveModeEnabled = false;
 
 function updateAdaptiveValidationRuntime(value: unknown) {
 	const adaptiveValidationGeneration = ++adaptiveValidationLoadGeneration;
 	stopAdaptiveValidationRuntime?.();
 	stopAdaptiveValidationRuntime = undefined;
-	if (!competitiveModeEnabled || value === undefined) return;
+	if (value === undefined) return;
 
 	void import('./adaptive-validation-runtime.ts')
 		.then(adaptiveValidation => {
@@ -483,25 +482,20 @@ ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
 	updateAdaptiveValidationRuntime(value);
 });
 
-ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
+ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, _graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
 	applyRawMouseInputPreference(_userPrefs);
 	applyClientMotionBlurSettings(_userPrefs);
 	applyMenuDeclutterSettings(_userPrefs);
 	applyPublicServerPingSortSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
-	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
 	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
 
-	if (_userPrefs.performanceOverlay) {
-		void import('./performance-monitor.ts')
-			.then(performanceMonitor => { performanceMonitor.startPerformanceMonitor(graphicsRuntimeInfo); })
-			.catch(error => { strippedConsole.error('Failed to start performance diagnostics', error); });
-	}
-
-	if (_userPrefs.competitiveMode || competitiveRuntimeInfo.hasGameSettingsBackup) {
+	// Competitive Mode was a visual-reduction preset. It is no longer exposed or enabled, but an
+	// existing backup must be restored once so users are not left on the reduced visual settings.
+	if (competitiveRuntimeInfo.hasGameSettingsBackup) {
 		void import('./competitive-mode.ts')
-			.then(competitiveMode => competitiveMode.synchronizeCompetitiveMode(Boolean(_userPrefs.competitiveMode), competitiveRuntimeInfo.hasGameSettingsBackup))
-			.catch(error => { strippedConsole.error('Failed to synchronize Competitive mode game settings', error); });
+			.then(competitiveMode => competitiveMode.synchronizeCompetitiveMode(false, true))
+			.catch(error => { strippedConsole.error('Failed to restore pre-Competitive-mode game settings', error); });
 	}
 	patchSettings(_userPrefs);
 

@@ -14,6 +14,11 @@ export const MENU_DECLUTTER_GRID_COLUMNS_ATTRIBUTE = 'data-wok-menu-declutter-gr
 export const MENU_DECLUTTER_STREAMS_WIDTH_ATTRIBUTE = 'data-wok-menu-declutter-streams-width';
 export const MENU_DECLUTTER_STREAMS_RAISED_ATTRIBUTE = 'data-wok-menu-declutter-streams-raised';
 export const MENU_DECLUTTER_STYLE_ID = 'wokMenuDeclutterStyle';
+export const MENU_DECLUTTER_STATIC_CSS = `
+#signedInHeaderBar > .verticalSeparator { display: none !important; }
+#mapInfoHld { font-size: 0 !important; }
+#mapInfoHld > #mapInfo { font-size: 20px !important; }
+`;
 export const STREAM_PROMOTION_TEXT = 'Stream Krunker and get featured!';
 
 export interface MenuDeclutterElement {
@@ -261,6 +266,9 @@ export function collectMenuDeclutterTargets(
 	for (const saleInfo of environment.queryAll('.kr-sale-info')) targets.add(saleInfo);
 	// Contact, Terms, and Changelog are the only children of this dedicated footer container.
 	for (const footerLinks of environment.queryAll('#termsInfo')) targets.add(footerLinks);
+	for (const headerChild of environment.queryAll('#signedInHeaderBar > *')) {
+		if (isVerticalSeparator(headerChild)) targets.add(headerChild);
+	}
 
 	const isRemovableControl = (control: MenuDeclutterElement): boolean => {
 		if (matchesAnySemanticLabel(control)) return true;
@@ -633,6 +641,7 @@ function createBrowserEnvironment(): MenuDeclutterEnvironment {
 [${MENU_DECLUTTER_ATTRIBUTE}] { display: none !important; }
 [${MENU_DECLUTTER_COLLAPSE_ATTRIBUTE}] { display: none !important; }
 [${MENU_DECLUTTER_STREAMS_RAISED_ATTRIBUTE}] { top: 90px !important; margin-top: 0 !important; }
+${MENU_DECLUTTER_STATIC_CSS}
 ${gridRules}
 ${streamWidthRules}`;
 			(document.head ?? document.body ?? document.documentElement)?.append(style);

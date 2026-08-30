@@ -23,6 +23,7 @@ export interface FrameTraceReport {
 		dxgi_present_calls: number;
 		presentation_reporter_spans: number;
 		presentation_feedbacks: number;
+		display_frame_feedbacks: number;
 		ledger_submitted_frames: number;
 		ledger_gpu_complete_frames: number;
 		ledger_presentation_feedback_frames: number;

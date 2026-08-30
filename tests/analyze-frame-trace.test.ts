@@ -27,6 +27,7 @@ test('separates callback, present-call, and presentation-feedback rates', async 
 			event({ ph: 'b', name: 'SubmitCompositorFrameToPresentationCompositorFrame', pid: 10, tid: 2, ts: timestamp + 120, id2: { local: `impl-${index}` }, args: {} }),
 			event({ ph: 'e', name: 'SubmitCompositorFrameToPresentationCompositorFrame', pid: 10, tid: 2, ts: timestamp + 500, id2: { local: `main-${index}` }, args: {} }),
 			event({ ph: 'e', name: 'SubmitCompositorFrameToPresentationCompositorFrame', pid: 10, tid: 2, ts: timestamp + 500, id2: { local: `impl-${index}` }, args: {} }),
+			event({ ph: 'I', name: 'Display::FrameDisplayed', pid: 20, tid: 3, ts: timestamp + 500, args: {} }),
 			event({ ph: 'I', name: 'WokFrameSubmitted', pid: 10, tid: 2, ts: timestamp + 510, args: { frame_token: index + 1 } }),
 			event({
 				ph: 'I',
@@ -58,7 +59,8 @@ test('separates callback, present-call, and presentation-feedback rates', async 
 		assert.equal(report.counts.viz_draw_and_swaps, 3);
 		assert.equal(report.counts.dxgi_present_calls, 3);
 		assert.equal(report.counts.presentation_reporter_spans, 6);
-		assert.equal(report.counts.presentation_feedbacks, 3, 'main and impl reporters deduplicate by feedback timestamp');
+		assert.equal(report.counts.presentation_feedbacks, 3);
+		assert.equal(report.counts.display_frame_feedbacks, 3, 'direct display feedback is preferred over reporter-span deduplication');
 		assert.equal(report.counts.ledger_submitted_frames, 3);
 		assert.equal(report.counts.ledger_gpu_complete_frames, 2);
 		assert.equal(report.counts.ledger_presentation_feedback_frames, 3);

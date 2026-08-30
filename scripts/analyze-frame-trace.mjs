@@ -18,6 +18,7 @@ const EVENT_METRICS = new Map([
 	['CommandBuffer::Flush', 'gpu_command_flush']
 ]);
 const PRESENTATION_SPAN = 'SubmitCompositorFrameToPresentationCompositorFrame';
+const DISPLAY_FRAME_FEEDBACK_EVENT = 'Display::FrameDisplayed';
 const WOK_SUBMIT_EVENT = 'WokFrameSubmitted';
 const WOK_FEEDBACK_EVENT = 'WokFramePresentationFeedback';
 const WOK_TERMINAL_EVENT = 'WokFrameTerminal';
@@ -88,6 +89,7 @@ export async function analyzeFrameTrace(tracePath) {
 	const presentationStarts = new Map();
 	const presentationDurations = [];
 	const presentationEndTimestamps = new Set();
+	const displayFrameFeedbackTimestamps = new Set();
 	const commitFrameSequenceIds = new Set();
 	const submittedFrameTokens = new Set();
 	const feedbackFrameTokens = new Set();
@@ -144,6 +146,9 @@ export async function analyzeFrameTrace(tracePath) {
 			}
 		}
 
+		if (name === DISPLAY_FRAME_FEEDBACK_EVENT && timestamp !== undefined) {
+			displayFrameFeedbackTimestamps.add(timestamp);
+		}
 		if (name === PRESENTATION_SPAN && timestamp !== undefined) {
 			const id = asyncId(event);
 			if (id && event.ph === 'b') {
@@ -198,7 +203,10 @@ export async function analyzeFrameTrace(tracePath) {
 	const measurementStart = firstTimestamp.get('callback')
 		?? firstTimestamp.get('commit')
 		?? firstTimestamp.get('viz_draw_and_swap');
-	const feedbackEnds = [...presentationEndTimestamps];
+	const feedbackTimestamps = displayFrameFeedbackTimestamps.size > 0
+		? displayFrameFeedbackTimestamps
+		: presentationEndTimestamps;
+	const feedbackEnds = [...feedbackTimestamps];
 	const measurementEnd = feedbackEnds.length > 0
 		? Math.max(...feedbackEnds)
 		: lastTimestamp.get('dxgi_present') ?? lastTimestamp.get('viz_draw_and_swap');
@@ -224,7 +232,7 @@ export async function analyzeFrameTrace(tracePath) {
 			surface_commit_fps: rate(counts.get('surface_commit') ?? 0),
 			viz_draw_and_swap_fps: rate(counts.get('viz_draw_and_swap') ?? 0),
 			dxgi_present_call_fps: rate(counts.get('dxgi_present') ?? 0),
-			presentation_feedback_fps: rate(presentationEndTimestamps.size),
+			presentation_feedback_fps: rate(feedbackTimestamps.size),
 			ledger_submitted_fps: rate(submittedFrameTokens.size),
 			ledger_gpu_complete_fps: rate(gpuCompleteFrameTokens.size),
 			ledger_presentation_feedback_fps: rate(feedbackFrameTokens.size),
@@ -238,7 +246,8 @@ export async function analyzeFrameTrace(tracePath) {
 			viz_draw_and_swaps: counts.get('viz_draw_and_swap') ?? 0,
 			dxgi_present_calls: counts.get('dxgi_present') ?? 0,
 			presentation_reporter_spans: presentationDurations.length,
-			presentation_feedbacks: presentationEndTimestamps.size,
+			presentation_feedbacks: feedbackTimestamps.size,
+			display_frame_feedbacks: displayFrameFeedbackTimestamps.size,
 			ledger_submitted_frames: submittedFrameTokens.size,
 			ledger_gpu_complete_frames: gpuCompleteFrameTokens.size,
 			ledger_presentation_feedback_frames: feedbackFrameTokens.size,

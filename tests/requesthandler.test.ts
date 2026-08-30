@@ -58,9 +58,14 @@ function createFakeBrowserWindow(options: FakeWebRequestOptions = {}): { browser
 							assert.ok(listener);
 							state.beforeRequest = { filter, listener };
 						},
-					onHeadersReceived(filter: WebRequestFilter, listener: HeadersReceivedListener) {
+					onHeadersReceived(filter: WebRequestFilter | null, listener?: HeadersReceivedListener) {
+							if (filter === null) {
+								state.headersReceived = undefined;
+								return;
+							}
 							state.headersReceivedRegistrations += 1;
 							if (state.headersReceivedRegistrations <= (options.headersReceivedFailures ?? 0)) throw new Error('Synthetic headers registration failure');
+							assert.ok(listener);
 							state.headersReceived = { filter, listener };
 						}
 				}
@@ -123,6 +128,37 @@ test('empty swap trees register no webRequest listeners at all', async t => {
 	assert.equal(state.beforeRequestRegistrations, 0);
 	assert.equal(state.headersReceived, undefined);
 	assert.equal(state.headersReceivedRegistrations, 0);
+});
+
+test('reconfigures request features without restarting the browser process', async t => {
+	const { browserWindow, state } = createFakeBrowserWindow();
+	const { filtersPath, swapDir } = createTestPaths(t);
+	const blocker = '*://ads.example.com/*';
+	const handler = new RequestHandler(browserWindow, swapDir, false, true, false, blocker, filtersPath);
+
+	assert.equal(await handler.start(), true);
+	assert.deepEqual(dispatchBeforeRequest(state, 'https://ads.example.com/banner.js'), { cancel: true });
+
+	assert.equal(await handler.reconfigure({
+		blockerEnabled: false,
+		customFiltersEnabled: false,
+		defaultFilters: '',
+		swapperEnabled: false
+	}), true);
+	assert.equal(state.beforeRequest, undefined);
+	assert.equal(state.headersReceived, undefined);
+
+	writeTestFile(join(swapDir, 'textures', 'weapon.png'));
+	assert.equal(await handler.reconfigure({
+		blockerEnabled: false,
+		customFiltersEnabled: false,
+		defaultFilters: '',
+		swapperEnabled: true
+	}), true);
+	assert.equal(
+		dispatchBeforeRequest(state, 'https://krunker.io/textures/weapon.png').redirectURL,
+		swapProtocolUrl('/textures/weapon.png')
+	);
 });
 
 test('resource swapping fails open when a tree exceeds its depth bound', async t => {

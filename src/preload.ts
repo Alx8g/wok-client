@@ -276,6 +276,18 @@ function renderSettings() {
 		.finally(() => { settingsRenderPromise = undefined; });
 }
 
+ipcRenderer.on('settingsUI_reopen', (_event, categoryIndex: number) => {
+	void import('./settingsui.ts').then(async settingsUI => {
+		settingsUI.rememberSettingsCategory(categoryIndex);
+		await settingsUI.settingsReady;
+		window.showWindow(1);
+		const settingsWindow = window.windows[0];
+		const tabs = settingsWindow.tabs[settingsWindow.settingType];
+		settingsWindow.changeTab(tabs.length - 1);
+		settingsUI.renderSettings();
+	}).catch(error => { strippedConsole.error('Failed to reopen WOK settings', error); });
+});
+
 const $assets = pathResolve(import.meta.dirname, '..', 'assets');
 
 let competitionAutomationEnabled = false;
@@ -523,53 +535,56 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, _graphics
 
 });
 
-ipcRenderer.once('initDiscordRPC', () => {
-	function updateRPC() {
-		strippedConsole.log('> updated RPC');
-		/*
-		 * Discord presence leaves this machine, so the text is read with the local display
-		 * identity undone. In practice these elements hold a class, a skin and a map name, but
-		 * "anything this client republishes is read through withRealIdentity" is the rule that
-		 * keeps the feature cosmetic instead of misleading. Free unless something is currently
-		 * rewritten, and the strings are captured inside the callback, not the elements.
-		 */
-		const presence = withRealIdentity(() => {
-			const skinElem = document.querySelector('#menuClassSubtext > span');
-			return {
-				className: document.getElementById('menuClassName')?.textContent ?? '',
-				hasSkinElement: skinElem !== null,
-				mapText: document.getElementById('mapInfo')?.textContent ?? null,
-				skinText: skinElem?.textContent ?? ''
-			};
-		});
+let discordRPCHooksInstalled = false;
 
-		const gameActivity = Object.hasOwn(window, 'getGameActivity') ? window.getGameActivity() as Partial<GameInfo> : {};
-		let overWriteDetails: string | false = false;
-		if (!Object.hasOwn(gameActivity, 'class')) gameActivity.class = { name: presence.className };
-		if (!Object.hasOwn(gameActivity, 'map') || !Object.hasOwn(gameActivity, 'mode')) overWriteDetails = presence.mapText ?? 'Loading game...';
-
-		const data: RPCargs = {
-			details: overWriteDetails || `${gameActivity.mode} on ${gameActivity.map}`,
-			state: `${gameActivity.class.name} • ${presence.skinText}`
+function updateDiscordRPC(): void {
+	strippedConsole.log('> updated RPC');
+	/*
+	 * Discord presence leaves this machine, so the text is read with the local display
+	 * identity undone. In practice these elements hold a class, a skin and a map name, but
+	 * "anything this client republishes is read through withRealIdentity" is the rule that
+	 * keeps the feature cosmetic instead of misleading. Free unless something is currently
+	 * rewritten, and the strings are captured inside the callback, not the elements.
+	 */
+	const presence = withRealIdentity(() => {
+		const skinElem = document.querySelector('#menuClassSubtext > span');
+		return {
+			className: document.getElementById('menuClassName')?.textContent ?? '',
+			hasSkinElement: skinElem !== null,
+			mapText: document.getElementById('mapInfo')?.textContent ?? null,
+			skinText: skinElem?.textContent ?? ''
 		};
-		if (!presence.hasSkinElement) { // as long as we have skinElem, we can fill in the other blanks
-			ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: new URL(WEBSITE_URL).hostname });
-		} else {
-			ipcRenderer.send('preload_updates_DiscordRPC', data);
-		}
-	}
-
-	// updating rpc
-	ipcRenderer.on('main_did-finish-load', updateRPC);
-	window.addEventListener('load', () => {
-		updateRPC();
-		setTimeout(() => {
-			// hook elements that update rpc
-			try { document.getElementById('windowCloser').addEventListener('click', updateRPC); } catch (e) { strippedConsole.error("didn't hook wincloser", e); }
-			try { document.getElementById('customizeButton').addEventListener('click', updateRPC); } catch (e) { strippedConsole.error("didn't hook customizeButton", e); }
-		}, 4000);
 	});
-	document.addEventListener('pointerlockchange', updateRPC); // thank God this exists
+
+	const gameActivity = Object.hasOwn(window, 'getGameActivity') ? window.getGameActivity() as Partial<GameInfo> : {};
+	let overWriteDetails: string | false = false;
+	if (!Object.hasOwn(gameActivity, 'class')) gameActivity.class = { name: presence.className };
+	if (!Object.hasOwn(gameActivity, 'map') || !Object.hasOwn(gameActivity, 'mode')) overWriteDetails = presence.mapText ?? 'Loading game...';
+
+	const data: RPCargs = {
+		details: overWriteDetails || `${gameActivity.mode} on ${gameActivity.map}`,
+		state: `${gameActivity.class.name} • ${presence.skinText}`
+	};
+	if (!presence.hasSkinElement) {
+		ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: new URL(WEBSITE_URL).hostname });
+	} else {
+		ipcRenderer.send('preload_updates_DiscordRPC', data);
+	}
+}
+
+ipcRenderer.on('initDiscordRPC', () => {
+	if (!discordRPCHooksInstalled) {
+		discordRPCHooksInstalled = true;
+		ipcRenderer.on('main_did-finish-load', updateDiscordRPC);
+		window.addEventListener('load', updateDiscordRPC);
+		document.addEventListener('pointerlockchange', updateDiscordRPC);
+		setTimeout(() => {
+			document.getElementById('windowCloser')?.addEventListener('click', updateDiscordRPC);
+			document.getElementById('customizeButton')?.addEventListener('click', updateDiscordRPC);
+		}, 4000);
+	}
+	// Enabling RPC after the load event still publishes current activity immediately.
+	updateDiscordRPC();
 });
 
 ipcRenderer.on('matchmakerRedirect', async (_event, _userPrefs: UserPrefs) => {
@@ -1092,6 +1107,19 @@ async function ensureMatchmakerStylesheet(): Promise<void> {
 
 let latestUserPrefs: UserPrefs | undefined;
 let identityStarterHandle: number | undefined;
+
+/** Reconcile preferences that can change without replacing the game document. */
+function applyRuntimePreferences(preferences: UserPrefs): void {
+	latestUserPrefs = preferences;
+	applyRawMouseInputPreference(preferences);
+	applyClientMatchmakerSettings(preferences);
+	competitionAutomationEnabled = Boolean(preferences.competitionAutomation);
+}
+
+ipcRenderer.on('settings_runtime_preferences', (_event, preferences: UserPrefs) => {
+	if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) return;
+	applyRuntimePreferences(preferences);
+});
 let authoritativeUserPrefsReceived = false;
 let userPrefsRecoveryStarted = false;
 let userPrefsFetchInFlight = false;
@@ -1416,7 +1444,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 		settingsWindow.getSettings = (...args: unknown[]) => {
 			const result: string = getSettingsHook(...args);
-			if (!_userPrefs.regionTimezones) return result;
+			if (!(latestUserPrefs ?? _userPrefs).regionTimezones) return result;
 
 			let patched = result;
 			runHookExtras('getSettings', () => {

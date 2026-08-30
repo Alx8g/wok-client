@@ -262,6 +262,13 @@ function exactSwapPatterns(resourcePath: string): string[] {
 	];
 }
 
+export interface RequestHandlerPreferences {
+	blockerEnabled: boolean;
+	customFiltersEnabled: boolean;
+	defaultFilters: string;
+	swapperEnabled: boolean;
+}
+
 export default class RequestHandler {
 
 	private browserWindow: Electron.BrowserWindow;
@@ -294,13 +301,43 @@ export default class RequestHandler {
 	public constructor(browserWindow: Electron.BrowserWindow, swapDir: string, swapperEnabled: boolean, blockerEnabled: boolean, customFiltersEnabled: boolean, defaultFiltersStr: string, customFiltersPath: string) {
 		this.browserWindow = browserWindow;
 		this.swapDir = swapDir;
-		this.swapperEnabled = swapperEnabled;
-		this.customFiltersEnabled = customFiltersEnabled;
 		this.customFiltersPath = customFiltersPath;
+		this.swapperEnabled = false;
+		this.customFiltersEnabled = false;
+		this.defaultFilters = [];
+		this.setPreferences({
+			blockerEnabled,
+			customFiltersEnabled,
+			defaultFilters: defaultFiltersStr,
+			swapperEnabled
+		});
+	}
 
-		this.defaultFilters = blockerEnabled
-			? defaultFiltersStr.split(/\r?\n/u).map(filter => filter.trim()).filter(Boolean)
+	private setPreferences(preferences: RequestHandlerPreferences): void {
+		this.swapperEnabled = preferences.swapperEnabled;
+		this.customFiltersEnabled = preferences.customFiltersEnabled;
+		this.defaultFilters = preferences.blockerEnabled
+			? preferences.defaultFilters.split(/\r?\n/u).map(filter => filter.trim()).filter(Boolean)
 			: [];
+	}
+
+	/** Replace request features without restarting Electron. The caller reloads the game afterward. */
+	public async reconfigure(preferences: RequestHandlerPreferences): Promise<boolean> {
+		try {
+			this.browserWindow.webContents.session.webRequest.onBeforeRequest(null);
+			this.browserWindow.webContents.session.webRequest.onHeadersReceived(null);
+		} catch (error) {
+			console.error('Failed to remove the previous WOK Client request filters', error);
+			return false;
+		}
+
+		this.started = false;
+		this.swapperActive = false;
+		this.swapRequestResources.clear();
+		this.swapProtocolFiles.clear();
+		this.blockingMatchers = [];
+		this.setPreferences(preferences);
+		return this.start();
 	}
 
 	/**

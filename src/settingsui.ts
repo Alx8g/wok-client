@@ -1,6 +1,5 @@
 import { readdirSync } from 'fs';
 import { DISPLAY_PREFERENCE_AUTO, type DisplayOption } from './display-selection.ts';
-import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
@@ -56,9 +55,10 @@ else requestUserPrefs();
 const displayOption: SelectSettingDescItem = {
 	title: 'Display',
 	type: 'sel',
-	desc: 'Chooses the monitor WOK opens on. Uses the primary monitor if the saved one is disconnected.',
+	desc: 'Moves WOK to this monitor. Uses the primary monitor if the saved one is disconnected.',
 	safety: 0,
 	cat: 0,
+	instant: process.platform === 'win32',
 	opts: [DISPLAY_PREFERENCE_AUTO],
 	optLabels: ['Automatic (primary display)']
 };
@@ -157,9 +157,9 @@ const settingsDesc: SettingsDesc = {
 	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: 'Removes promotions, Manage Ads, and low-value menu items while keeping balances and core controls.', safety: 0, cat: 2, instant: true },
 	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Shows each Public region’s ping and puts the fastest regions first. Fixed categories stay pinned.', safety: 0, cat: 3, instant: true },
 	fpsUncap: { title: 'Uncap FPS', type: 'bool', desc: 'Removes the frame cap so WOK can run as fast as the system allows.', safety: 0, cat: 0 },
-	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Prevents camera jumps on high-polling mice and ignores Windows mouse acceleration. Restart required.', safety: 0, cat: 0 },
+	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Prevents camera jumps on high-polling mice and ignores Windows mouse acceleration. Applies on the next mouse capture.', safety: 0, cat: 0, instant: true },
 	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Auto is recommended. Run calibration to measure which graphics option is fastest.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
-	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Chooses how WOK fills the screen. Fullscreen usually gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
+	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Changes how WOK fills the screen. Fullscreen usually gives the smoothest frames.', safety: 0, cat: 0, instant: process.platform === "win32", opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
 	display: displayOption,
 
 	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Shows the next-match countdown on the menu.', safety: 0, cat: 1, instant: true },
@@ -167,19 +167,19 @@ const settingsDesc: SettingsDesc = {
 	customName: { title: 'Custom Name', type: 'text', desc: 'Replaces your name in the local UI. Other players and Krunker still receive your real name.', placeholder: 'Leave empty for your real name', safety: 0, cat: 2, instant: true },
 	customClan: { title: 'Custom Clan', type: 'text', desc: 'Replaces your clan tag in the local UI. Other players still see your real clan.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 2, instant: true },
 	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Animates your local name and clan in sync. Other players still see your real identity.', safety: 0, cat: 2, instant: true },
-	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows the local time for each region.', safety: 0, cat: 3, refreshOnly: true },
-	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows your current game on your Discord profile.', safety: 0, cat: 1 },
+	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows the local time for each region.', safety: 0, cat: 3, instant: true },
+	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows your current game on your Discord profile.', safety: 0, cat: 1, instant: true },
 	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds join and project links to your Discord activity.', safety: 0, cat: 1, instant: true },
 
 	motionBlur: { title: 'Motion Blur', type: 'bool', desc: 'Adds trails while turning. The HUD stays sharp.', safety: 0, cat: 2, instant: true },
 	motionBlurStrength: { title: 'Motion Blur Strength', type: 'num', min: 0, max: 100, desc: 'Sets trail intensity. 50 is recommended.', safety: 0, cat: 2, instant: true },
 	motionBlurQuality: { title: 'Motion Blur Quality', type: 'sel', desc: 'Native stays sharpest. Lower modes use less GPU but look softer.', safety: 0, cat: 2, instant: true, opts: ['native', 'balanced', 'performance'], optLabels: ['Native (100%)', 'Balanced (75%)', 'Performance (50%)'] },
 	theme: themeOption,
-	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation while Krunker loads.', safety: 0, cat: 2 },
-	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Plays sound with the launch animation.', safety: 0, cat: 2 },
-	clientSplash: { title: 'Splash Screen', type: 'bool', desc: 'Shows WOK branding while Krunker loads.', safety: 0, cat: 2, refreshOnly: true },
-	immersiveSplash: { title: 'Full-Screen Splash', type: 'bool', desc: 'Covers Krunker’s loading screen with the WOK splash.', safety: 0, cat: 2, refreshOnly: true },
-	immersiveSplashBackgroundColor: { title: 'Splash Colour', type: 'color', desc: 'Sets the full-screen splash background.', safety: 0, cat: 2, refreshOnly: true },
+	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation on the next launch.', safety: 0, cat: 2, instant: true },
+	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Plays sound with the animation on the next launch.', safety: 0, cat: 2, instant: true },
+	clientSplash: { title: 'Splash Screen', type: 'bool', desc: 'Shows WOK branding during the next launch.', safety: 0, cat: 2, instant: true },
+	immersiveSplash: { title: 'Full-Screen Splash', type: 'bool', desc: 'Covers Krunker’s loading screen during the next launch.', safety: 0, cat: 2, instant: true },
+	immersiveSplashBackgroundColor: { title: 'Splash Colour', type: 'color', desc: 'Sets the splash background for the next launch.', safety: 0, cat: 2, instant: true },
 
 	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: 'Finds a lobby using the filters below. This is unofficial and may conflict with game rules.', safety: 2, cat: 3, instant: true },
 	matchmakerKey: { title: 'Search Hotkey', type: 'keybind', desc: 'Starts custom matchmaking.', safety: 0, cat: 3, instant: true },
@@ -198,13 +198,13 @@ const settingsDesc: SettingsDesc = {
 	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Keeps WOK at full speed when another window is focused. Uses more power.', safety: 2, cat: 0 },
 	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Overrides Chromium’s driver safety block. No proven performance gain; leave off.', safety: 3, cat: 4 },
 	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Enables unproven Linux flags that may reduce stability.', safety: 4, cat: 4 },
-	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Keeps DevTools attached during startup. Developer debugging only.', safety: 3, cat: 4 },
-	overrideURL: { title: 'Override URL', desc: 'Loads another HTTPS krunker.io address. Testing only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4 },
+	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Keeps DevTools attached during startup. Developer debugging only.', safety: 3, cat: 4, instant: true },
+	overrideURL: { title: 'Override URL', desc: 'Uses another HTTPS krunker.io address the next time WOK navigates. Testing only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4, instant: true },
 
-	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from the local Swapper folder. Use official mod support when possible.', safety: 3, cat: 4 },
-	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Chooses Off, Hide, or Block. Blocking stops ad requests and may conflict with game rules. Restart required.', safety: 4, cat: 1, opts: ['off', 'hide', 'block'] },
-	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Uses your Filters file to cancel or redirect requests. Can break the game or conflict with its rules.', safety: 4, cat: 4 },
-	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. Competition tooling only.', safety: 4, cat: 4, refreshOnly: true }
+	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from the local Swapper folder after a game reload. Use official mod support when possible.', safety: 3, cat: 4, refreshOnly: true },
+	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Chooses Off, Hide, or Block. Blocking stops ad requests after a game reload and may conflict with game rules.', safety: 4, cat: 1, opts: ['off', 'hide', 'block'], refreshOnly: true },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Uses your Filters file after a game reload to cancel or redirect requests. Can break the game or conflict with its rules.', safety: 4, cat: 4, refreshOnly: true },
+	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. Competition tooling only.', safety: 4, cat: 4, instant: true }
 };
 
 /** index-based safety descriptions. goes in title attribute */
@@ -278,6 +278,24 @@ function updateRefreshNeededForKey(key: string) {
 	);
 }
 
+function runPendingSettingsAction(): void {
+	flushSettingsUpdates();
+	if (refreshNeeded === RefreshEnum.reloadApp) {
+		ipcRenderer.send('settingsUI_relaunch_wok', activeSettingsCategory);
+		return;
+	}
+	if (refreshNeeded === RefreshEnum.refresh) {
+		ipcRenderer.send('settingsUI_reload_game', activeSettingsCategory);
+	}
+}
+
+function renderRefreshNotification(): void {
+	if (!refreshNotifElement) return;
+	refreshNotifElement.innerHTML = skeleton.refreshElem(refreshNeeded);
+	refreshNotifElement.querySelector('.settings-apply-button')?.addEventListener('click', runPendingSettingsAction);
+	displayedRefreshNeeded = refreshNeeded;
+}
+
 function updateRefreshNotification() {
 	if (refreshNeeded === RefreshEnum.notNeeded) {
 		refreshNotifElement?.remove();
@@ -288,18 +306,14 @@ function updateRefreshNotification() {
 
 	if (!refreshNotifElement) {
 		refreshNotifElement = createElement('div', {
-			class: ['crankshaft-holder-update', 'refresh-popup'],
-			innerHTML: skeleton.refreshElem(refreshNeeded)
+			class: ['crankshaft-holder-update', 'refresh-popup']
 		});
 		document.body.appendChild(refreshNotifElement);
-		displayedRefreshNeeded = refreshNeeded;
+		renderRefreshNotification();
 		return;
 	}
 
-	if (displayedRefreshNeeded !== refreshNeeded) {
-		refreshNotifElement.innerHTML = skeleton.refreshElem(refreshNeeded);
-		displayedRefreshNeeded = refreshNeeded;
-	}
+	if (displayedRefreshNeeded !== refreshNeeded) renderRefreshNotification();
 }
 
 function sanitizeString(string: string) {
@@ -808,9 +822,9 @@ const skeleton = {
 	refreshElem: (level: (typeof RefreshEnum)[keyof typeof RefreshEnum]) => {
 		switch (level) {
 			case RefreshEnum.reloadApp:
-				return '<span class="restart-msg">Restart client fully to see changes</span>';
+				return '<span class="restart-msg">Restart WOK to apply these changes <button class="settings-apply-button" type="button">Restart WOK</button></span>';
 			case RefreshEnum.refresh:
-				return `<span class="reload-msg">${skeleton.refreshIcon()}Reload page with <code>F5</code> or <code>${os.platform() === "darwin" ? "CMD" : "CTRL"} + R</code> to see changes</span>`;
+				return `<span class="reload-msg">${skeleton.refreshIcon()}Reload the game to apply these changes <button class="settings-apply-button" type="button">Reload game</button></span>`;
 			case RefreshEnum.notNeeded:
 			default:
 				return '';
@@ -852,6 +866,12 @@ let settingElementPairs: { [key: string]: SettingElem } = {};
 
 /** Sidebar section the user last opened; survives re-renders so a refresh never dumps them back to the top. */
 let activeSettingsCategory = 0;
+
+export function rememberSettingsCategory(categoryIndex: number): void {
+	if (Number.isInteger(categoryIndex) && categoryIndex >= 0 && categoryIndex < categoryNames.length) {
+		activeSettingsCategory = categoryIndex;
+	}
+}
 
 export function renderSettings() {
 	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').toLowerCase();

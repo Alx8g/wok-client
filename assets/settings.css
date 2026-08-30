@@ -284,6 +284,21 @@ input:checked+.advancedSlider:hover {
     border: 2px solid #333333
 }
 
+.refresh-popup .settings-apply-button {
+	margin-left: .4rem;
+	padding: .45rem .65rem;
+	border: 1px solid rgba(255, 255, 255, .2);
+	border-radius: 4px;
+	background: #FBC02D;
+	color: #151515;
+	font: 700 .8rem/1 inherit;
+	cursor: pointer;
+}
+
+.refresh-popup .settings-apply-button:hover {
+	background: #FFD54F;
+}
+
 .hiddenClasses-hideAds-bottomOffset { bottom: 80px !important; }
 
 .keybinddummyinput {

@@ -30,8 +30,13 @@ export const macAppMenuArr: (MenuItemConstructorOptions | MenuItem)[] = process.
 	: [];
 
 /** make 2 menuItems that determine wether to use fallback or not, and then act accordingly */
-export function constructDevtoolsSubmenu(providedWindow: BrowserWindow, skipFallback: null | boolean = null, options?: OpenDevToolsOptions) {
+export function constructDevtoolsSubmenu(
+	providedWindow: BrowserWindow,
+	skipFallbackPreference: null | boolean | (() => null | boolean) = null,
+	options?: OpenDevToolsOptions
+) {
 	const maxLag = 500; // default timeout by asger-finding / Commander
+	let detectedSkipFallback = typeof skipFallbackPreference === 'function' ? null : skipFallbackPreference;
 
 	/** Fallback if openDevTools fails */
 	function fallbackDevtools() {
@@ -47,14 +52,18 @@ export function constructDevtoolsSubmenu(providedWindow: BrowserWindow, skipFall
 
 	/** test first time if should open fallback or not. then decide */
 	function openDevToolsWithFallback() {
+		const configuredPreference = typeof skipFallbackPreference === 'function'
+			? skipFallbackPreference()
+			: skipFallbackPreference;
+		const skipFallback = configuredPreference ?? detectedSkipFallback;
 		if (skipFallback === true) {
 			providedWindow.webContents.openDevTools(options);
 		} else if (skipFallback === false) {
 			fallbackDevtools();
-		} else if (skipFallback === null) {
+		} else {
 			providedWindow.webContents.openDevTools(options); // start opening devtools
-			const popupDevtoolTimeout = setTimeout(() => { skipFallback = false; fallbackDevtools(); }, maxLag); // wait maxLag. if times out, always run fallback
-			providedWindow.webContents.once('devtools-opened', () => { skipFallback = true; clearTimeout(popupDevtoolTimeout); }); // if opens devtools first, never run fallback
+			const popupDevtoolTimeout = setTimeout(() => { detectedSkipFallback = false; fallbackDevtools(); }, maxLag); // wait maxLag. if times out, always run fallback
+			providedWindow.webContents.once('devtools-opened', () => { detectedSkipFallback = true; clearTimeout(popupDevtoolTimeout); }); // if opens devtools first, never run fallback
 		}
 	}
 

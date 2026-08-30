@@ -242,28 +242,6 @@ export function applyClientMotionBlurSettings(preferences: UserPrefs): void {
 window.addEventListener('beforeunload', stopMotionBlurRuntime, { once: true });
 
 let settingsRenderPromise: Promise<void> | undefined;
-let stopAdaptiveValidationRuntime: (() => void) | undefined;
-let adaptiveValidationLoadGeneration = 0;
-
-function updateAdaptiveValidationRuntime(value: unknown) {
-	const adaptiveValidationGeneration = ++adaptiveValidationLoadGeneration;
-	stopAdaptiveValidationRuntime?.();
-	stopAdaptiveValidationRuntime = undefined;
-	if (value === undefined) return;
-
-	void import('./adaptive-validation-runtime.ts')
-		.then(adaptiveValidation => {
-			if (adaptiveValidationGeneration !== adaptiveValidationLoadGeneration) return;
-			const state = adaptiveValidation.parseAdaptiveValidationState(value);
-			if (!state) return;
-			stopAdaptiveValidationRuntime = adaptiveValidation.startAdaptiveValidationRuntime({
-				onError: error => { strippedConsole.error('Adaptive gameplay validation failed', error); },
-				state,
-				submitSession: submission => ipcRenderer.invoke('adaptiveValidation_recordSession', submission)
-			});
-		})
-		.catch(error => { strippedConsole.error('Failed to start adaptive gameplay validation', error); });
-}
 
 // Set by the settings UI module when it loads; lets the hotkey handler skip the keybind-capture
 // state without a document scan on every keydown.
@@ -496,17 +474,12 @@ export const styleSettingsCSS = {
 	get quickClassPicker() { return loadStyleSettingCSS('quickClassPicker'); }
 };
 
-ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
-	updateAdaptiveValidationRuntime(value);
-});
-
 ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, _graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
 	applyRawMouseInputPreference(_userPrefs);
 	applyClientMotionBlurSettings(_userPrefs);
 	applyMenuDeclutterSettings(_userPrefs);
 	applyPublicServerPingSortSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
-	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
 
 	// Competitive Mode was a visual-reduction preset. It is no longer exposed or enabled, but an
 	// existing backup must be restored once so users are not left on the reduced visual settings.

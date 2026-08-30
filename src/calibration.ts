@@ -1107,8 +1107,8 @@ export function finalizeCalibration(state: CalibrationState): CalibrationState {
 
 export function completeCalibration(state: CalibrationState, applyRecommendation: boolean, now: number = Date.now()): CalibrationState {
 	if (applyRecommendation && state.recommendedSelection) {
-		// Apply provisionally: the previous selection is retained for automatic rollback and the
-		// adaptive-validation loop becomes the confirmation authority (design §4.3/§4.4).
+		// Apply provisionally: retain the previous selection through the bounded compatibility
+		// window. Without an active automatic validator, expiry parks the selection as unwatched.
 		return {
 			...state,
 			activeSelection: state.recommendedSelection,

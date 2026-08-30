@@ -96,14 +96,6 @@ export function hiddenClassesImages(classesCount: number) {
 	return css;
 }
 
-export function secondsToTimestring(num: number) {
-	const minutes = Math.floor(num / 60);
-	const seconds = num % 60;
-
-	if (minutes < 1) return `${num}s`;
-	return `${minutes}m ${seconds}s`;
-}
-
 export function haveSameContents(array1: unknown[], array2: unknown[]) {
 	if (array1.length !== array2.length) return false;
 

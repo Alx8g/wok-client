@@ -30,7 +30,6 @@ test('reports hardware, selection, and graceful placeholders without calibration
 	assert.ok(report.includes('recommendation: d3d11on12'));
 	assert.ok(report.includes('backend failures: none'));
 	assert.ok(report.includes('CALIBRATION: never run'));
-	assert.ok(report.includes('VALIDATION: no gameplay evidence yet'));
 	assert.ok(report.includes('safeFlags_highPerformanceGpu=true'));
 	assert.ok(report.includes('safeFlags_gpuRasterizing=unset'));
 });
@@ -68,7 +67,7 @@ test('explains a calibration that completed without a benchmark cycle', () => {
 	assert.ok(report.includes(`  ${CALIBRATION_NO_COMPARISON_REASON}`));
 });
 
-test('surfaces artifact flags, verdicts, and validation sessions in the calibration sections', () => {
+test('surfaces artifact flags and verdicts in the calibration section', () => {
 	const input = baseInput();
 	const artifactMetrics = {
 		averageFps: 90.95,
@@ -112,32 +111,9 @@ test('surfaces artifact flags, verdicts, and validation sessions in the calibrat
 		updatedAt: 2,
 		version: 2
 	} as DiagnosticsReportInput['calibration'];
-	input.adaptiveValidation = {
-		baseline: {
-			medianAverageFps: 400,
-			profile: { activeBackend: 'd3d11on12', benchmarkSemanticVersion: 1, driverFingerprint: 'driver-a', electronVersion: '44.0.0', framePolicy: 'uncapped', hardwareFingerprint: '8086:46a6', profileSemanticVersion: 1 }
-		},
-		classification: 'inconclusive',
-		profile: { activeBackend: 'd3d11on12', benchmarkSemanticVersion: 1, driverFingerprint: 'driver-a', electronVersion: '44.0.0', framePolicy: 'uncapped', hardwareFingerprint: '8086:46a6', profileSemanticVersion: 1 },
-		profileChangeConfirmationRequired: true,
-		sessions: [{
-			completedAt: 100,
-			durationMs: 60_000,
-			id: 'adaptive-session-00000001',
-			lowConfidenceReasons: [],
-			metrics: { averageFps: 398.2, onePercentLowFps: 150.1, p95FrameTimeMs: 3.1, sampleCount: 20_000, worstFrameTimeMs: 12 }
-		}],
-		status: 'sampling',
-		summary: { acceptedSessionCount: 1, cleanSessionCount: 1, maximumP95FrameTimeMs: 3.1, maximumWorstFrameTimeMs: 12, minimumAverageFps: 398.2, minimumOnePercentLowFps: 150.1, severeInstabilitySessionCount: 0, totalFrameSamples: 20_000 },
-		updatedAt: 101,
-		version: 1
-	};
-
 	const report = buildDiagnosticsReport(input);
 	assert.ok(report.includes('CALIBRATION: awaiting-confirmation'));
 	assert.ok(report.includes('[fence-pacing-dominates-frame-interval]'));
 	assert.ok(report.includes('stall 0.73'));
 	assert.ok(report.includes('recommended: d3d11on12:uncapped'));
-	assert.ok(report.includes('baseline 400.0 fps (from d3d11on12)'));
-	assert.ok(report.includes('session 1: avg 398.2'));
 });

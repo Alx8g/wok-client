@@ -26,7 +26,6 @@ const lazyBoundaries = [
 	'src/matchmaker.ts',
 	'src/discord-rpc.ts',
 	'src/competitive-mode.ts',
-	'src/adaptive-validation-runtime.ts',
 	'src/calibration-window.ts'
 ];
 

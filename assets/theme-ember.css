@@ -43,10 +43,6 @@
 
 	--wok-scrollbar-track: #150E0A;
 	--wok-scrollbar-thumb: #472F22;
-
-	--wok-overlay-bg: rgba(18, 12, 9, .86);
-	--wok-overlay-border: rgba(255, 107, 53, .70);
-	--wok-overlay-text: #FBEFE7;
 }
 
 /* A low ember glow behind the section list, warmest at the bottom where the content sits. */

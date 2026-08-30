@@ -89,9 +89,6 @@ export interface IdentityTextFragment {
 	start: number;
 }
 
-/** Finds only the display identity fragments, leaving surrounding chat or row text untouched. */
-export type IdentityTextFragmentFinder = (text: string) => readonly IdentityTextFragment[];
-
 /** Marker shared by the DOM decoration engine and its stylesheet. */
 export const IDENTITY_RGB_MARKER_ATTRIBUTE = 'data-wok-identity-rgb';
 export const IDENTITY_RGB_CLASS = 'wok-identity-rgb';

@@ -42,7 +42,6 @@ interface GraphicsRuntimeInfo {
 }
 
 interface CompetitiveModeRuntimeInfo {
-	adaptiveValidationState?: unknown;
 	hasGameSettingsBackup: boolean;
 }
 
@@ -56,28 +55,6 @@ interface PerformanceSnapshot {
 	windowSeconds: number;
 }
 
-interface NetworkDiagnosticsSnapshot {
-	available: boolean;
-	currentReportedPingMs: number;
-	minimumReportedPingMs: number;
-	medianReportedPingMs: number;
-	p95ReportedPingMs: number;
-	reportedPingVariationMs: number;
-	reportedPingSampleAgeMs: number;
-	reportedPingSampleCount: number;
-	reportedPingWindowSeconds: number;
-	regionCode: string;
-	reportedTps: number;
-	networkLagWarning: boolean;
-}
-
-interface WokPerformanceAPI {
-	networkSnapshot: () => NetworkDiagnosticsSnapshot;
-	reset: () => void;
-	setVisible: (visible: boolean) => void;
-	snapshot: () => PerformanceSnapshot;
-}
-
 // stuff krunker adds
 type SettingsTab = {
 	name: string;
@@ -87,7 +64,6 @@ type SettingsTab = {
 interface Window {
 	OffCliV: boolean;
 	closeClient: Function;
-	wokPerformance?: WokPerformanceAPI;
 	getGameActivity: Function;
 	showWindow: Function;
 	setSetting: (key: string, value: boolean | number | string) => void;

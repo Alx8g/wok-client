@@ -1,15 +1,13 @@
-import type { AdaptiveValidationState } from './adaptive-validation.ts';
 import type { CalibrationResult, CalibrationState } from './calibration.ts';
 import type { GraphicsProfileState, GraphicsSelection } from './graphics-profile.ts';
 
 /**
  * Builds the plain-text diagnostics block behind "Copy diagnostics report". Everything a remote
  * report needs to be actionable instead of vibes: hardware identity, which backend is live and
- * why, the calibration evidence (including artifact flags), and the real-gameplay validation
- * trail. Pure and Electron-free so the exact output is testable.
+ * why, and calibration evidence including artifact flags. Pure and Electron-free so the exact
+ * output is testable.
  */
 export interface DiagnosticsReportInput {
-	adaptiveValidation?: AdaptiveValidationState;
 	appVersion: string;
 	calibration?: CalibrationState;
 	electronVersion: string;
@@ -64,18 +62,6 @@ function calibrationSection(calibration: CalibrationState | undefined): string[]
 	return lines;
 }
 
-function validationSection(validation: AdaptiveValidationState | undefined): string[] {
-	if (!validation) return ['VALIDATION: no gameplay evidence yet'];
-	const header = `VALIDATION: ${validation.status} (${validation.sessions.length}/3) — ${validation.classification}`
-		+ (validation.baseline ? `  baseline ${validation.baseline.medianAverageFps.toFixed(1)} fps (from ${validation.baseline.profile.activeBackend})` : '');
-	const lines = [header, `  watching: ${validation.profile.activeBackend} · ${validation.profile.framePolicy}`];
-	validation.sessions.forEach((session, index) => {
-		const metrics = session.metrics;
-		lines.push(`  session ${index + 1}: avg ${metrics.averageFps.toFixed(1)}  1%low ${metrics.onePercentLowFps.toFixed(1)}  p95 ${metrics.p95FrameTimeMs.toFixed(2)}ms  (${Math.round(session.durationMs / 1000)}s, ${metrics.sampleCount} samples)`);
-	});
-	return lines;
-}
-
 export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
 	const profile = input.graphicsProfile;
 	const quarantined = profile.blockedBackends.length > 0 ? profile.blockedBackends.join(', ') : 'none';
@@ -105,7 +91,6 @@ export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
 		`last launch: ${profile.lastLaunchOutcome}${profile.lastFailureReason ? ` — ${profile.lastFailureReason}` : ''}`,
 		`gpu features: ${features}`,
 		...calibrationSection(input.calibration),
-		...validationSection(input.adaptiveValidation),
 		`PREFS: ${preferences}`
 	];
 	return lines.join('\n');

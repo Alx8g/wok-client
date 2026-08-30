@@ -504,16 +504,6 @@ export function describeManualBackendFailures(
 	return `The manually selected ${selection.backend} backend crashed its GPU process ${times} recently. Manual selections are never quarantined; switch the graphics backend to Auto if the crashes continue.`;
 }
 
-/** @deprecated Use recordGraphicsGpuFailure for an explicitly observed GPU-process failure. */
-export function recordGraphicsFailure(
-	state: GraphicsProfileState,
-	backend: AppliedGraphicsBackend,
-	reason: string,
-	now: number = Date.now()
-): GraphicsProfileState {
-	return recordGraphicsGpuFailure(state, backend, reason, now);
-}
-
 export function recordGraphicsLaunchInterruption(
 	state: GraphicsProfileState,
 	kind: GraphicsLaunchInterruptionKind,
@@ -558,14 +548,6 @@ export function recoverInterruptedGraphicsLaunch(
 		reason ?? `The previous ${selectionLabel} ${state.lastAppliedBackend} launch ended before a success or GPU-failure signal was recorded.`,
 		now
 	);
-}
-
-/** @deprecated Interrupted launches are unknown outcomes, not automatic GPU failures. */
-export function recoverInterruptedAutoLaunch(
-	state: GraphicsProfileState,
-	now: number = Date.now()
-): GraphicsProfileState {
-	return recoverInterruptedGraphicsLaunch(state, undefined, now);
 }
 
 function backendSupportedOnPlatform(backend: AppliedGraphicsBackend, platform: NodeJS.Platform): boolean {

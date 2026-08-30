@@ -232,7 +232,7 @@ function setOverlayVisible(visible: boolean) {
 
 function createOverlay(): HTMLPreElement {
 	const element = document.createElement('pre');
-	element.id = 'crankshaftPerformanceOverlay';
+	element.id = 'wokPerformanceOverlay';
 	element.setAttribute('aria-label', 'WOK Client performance and network diagnostics');
 	// This overlay prints the real name it is searching for, so the identity engine must leave it
 	// alone; rewriting it would make the one diagnostic that proves the feature works agree with
@@ -310,7 +310,6 @@ export function startPerformanceMonitor(info: GraphicsRuntimeInfo) {
 	window.addEventListener('keydown', handleOverlayHotkey, true);
 	window.addEventListener('beforeunload', handleBeforeUnload, { once: true });
 	window.wokPerformance = performanceApi;
-	window.crankshaftPerformance = performanceApi;
 	renderOverlay();
 	startSampling();
 }
@@ -328,7 +327,6 @@ export function stopPerformanceMonitor() {
 	performanceStats.reset();
 	reportedPingStats.reset();
 	if (window.wokPerformance === performanceApi) delete window.wokPerformance;
-	if (window.crankshaftPerformance === performanceApi) delete window.crankshaftPerformance;
 	runtimeInfo = undefined;
 	monitorStarted = false;
 	overlayVisible = true;

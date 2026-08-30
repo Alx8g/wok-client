@@ -28,12 +28,12 @@ test('phase 1 copies only the startup-critical top-level allowlist and writes no
 	writeTestFile(join(source, 'notes.txt'), 'not required during startup');
 	writeTestFile(join(source, 'swapper', 'textures', 'weapon.png'), 'texture');
 
-	const result = migrateLegacyConfigsPhaseOne(destination, [{ label: 'Crankshaft AppData', path: source }]);
+	const result = migrateLegacyConfigsPhaseOne(destination, [{ label: 'Legacy AppData profile', path: source }]);
 
 	assert.equal(result.completed, false);
 	assert.equal(result.copiedFiles, 2);
 	assert.equal(result.errors, 0);
-	assert.deepEqual(result.deferredSources, [{ label: 'Crankshaft AppData', path: source }]);
+	assert.deepEqual(result.deferredSources, [{ label: 'Legacy AppData profile', path: source }]);
 	assert.equal(readFileSync(join(destination, 'settings.json'), 'utf-8'), '{"fpsUncap":true}');
 	assert.equal(readFileSync(join(destination, 'filters.txt'), 'utf-8'), 'legacy filters');
 	assert.equal(existsSync(join(destination, 'future-config.json')), false);
@@ -53,7 +53,7 @@ test('phase 2 copies deferred top-level files and directory trees without deleti
 	writeTestFile(join(source, 'scripts', 'tracker.json'), '{}');
 	writeTestFile(join(source, 'css', 'custom.css'), 'body {}');
 
-	const phaseOne = migrateLegacyConfigsPhaseOne(destination, [{ label: 'Crankshaft AppData', path: source }]);
+	const phaseOne = migrateLegacyConfigsPhaseOne(destination, [{ label: 'Legacy AppData profile', path: source }]);
 	const phaseTwo = await migrateLegacyConfigsPhaseTwo(destination, phaseOne.deferredSources);
 
 	assert.equal(phaseOne.copiedFiles, 1);

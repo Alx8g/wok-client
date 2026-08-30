@@ -56,11 +56,14 @@ const EXCLUDED_TAGS = new Set([
 /** The slice of Node the engine touches, so tests can pass literals. */
 export interface IdentityRewriteNode {
 	childNodes?: ArrayLike<IdentityRewriteNode>;
+	/** DOM parent, present in the renderer and optional in pure test nodes. */
+	parentNode?: IdentityRewriteNode | null;
 	/** Text node contents. */
 	data?: string;
 	hasAttribute?(name: string): boolean;
 	isConnected?: boolean;
 	nodeType: number;
+	setAttribute?(name: string, value: string): void;
 	tagName?: string;
 }
 
@@ -80,9 +83,24 @@ export interface IdentityRewriteObserver {
 /** Returns the replacement text, or undefined when the input needs no change. */
 export type IdentityTextRewriter = (text: string) => string | undefined;
 
+/** A range in a rendered text node that belongs to the local identity. */
+export interface IdentityTextFragment {
+	end: number;
+	start: number;
+}
+
+/** Finds only the display identity fragments, leaving surrounding chat or row text untouched. */
+export type IdentityTextFragmentFinder = (text: string) => readonly IdentityTextFragment[];
+
+/** Marker shared by the DOM decoration engine and its stylesheet. */
+export const IDENTITY_RGB_MARKER_ATTRIBUTE = 'data-wok-identity-rgb';
+export const IDENTITY_RGB_CLASS = 'wok-identity-rgb';
+
 export interface IdentityRewriteRules {
 	/** The real clan tags to look for, without brackets. */
 	clans: readonly string[];
+	/** Keep same-value matches as fragments so a renderer can decorate the real identity. */
+	decorateUnchanged?: boolean;
 	/** What to show instead of the real clan tag. '' leaves clan tags alone. */
 	displayClan: string;
 	/** What to show instead of the real name. '' leaves names alone. */
@@ -100,11 +118,11 @@ function escapeForRegExp(value: string): string {
  * no-op that would only cost time), and put the longest first so alternation prefers the most
  * specific match.
  */
-function prepareNeedles(values: readonly string[], replacement: string): string[] {
+function prepareNeedles(values: readonly string[], replacement: string, keepReplacement = false): string[] {
 	const unique = new Set<string>();
 	for (const value of values) {
 		if (typeof value !== 'string') continue;
-		if (value === '' || value === replacement) continue;
+		if (value === '' || (!keepReplacement && value === replacement)) continue;
 		unique.add(value);
 	}
 	return [...unique].sort((first, second) => second.length - first.length);
@@ -114,26 +132,90 @@ function alternation(needles: readonly string[]): string {
 	return needles.map(escapeForRegExp).join('|');
 }
 
+function replaceMatchesWithFragments(
+	text: string,
+	fragments: readonly IdentityTextFragment[],
+	pattern: RegExp,
+	replacement: string
+): IdentityTextRewrite {
+	pattern.lastIndex = 0;
+	const matches: IdentityTextFragment[] = [];
+	for (const match of text.matchAll(pattern)) {
+		const start = match.index;
+		if (start !== undefined && match[0].length > 0) matches.push({ end: start + match[0].length, start });
+	}
+	if (matches.length === 0) return { fragments, text };
+
+	let cursor = 0;
+	let next = '';
+	for (const match of matches) {
+		next += text.slice(cursor, match.start) + replacement;
+		cursor = match.end;
+	}
+	next += text.slice(cursor);
+
+	const retained = fragments.flatMap(fragment => {
+		if (matches.some(match => match.start < fragment.end && match.end > fragment.start)) return [];
+		const shift = matches
+			.filter(match => match.end <= fragment.start)
+			.reduce((total, match) => total + replacement.length - (match.end - match.start), 0);
+		return [{ start: fragment.start + shift, end: fragment.end + shift }];
+	});
+	let shift = 0;
+	const additions = matches.map(match => {
+		const result = { start: match.start + shift, end: match.start + shift + replacement.length };
+		shift += replacement.length - (match.end - match.start);
+		return result;
+	});
+	return { fragments: [...retained, ...additions].sort((first, second) => first.start - second.start), text: next };
+}
+
+function mergeIdentityFragments(
+	text: string,
+	fragments: readonly IdentityTextFragment[],
+	displayClan: string
+): IdentityTextFragment[] {
+	const sorted = [...fragments].sort((first, second) => first.start - second.start || second.end - first.end);
+	const isClan = (fragment: IdentityTextFragment) => {
+		const value = text.slice(fragment.start, fragment.end).trim();
+		return value === displayClan || value === `[${displayClan}]`;
+	};
+	const merged: IdentityTextFragment[] = [];
+	for (const fragment of sorted) {
+		const previous = merged.at(-1);
+		if (!previous) {
+			merged.push({ ...fragment });
+			continue;
+		}
+		if (fragment.start <= previous.end) {
+			previous.end = Math.max(previous.end, fragment.end);
+			continue;
+		}
+		const between = text.slice(previous.end, fragment.start);
+		if (displayClan !== '' && between.trim() === '' && isClan(previous) !== isClan(fragment)) previous.end = fragment.end;
+		else merged.push({ ...fragment });
+	}
+	return merged;
+}
+
+/** A rewrite result with exact ranges for the custom identity in the resulting text. */
+export interface IdentityTextRewrite {
+	fragments: readonly IdentityTextFragment[];
+	text: string;
+}
+
+/** Detailed form used by the RGB decorator; the ordinary rewriter remains text-only. */
+export type IdentityTextRewriteResolver = (text: string) => IdentityTextRewrite | undefined;
+
 /**
- * Build the rewriter for one identity. Returns undefined when there is nothing to do - nothing
- * set, or the custom value is already what Krunker prints - so callers can skip starting an
- * engine at all.
- *
- * Name matching is case-sensitive and token-bounded. Krunker sometimes upper-cases names with CSS
- * (`text-transform`), which does not touch the text itself, so the match still lands and the
- * replacement inherits the same styling.
- *
- * Clan tags are matched three ways, all of them narrow on purpose, because a two-character tag is
- * far too short to replace wherever it happens to appear in chat:
- *   - bracketed, `[WOK]`, which is how Krunker prints a tag inline;
- *   - as the entire contents of an element, which is how a tag rendered in its own span reads
- *     when the brackets come from CSS;
- *   - immediately before the player's real name, which is the remaining layout.
+ * Build the text rewriter and preserve the ranges that came from each identity replacement. Keeping
+ * this beside the ordinary parser means RGB styling cannot accidentally infer a user's name from
+ * unrelated chat text.
  */
-export function createIdentityTextRewriter(rules: Readonly<IdentityRewriteRules>): IdentityTextRewriter | undefined {
-	const { displayClan, displayName } = rules;
-	const nameNeedles = displayName === '' ? [] : prepareNeedles(rules.names, displayName);
-	const clanNeedles = displayClan === '' ? [] : prepareNeedles(rules.clans, displayClan);
+export function createIdentityTextRewrite(rules: Readonly<IdentityRewriteRules>): IdentityTextRewriteResolver | undefined {
+	const { decorateUnchanged = false, displayClan, displayName } = rules;
+	const nameNeedles = displayName === '' ? [] : prepareNeedles(rules.names, displayName, decorateUnchanged);
+	const clanNeedles = displayClan === '' ? [] : prepareNeedles(rules.clans, displayClan, decorateUnchanged);
 	if (nameNeedles.length === 0 && clanNeedles.length === 0) return undefined;
 
 	const namePattern = nameNeedles.length === 0
@@ -142,45 +224,63 @@ export function createIdentityTextRewriter(rules: Readonly<IdentityRewriteRules>
 	const bracketedClanPattern = clanNeedles.length === 0
 		? undefined
 		: new RegExp(`\\[(?:${alternation(clanNeedles)})\\]`, 'gu');
-
-	// The tag-then-name layout needs the *real* names, which exist whether or not the name itself
-	// is being replaced, so this pattern is built from rules.names rather than nameNeedles.
 	const realNames = prepareNeedles(rules.names, '');
 	const clanBeforeNamePattern = clanNeedles.length === 0 || realNames.length === 0
 		? undefined
 		: new RegExp(`(?<![${IDENTIFIER_CHARACTER_CLASS}])(?:${alternation(clanNeedles)})(?=\\s*(?:${alternation(realNames)})(?![${IDENTIFIER_CHARACTER_CLASS}]))`, 'gu');
-
 	const clanSet = new Set(clanNeedles);
-	// Cheap gate: most text nodes in a running game are numbers and single words, and skipping
-	// them costs one length check plus a couple of substring searches instead of a regex pass.
 	const gates = [...nameNeedles, ...clanNeedles];
 	const shortestGate = Math.min(...gates.map(gate => gate.length));
 
 	return text => {
-		if (text.length < shortestGate) return undefined;
-		let gated = false;
-		for (const gate of gates) {
-			if (text.includes(gate)) {
-				gated = true;
-				break;
-			}
-		}
-		if (!gated) return undefined;
-
+		if (text.length < shortestGate || !gates.some(gate => text.includes(gate))) return undefined;
 		let next = text;
+		let fragments: IdentityTextFragment[] = [];
 		if (clanNeedles.length > 0) {
 			const trimmed = next.trim();
-			if (clanSet.has(trimmed)) next = next.replace(trimmed, () => displayClan);
-			else {
-				if (bracketedClanPattern) next = next.replace(bracketedClanPattern, () => `[${displayClan}]`);
-				if (clanBeforeNamePattern) next = next.replace(clanBeforeNamePattern, () => displayClan);
+			if (clanSet.has(trimmed)) {
+				const result = replaceMatchesWithFragments(next, fragments, new RegExp(escapeForRegExp(trimmed), 'gu'), displayClan);
+				next = result.text;
+				fragments = result.fragments as IdentityTextFragment[];
+			} else {
+				if (bracketedClanPattern) {
+					const result = replaceMatchesWithFragments(next, fragments, bracketedClanPattern, `[${displayClan}]`);
+					next = result.text;
+					fragments = result.fragments as IdentityTextFragment[];
+				}
+				if (clanBeforeNamePattern) {
+					const result = replaceMatchesWithFragments(next, fragments, clanBeforeNamePattern, displayClan);
+					next = result.text;
+					fragments = result.fragments as IdentityTextFragment[];
+				}
 			}
 		}
-		// Names last: the clan patterns above look for the real name as an anchor, so they have to
-		// run while it is still there.
-		if (namePattern) next = next.replace(namePattern, () => displayName);
-		return next === text ? undefined : next;
+		if (namePattern) {
+			const result = replaceMatchesWithFragments(next, fragments, namePattern, displayName);
+			next = result.text;
+			fragments = result.fragments as IdentityTextFragment[];
+		}
+		return next === text && (!decorateUnchanged || fragments.length === 0)
+			? undefined
+			: { fragments: mergeIdentityFragments(next, fragments, displayClan), text: next };
 	};
+}
+
+/** Build the legacy text-only API from the detailed parser. */
+export function createIdentityTextRewriter(rules: Readonly<IdentityRewriteRules>): IdentityTextRewriter | undefined {
+	const rewrite = createIdentityTextRewrite(rules);
+	return rewrite ? text => rewrite(text)?.text : undefined;
+}
+
+export interface IdentityRewriteApplication {
+	/** Node whose data is the applied replacement, used to recognize observer echoes. */
+	node: IdentityRewriteNode;
+	/** Optional connected node used to prune an application whose source was split into DOM. */
+	connectedNode?: IdentityRewriteNode;
+	applied: string;
+	original: string;
+	/** Restore the source node and remove any DOM decoration. Must be safe to call once. */
+	restore(): void;
 }
 
 export interface IdentityRewriteEngineOptions {
@@ -192,6 +292,10 @@ export interface IdentityRewriteEngineOptions {
 	/** Tracked nodes tolerated before detached ones are swept out. */
 	pruneThreshold?: number;
 	rewrite: IdentityTextRewriter;
+	/** Optional detailed result used when the renderer wants to decorate exact replacement ranges. */
+	rewriteDetailed?: IdentityTextRewriteResolver;
+	/** Applies a detailed rewrite, optionally replacing the text node with marked DOM fragments. */
+	applyRewrite?(node: IdentityRewriteNode, original: string, rewrite: IdentityTextRewrite): IdentityRewriteApplication | undefined;
 	root: IdentityRewriteNode;
 	/** Batching hook. requestAnimationFrame in the renderer. */
 	schedule(callback: () => void): unknown;
@@ -216,6 +320,8 @@ interface RewriteRecord {
 	applied: string;
 	/** Exactly what Krunker had written, so it can be handed back verbatim. */
 	original: string;
+	connectedNode?: IdentityRewriteNode;
+	restore?: () => void;
 }
 
 function isExcludedByDefault(element: IdentityRewriteNode): boolean {
@@ -267,12 +373,28 @@ export function startIdentityRewriteEngine(options: IdentityRewriteEngineOptions
 		// Recognising them here is what keeps this from being an infinite loop, and it is cheaper
 		// and safer than disconnecting and reconnecting the observer around every write.
 		if (record && current === record.applied) return;
+		if (record) {
+			record.restore?.();
+			tracked.delete(node);
+		}
 
-		const next = options.rewrite(current);
-		if (next === undefined || next === current) {
-			if (record) tracked.delete(node);
+		const detailed = options.rewriteDetailed?.(current);
+		const next = detailed?.text ?? options.rewrite(current);
+		if (next === undefined) return;
+		// A detailed rewrite can intentionally preserve the text while decorating its exact identity
+		// ranges (the RGB toggle with no custom alias). Give that renderer hook the first chance to
+		// apply before treating same-value text as a no-op.
+		const application = detailed && options.applyRewrite?.(node, current, detailed);
+		if (application) {
+			tracked.set(application.node, {
+				applied: application.applied,
+				connectedNode: application.connectedNode,
+				original: application.original,
+				restore: application.restore
+			});
 			return;
 		}
+		if (next === current) return;
 		node.data = next;
 		tracked.set(node, { applied: next, original: current });
 	}
@@ -280,8 +402,8 @@ export function startIdentityRewriteEngine(options: IdentityRewriteEngineOptions
 	/** Detached nodes (a chat line that scrolled off) are dropped so the map cannot grow forever. */
 	function prune(): void {
 		if (tracked.size <= pruneThreshold) return;
-		for (const node of [...tracked.keys()]) {
-			if (!node.isConnected) tracked.delete(node);
+		for (const [node, record] of tracked) {
+			if (!(record.connectedNode ?? node).isConnected) tracked.delete(node);
 		}
 	}
 
@@ -342,7 +464,10 @@ export function startIdentityRewriteEngine(options: IdentityRewriteEngineOptions
 			for (const [node, record] of tracked) {
 				// Only hand back nodes still carrying the engine's own value; anything Krunker has
 				// rewritten since is already correct and must not be clobbered.
-				if ((node.data ?? '') === record.applied) node.data = record.original;
+				if (record.restore || (node.data ?? '') === record.applied) {
+					if (record.restore) record.restore();
+					else node.data = record.original;
+				}
 			}
 			tracked.clear();
 		},

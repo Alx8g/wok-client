@@ -610,7 +610,7 @@ test('result page displays low-confidence and backend-verification evidence with
 		]
 	});
 	const result = state.results[0];
-	const page = buildCalibrationResultPage([result], result, '<svg></svg>', false);
+	const page = buildCalibrationResultPage([result], result, '<svg></svg>');
 
 	assert.match(page, /Lower confidence/);
 	assert.match(page, /window lost focus/);
@@ -636,7 +636,7 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 280, webglRenderer: 'Unknown renderer' });
 	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 282, webglRenderer: 'Unknown renderer' });
 	const finalized = finalizeCalibration(state);
-	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>');
 
 	assert.match(page, /GPU completion measured directly \(p95 4\.20 ms\)/);
 	assert.match(page, /GPU completion inferred from bounded-queue frame delivery/);
@@ -756,7 +756,7 @@ test('the results page explains an artifact-affected verdict instead of claiming
 	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 151.15, webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)' });
 	const finalized = finalizeCalibration(state);
 
-	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>');
 	assert.ok(page.includes('could not compare these fairly'), 'summary must explain the invalidated comparison');
 	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
 	assert.ok(page.includes('not comparable'), 'the artifact score must not print as a number');

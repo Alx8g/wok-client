@@ -1,6 +1,6 @@
 /**
  * One-time settings baselines. Existing settings.json files can carry defaults this project no
- * longer ships: Terms-sensitive features that legacy Crankshaft profiles had enabled, and
+ * longer ships: product defaults inherited from legacy client profiles, and
  * safeFlags_gpuRasterizing from its default-on era (--enable-gpu-rasterization is a no-op on
  * modern Chromium except for forcing past the driver blocklist, audit A5).
  *
@@ -18,11 +18,11 @@ export interface SettingsBaselineMarker {
 	version: number;
 }
 
-/** Baseline 1: Terms-sensitive features reset once for pre-baseline (legacy Crankshaft/WOK) profiles. */
+/** Baseline 1: current product defaults applied once to pre-baseline profiles. */
 const SAFE_FEATURE_DEFAULTS: ReadonlyArray<readonly [string, UserPrefValue]> = [
 	['competitionAutomation', false],
 	['customFilters', false],
-	['hideAds', 'off'],
+	['hideAds', 'block'],
 	['matchmaker', false],
 	['resourceSwapper', false]
 ];

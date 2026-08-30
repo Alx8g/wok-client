@@ -186,14 +186,14 @@
 -->
 <link id="wokThemeBase" rel="stylesheet" href="">
 <link id="wokThemeGame" rel="stylesheet" href="">
-<link id="crankshaftCustomCSS" rel="stylesheet" href="">
+<link id="wokCustomCSS" rel="stylesheet" href="">
 
 <script>
 function apply(id) {
 	const none = id === 'None';
 	document.getElementById('wokThemeBase').href = none ? '' : '../assets/theme-base.css';
 	document.getElementById('wokThemeGame').href = none ? '' : '../assets/theme-game.css';
-	document.getElementById('crankshaftCustomCSS').href = none ? '' : `../assets/theme-${id}.css`;
+	document.getElementById('wokCustomCSS').href = none ? '' : `../assets/theme-${id}.css`;
 	document.getElementById('active').textContent = id;
 	location.hash = id;
 }

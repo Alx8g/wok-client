@@ -9,12 +9,14 @@ import {
 	formatCustomIdentityLabel,
 	hasCustomIdentity,
 	isCustomIdentityPreferenceKey,
+	isCustomIdentityTextPreferenceKey,
 	isPlausibleRealName,
 	mergeRealIdentityCandidates,
 	parseCustomIdentityPreference,
 	readGameActivityName,
 	resolveConfiguredRealIdentity,
 	resolveCustomIdentity,
+	resolveCustomIdentityRgbCycle,
 	sanitizeCustomClan,
 	sanitizeCustomName
 } from '../src/custom-identity.ts';
@@ -94,13 +96,27 @@ test('accepts only already-clean stored values', () => {
 	assert.equal(parseCustomIdentityPreference('customClan', 'WOKKK!'), undefined);
 	assert.equal(parseCustomIdentityPreference('customName', 42), undefined);
 	assert.equal(parseCustomIdentityPreference('customName', undefined), undefined);
+	assert.equal(parseCustomIdentityPreference('customIdentityRgbCycle', true), true);
+	assert.equal(parseCustomIdentityPreference('customIdentityRgbCycle', false), false);
+	assert.equal(parseCustomIdentityPreference('customIdentityRgbCycle', 'true'), undefined);
+});
+
+test('RGB styling is opt-in and accepts only a boolean preference', () => {
+	assert.equal(resolveCustomIdentityRgbCycle(undefined), false);
+	assert.equal(resolveCustomIdentityRgbCycle({}), false);
+	assert.equal(resolveCustomIdentityRgbCycle({ customIdentityRgbCycle: true }), true);
+	assert.equal(resolveCustomIdentityRgbCycle({ customIdentityRgbCycle: false }), false);
+	assert.equal(resolveCustomIdentityRgbCycle({ customIdentityRgbCycle: 'true' as never }), false);
 });
 
 test('the manual real-identity keys follow the same rules as the custom ones', () => {
 	for (const key of ['customName', 'customClan', 'realName', 'realClan']) {
 		assert.equal(isCustomIdentityPreferenceKey(key), true, key);
 	}
+	assert.equal(isCustomIdentityPreferenceKey('customIdentityRgbCycle'), true);
 	assert.equal(isCustomIdentityPreferenceKey('menuTimer'), false);
+	assert.equal(isCustomIdentityTextPreferenceKey('customName'), true);
+	assert.equal(isCustomIdentityTextPreferenceKey('customIdentityRgbCycle'), false);
 
 	assert.equal(parseCustomIdentityPreference('realName', 'Rocketeer'), 'Rocketeer');
 	assert.equal(parseCustomIdentityPreference('realClan', 'WOK'), 'WOK');
@@ -116,8 +132,9 @@ test('the manual real-identity keys follow the same rules as the custom ones', (
 });
 
 test('the preference loader keeps the local identity keys', () => {
-	assert.deepEqual(parseUserPreferencePatch({ customClan: 'WOK', customName: 'Rocketeer' }), {
+	assert.deepEqual(parseUserPreferencePatch({ customClan: 'WOK', customName: 'Rocketeer', customIdentityRgbCycle: true }), {
 		customClan: 'WOK',
+		customIdentityRgbCycle: true,
 		customName: 'Rocketeer'
 	});
 	assert.deepEqual(parseUserPreferencePatch({ customClan: '', customName: '' }), {

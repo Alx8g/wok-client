@@ -497,16 +497,15 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 export function buildCalibrationResultPage(
 	results: CalibrationResult[],
 	recommended: CalibrationResult | undefined,
-	markSvg: string,
-	wasCompetitiveModeEnabled: boolean
+	markSvg: string
 ): string {
 	const hasRecommendation = Boolean(recommended);
 	const groups = groupResultsByCandidate(results);
 	const retainedKnownGood = Boolean(recommended && !results.some(result => result.candidate.id === recommended.candidate.id));
 	if (recommended && retainedKnownGood) groups.unshift({ candidate: recommended.candidate, representative: recommended, trials: [recommended] });
 	const resultsHtml = groups.map(group => resultMarkup(group, recommended?.candidate.id)).join('');
-	const applyLabel = wasCompetitiveModeEnabled ? 'Apply new profile' : 'Enable Competitive mode';
-	const keepLabel = wasCompetitiveModeEnabled ? 'Keep previous profile' : 'Keep current settings';
+	const applyLabel = 'Apply new profile';
+	const keepLabel = 'Keep current profile';
 	const artifactAffected = results.some(result => (result.metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
 	const summary = recommended
 		? retainedKnownGood

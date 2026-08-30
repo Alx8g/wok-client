@@ -12,7 +12,7 @@
  * 1. Every selector belongs to a surface WOK adds to the page. Krunker's UI is themed by the game
  *    layer, which is checked against a committed inventory of the real stylesheets; here, where a
  *    Krunker class appears (.settingsBtn, .inputGrey2, .hostOpt) it is scoped under
- *    .Crankshaft-settings, i.e. inside the panel WOK builds, and that scoping is what makes it win
+ *    .wok-settings, i.e. inside the panel WOK builds, and that scoping is what makes it win
  *    over the game layer's rule for the same class.
  * 2. Every value is var(--wok-*, <the stock value>). A palette that omits a variable still
  *    renders, and the fallback is what the client looks like with no theme selected.
@@ -23,7 +23,7 @@
 
 /* --- settings panel shell ------------------------------------------------------------------ */
 
-.Crankshaft-settings {
+.wok-settings {
 	background: var(--wok-bg, transparent);
 	border-radius: var(--wok-radius, 0);
 	box-sizing: border-box;
@@ -32,32 +32,32 @@
 	padding: 12px 14px;
 }
 
-.Crankshaft-settings-nav {
+.wok-settings-nav {
 	border-right-color: var(--wok-border, rgba(255, 255, 255, .08));
 }
 
-.Crankshaft-settings-navitem {
+.wok-settings-navitem {
 	border-radius: var(--wok-radius, 0);
 	color: var(--wok-text-muted, rgba(255, 255, 255, .62));
 	transition-timing-function: var(--wok-ease, ease);
 }
 
-.Crankshaft-settings-navitem:hover {
+.wok-settings-navitem:hover {
 	background: var(--wok-surface-raised, rgba(255, 255, 255, .05));
 	color: var(--wok-text, #fff);
 }
 
-.Crankshaft-settings-navitem.active {
+.wok-settings-navitem.active {
 	background: var(--wok-accent-soft, rgba(251, 192, 45, .10));
 	border-left-color: var(--wok-accent, #FBC02D);
 	color: var(--wok-text, #fff);
 }
 
-.Crankshaft-settings .Crankshaft-setHed {
+.wok-settings .wok-set-heading {
 	color: var(--wok-text-muted, rgba(255, 255, 255, .6));
 }
 
-.Crankshaft-settings .Crankshaft-setBodH {
+.wok-settings .wok-set-body {
 	background: var(--wok-surface, transparent);
 	border: 1px solid var(--wok-border, transparent);
 	border-radius: var(--wok-radius, 0);
@@ -67,20 +67,20 @@
 /* --- settings rows -------------------------------------------------------------------------- */
 
 /* settings.css wins these with !important, so the theme has to match it to have any effect. */
-.Crankshaft-settings .settName,
-.Crankshaft-settings .settName .setting-title {
+.wok-settings .settName,
+.wok-settings .settName .setting-title {
 	color: var(--wok-text-muted, rgba(255, 255, 255, .6)) !important;
 }
 
-.Crankshaft-settings .setting.settName:not(.heading) {
+.wok-settings .setting.settName:not(.heading) {
 	border-bottom: 1px solid var(--wok-border, transparent);
 }
 
-.Crankshaft-settings .setting-desc-new {
+.wok-settings .setting-desc-new {
 	color: var(--wok-text-faint, rgba(255, 255, 255, .4)) !important;
 }
 
-.Crankshaft-settings .setting-desc-new a {
+.wok-settings .setting-desc-new a {
 	color: var(--wok-accent, inherit);
 }
 
@@ -88,7 +88,7 @@
  * Group headings. The accent has to be !important because the row also matches the .settName
  * rule above, which settings.css already marks !important.
  */
-.Crankshaft-settings .setting.heading .setting-title {
+.wok-settings .setting.heading .setting-title {
 	color: var(--wok-accent, #FBC02D) !important;
 	letter-spacing: var(--wok-heading-spacing, .10em);
 	text-transform: var(--wok-heading-transform, uppercase);
@@ -102,32 +102,32 @@
  * them with its accent would make "applies instantly" look exactly like "not recommended" in any
  * theme whose accent is warm, so no theme gets to touch these colours.
  */
-.Crankshaft-settings .setting .desc-icon {
+.wok-settings .setting .desc-icon {
 	border-radius: var(--wok-radius, 5px) !important;
 }
 
 /* --- controls inside the panel -------------------------------------------------------------- */
 
-.Crankshaft-settings .settingsBtn {
+.wok-settings .settingsBtn {
 	background: var(--wok-surface-raised, transparent);
 	border: 1px solid var(--wok-border, transparent);
 	border-radius: var(--wok-radius, 0);
 	color: var(--wok-text-muted, inherit);
 }
 
-.Crankshaft-settings .settingsBtn:hover {
+.wok-settings .settingsBtn:hover {
 	border-color: var(--wok-accent, currentColor);
 	color: var(--wok-text, #fff);
 }
 
-.Crankshaft-settings .inputGrey2 {
+.wok-settings .inputGrey2 {
 	background: var(--wok-surface-raised, transparent);
 	border: 1px solid var(--wok-border, transparent);
 	border-radius: var(--wok-radius, 0);
 	color: var(--wok-text, inherit);
 }
 
-.Crankshaft-settings select.inputGrey2 option {
+.wok-settings select.inputGrey2 option {
 	background: var(--wok-surface, #1a1a1a);
 	color: var(--wok-text, #fff);
 }
@@ -138,16 +138,16 @@
  * part of a toggle a theme has anything to say about. revert is the fallback because the stock
  * value belongs to Krunker's sheet, not to one this project can name.
  */
-.Crankshaft-settings .setting input:checked + .slider.round {
+.wok-settings .setting input:checked + .slider.round {
 	background-color: var(--wok-accent, revert);
 }
 
-.Crankshaft-settings .crankshaft-multisel-parent {
+.wok-settings .wok-multiselect {
 	background: var(--wok-surface-raised, #232323);
 	border-radius: var(--wok-radius, 10px);
 }
 
-.Crankshaft-settings .crankshaft-multisel-parent label.hostOpt {
+.wok-settings .wok-multiselect label.hostOpt {
 	border-radius: var(--wok-radius, 0);
 	color: var(--wok-text-muted, inherit);
 }
@@ -158,35 +158,35 @@
  * white-on-white is all the user gets. Scoped to the panel, so the game's own lists keep the
  * outlined treatment the game layer gives them.
  */
-.Crankshaft-settings .crankshaft-multisel-parent .optName {
+.wok-settings .wok-multiselect .optName {
 	color: var(--wok-text, #fff);
 }
 
-.Crankshaft-settings span.optDescription {
+.wok-settings span.optDescription {
 	color: var(--wok-text-faint, #fff);
 }
 
-.Crankshaft-settings .crankshaft-button-holder .buttons-title {
+.wok-settings .wok-button-holder .buttons-title {
 	color: var(--wok-text-faint, inherit);
 }
 
 /* --- floating toasts and the refresh notice ------------------------------------------------- */
 
-.crankshaft-holder-l,
-.crankshaft-holder-r,
-.crankshaft-holder-update {
+.wok-holder-left,
+.wok-holder-right,
+.wok-holder-update {
 	color: var(--wok-text-muted, rgba(255, 255, 255, .7));
 	font-family: var(--wok-font, inherit);
 }
 
-.crankshaft-holder-update {
+.wok-holder-update {
 	background-color: var(--wok-surface, black);
 	border: 1px solid var(--wok-border, transparent);
 	border-radius: var(--wok-radius-lg, .5rem);
 	box-shadow: var(--wok-shadow, none);
 }
 
-.crankshaft-holder-update .restart-msg {
+.wok-holder-update .restart-msg {
 	color: var(--wok-danger, inherit);
 }
 
@@ -247,11 +247,11 @@
 	color: var(--wok-accent-contrast, white);
 }
 
-.keyIcon.crankshaftKeyIcon {
+.keyIcon.wok-key-icon {
 	font-family: var(--wok-font-mono, inherit);
 }
 
-.material-icons.crankshaftUnbindButton {
+.material-icons.wok-unbind-button {
 	color: var(--wok-danger, red);
 }
 
@@ -315,11 +315,11 @@
  * The splash stage carries a fixed image, so a theme cannot repaint it. What it can do is own the
  * surface the stage sits on and sign the bottom edge with the accent.
  */
-.crankshaft-loading-background {
+.wok-loading-background {
 	background-color: var(--wok-bg, #000000);
 }
 
-.crankshaft-loading-background::after {
+.wok-loading-background::after {
 	background: var(--wok-accent, #FBC02D);
 	bottom: 0;
 	content: '';

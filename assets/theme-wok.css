@@ -54,7 +54,7 @@
 }
 
 /* A single accent rail along the top edge, so the theme announces itself once per surface. */
-.Crankshaft-settings {
+.wok-settings {
 	border-top: 2px solid var(--wok-accent);
 }
 

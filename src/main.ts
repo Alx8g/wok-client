@@ -8,6 +8,8 @@ import { aboutSubmenu, macAppMenuArr, csMenuTemplate, constructDevtoolsSubmenu }
 import { buildDiagnosticsReport } from './diagnostics-report.ts';
 import { applyCommandLineSwitches } from './switches.ts';
 import RequestHandler from './requesthandler.ts';
+import { applyRuntimeWindowSettings } from './runtime-window-settings.ts';
+import { buildRelaunchArguments, parseReopenSettingsCategory } from './settings-relaunch.ts';
 import { runBeforeDeadline } from './absolute-deadline.ts';
 import { fetchCalibrationGraphicsInfo, fetchRuntimeGraphicsInfo } from './gpu-info-policy.ts';
 import { createIntroGameWindowHandoff, getIntroWindowBounds, selectIntroSource, startIntroSequence, type IntroSequence } from './intro-window.ts';
@@ -46,7 +48,7 @@ import {
 	type GraphicsSelection
 } from './graphics-profile.ts';
 import { createGraphicsStabilityConfirmation } from './graphics-stability.ts';
-import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
+import { APP_ID, APP_PROTOCOL, LEGACY_APP_PROTOCOL, REPO_URL, WEBSITE_URL } from './branding.ts';
 import { migrateLegacyConfigsPhaseOne, migrateLegacyConfigsPhaseTwo, type LegacyConfigSource } from './config-migration.ts';
 import {
 	CALIBRATION_BENCHMARK_MS,
@@ -334,15 +336,15 @@ if (!gotTheLock) {
 let deferredMigrationSources: LegacyConfigSource[] = [];
 try {
 	const migration = migrateLegacyConfigsPhaseOne(configPath, [
-		{ label: 'Crankshaft AppData', path: legacyRoamingConfigPath },
-		{ label: 'Crankshaft Documents', path: legacyDocumentsConfigPath }
+		{ label: 'Legacy AppData profile', path: legacyRoamingConfigPath },
+		{ label: 'Legacy Documents profile', path: legacyDocumentsConfigPath }
 	]);
 	deferredMigrationSources = migration.deferredSources;
 	if (migration.foundSources.length > 0) {
 		console.log(`Migrated ${migration.copiedFiles} startup-critical legacy configuration files from ${migration.foundSources.join(', ')}; preserved ${migration.skippedConflicts} existing WOK Client files. Remaining files migrate in the background after the game window opens.`);
 	}
 } catch (error) {
-	console.error('Failed to migrate legacy Crankshaft configuration. The original files were left untouched.', error);
+	console.error('Failed to migrate legacy client configuration. The original files were left untouched.', error);
 }
 
 const swapperPath = pathJoin(configPath, 'swapper');
@@ -364,8 +366,10 @@ const settingsSkeleton = {
 	fpsUncap: true,
 	rawMouseInput: true,
 	graphicsBackend: 'auto',
-	competitiveMode: false,
-	performanceOverlay: false,
+	// Mark selected menu controls and promotions as hidden while preserving their original DOM.
+	wokMenuDeclutter: true,
+	// Public screen only: pin fixed categories, then show and sort geographic regions by ping.
+	wokPublicServerPingSort: true,
 	motionBlur: false,
 	motionBlurStrength: 50,
 	motionBlurQuality: 'native',
@@ -375,6 +379,7 @@ const settingsSkeleton = {
 	// one. realName/realClan are the manual fallback for what to search for; normally detected.
 	customName: '',
 	customClan: '',
+	customIdentityRgbCycle: false,
 	realName: '',
 	realClan: '',
 	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless
@@ -424,7 +429,7 @@ const settingsSkeleton = {
 	matchmaker_minPlayers: 1,
 	matchmaker_maxPlayers: 6,
 	matchmaker_minRemainingTime: 120,
-	hideAds: 'off',
+	hideAds: 'block',
 	customFilters: false,
 	regionTimezones: false,
 	immersiveSplashBackgroundColor: '#0A0A0A'
@@ -657,7 +662,8 @@ if (calibrationState && calibrationProvisionalExpired(calibrationState)) {
 	writeCalibrationStateSync(calibrationState);
 }
 
-const activeCalibrationSelection = userPrefs.competitiveMode && calibrationState?.status === 'complete'
+// A measured backend/frame policy is useful independently of the removed visual-reduction preset.
+const activeCalibrationSelection = calibrationState?.status === 'complete'
 	? calibrationState.activeSelection
 	: undefined;
 const calibratedCandidate = queuedCalibrationCandidate ?? activeCalibrationSelection?.candidate;
@@ -674,7 +680,7 @@ const graphicsSelection: GraphicsSelection = process.argv.includes('--safe-graph
 			preference: 'auto',
 			reason: queuedCalibrationCandidate
 				? `Running calibration profile ${calibratedCandidate.id}.`
-				: `Using calibrated Competitive mode profile ${calibratedCandidate.id}.`,
+				: `Using calibrated graphics profile ${calibratedCandidate.id}.`,
 			source: 'calibration'
 		}
 		: selectGraphicsBackend(userPrefs.graphicsBackend, graphicsProfileState);
@@ -686,6 +692,9 @@ writeGraphicsProfileSync(graphicsProfileState);
 console.log(`Graphics profile: ${graphicsSelection.reason}`);
 
 let adaptiveValidationState = loadAdaptiveValidationState();
+// Adaptive validation belonged to the removed Competitive Mode flow. Keep legacy state readable,
+// but do not collect or prompt until it is redesigned around same-visual runtime profiles.
+const adaptiveGameplayValidationEnabled = false;
 
 function getAdaptiveValidationProfileIdentity(): AdaptiveValidationProfileIdentity | undefined {
 	const calibrationSignature = calibrationState?.signature;
@@ -708,8 +717,6 @@ function prepareCurrentAdaptiveValidationState(): AdaptiveValidationState | unde
 	adaptiveValidationState = preparedState;
 	return preparedState;
 }
-
-if (userPrefs.competitiveMode) prepareCurrentAdaptiveValidationState();
 
 function ensureFilterStorage() {
 	if (existsSync(filtersPath)) return;
@@ -795,7 +802,7 @@ if (typeof userPrefs.hideAds === 'boolean') {
 	if (userPrefs.hideAds === true) userPrefs.hideAds = 'hide'; else userPrefs.hideAds = 'off';
 }
 
-// Move untouched Crankshaft splash defaults to the WOK palette while preserving custom colours.
+// Move untouched legacy splash defaults to the WOK palette while preserving custom colours.
 if (userPrefs.immersiveSplashBackgroundColor === '#171717') {
 	userPrefs.immersiveSplashBackgroundColor = '#0A0A0A';
 	modifiedSettings = true;
@@ -809,6 +816,10 @@ if (settingsBaselinePlan.marker) {
 }
 
 let mainWindow: BrowserWindow;
+let requestHandler: RequestHandler | undefined;
+let requestHandlerStarted = false;
+let synchronizeDiscordRuntime: (() => void) | undefined;
+let pendingReopenSettingsCategory = parseReopenSettingsCategory(process.argv);
 let gpuFeatureStatus: Record<string, string> = {};
 
 async function loadMatchmakerPingTargets(signal: AbortSignal): Promise<unknown> {
@@ -1129,10 +1140,25 @@ function observeGraphicsLaunchRenderer(window: BrowserWindow, onRendererGone?: (
 	});
 }
 
-function relaunchClient() {
-	const args = process.argv.slice(1).filter(argument => argument !== '--safe-graphics');
+function relaunchClient(reopenSettingsCategory?: number) {
+	const args = buildRelaunchArguments(process.argv.slice(1), reopenSettingsCategory);
 	app.relaunch({ args });
 	app.exit(0);
+}
+
+async function persistSettingsAndRelaunch(reopenSettingsCategory?: number): Promise<void> {
+	if (settingsWriteTimer) {
+		clearTimeout(settingsWriteTimer);
+		settingsWriteTimer = undefined;
+		enqueueSettingsWrite();
+	}
+	await settingsWriteQueue;
+	const args = buildRelaunchArguments(process.argv.slice(1), reopenSettingsCategory);
+	app.relaunch({ args });
+	// User-triggered settings relaunches should run normal shutdown hooks so Discord, graphics
+	// health tracking, and any future cleanup finish cleanly. Calibration retains the immediate
+	// relaunch path above because its state machine persists each transition before calling it.
+	app.quit();
 }
 
 function persistCalibrationState(next: CalibrationState) {
@@ -1163,34 +1189,13 @@ async function requestCalibrationRunAndRelaunch(): Promise<void> {
 	relaunchClient();
 }
 
-/** Consent dialog shown when Competitive mode is switched on without a completed calibration (design §4.2.1). */
-async function offerCalibrationForCompetitiveEnable(): Promise<void> {
-	if (!mainWindow || mainWindow.isDestroyed()) return;
-	if (calibrationState?.status === 'complete' && !calibrationState.signatureStale) return;
-	try {
-		const result = await dialog.showMessageBox(mainWindow, {
-			buttons: ['Calibrate now', 'Use recommended settings'],
-			cancelId: 1,
-			defaultId: 0,
-			detail: 'Calibration takes under a minute and the app restarts a few times while renderer profiles are measured. Declining keeps Competitive mode on with the recommended settings; you can calibrate any time from Settings.',
-			message: 'Calibrate graphics for Competitive mode?',
-			noLink: true,
-			title: 'WOK Competitive mode',
-			type: 'question'
-		});
-		if (result.response === 0) await requestCalibrationRunAndRelaunch();
-	} catch (error) {
-		console.error('Failed to offer Competitive-mode calibration', error);
-	}
-}
-
 /** One-time post-first-session offer (design §4.2.3); declining persists and never re-prompts. */
 let calibrationOfferShownThisSession = false;
 
 async function maybeOfferPostSessionCalibration(): Promise<void> {
 	if (
 		calibrationOfferShownThisSession
-		|| !userPrefs.competitiveMode
+		|| !adaptiveGameplayValidationEnabled
 		|| !calibrationState
 		|| calibrationState.status !== 'uncalibrated'
 		|| calibrationState.calibrationOfferDeclinedAt !== undefined
@@ -1266,9 +1271,8 @@ async function handleProvisionalConfirmation(validation: AdaptiveValidationState
 		const beforeRollback = calibrationState;
 		const previousLabel = beforeRollback.previousSelection?.candidate.id ?? 'the automatic profile';
 		persistCalibrationState(rollbackCalibration(beforeRollback));
-		// The applied backend is also persisted as an explicit preference so it survives
-		// Competitive mode being switched off, so a rollback has to restore that preference too -
-		// otherwise the rejected backend would quietly come back the moment the mode was disabled.
+		// The applied backend is also persisted as an explicit preference, so a rollback must
+		// restore that preference or the rejected backend would return after restart.
 		const restoredBackend = beforeRollback.previousSelection?.candidate.backend;
 		if (restoredBackend && userPrefs.graphicsBackend !== restoredBackend) {
 			userPrefs.graphicsBackend = restoredBackend;
@@ -1310,7 +1314,7 @@ async function maybePromptAdaptiveRecalibration(): Promise<void> {
 	const state = adaptiveValidationState;
 	if (
 		adaptiveValidationPromptPending
-		|| !userPrefs.competitiveMode
+		|| !adaptiveGameplayValidationEnabled
 		|| !state
 		|| state.status !== 'complete'
 		|| state.classification !== 'recalibration-recommended'
@@ -1355,7 +1359,7 @@ async function maybePromptAdaptiveRecalibration(): Promise<void> {
 }
 
 ipcMain.handle('adaptiveValidation_recordSession', (event, value: unknown) => {
-	if (!userPrefs.competitiveMode || !isTrustedGameIpcSender(event)) return undefined;
+	if (!adaptiveGameplayValidationEnabled || !isTrustedGameIpcSender(event)) return undefined;
 	const currentState = prepareCurrentAdaptiveValidationState();
 	if (!currentState) return undefined;
 	const submission = parseAdaptiveValidationSubmission(value);
@@ -1437,15 +1441,57 @@ ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
 	const validUpdates = Object.fromEntries(
 		Object.entries(parsedUpdates).filter(([key]) => Object.hasOwn(userPrefs, key))
 	);
-	if (Object.keys(validUpdates).length === 0) return;
+	const changedKeys = Object.keys(validUpdates).filter(key => indexedUserPrefs[key] !== validUpdates[key]);
+	if (changedKeys.length === 0) return;
 
-	const enablingCompetitiveMode = validUpdates.competitiveMode === true && userPrefs.competitiveMode !== true;
 	Object.assign(userPrefs, validUpdates);
 	settingsRevision++;
 	scheduleSettingsWrite();
-	// Competitive-enable is a calibration consent entry point (design §4.2.1); declining still
-	// enables Competitive mode on the heuristic recommendation with adaptive validation watching.
-	if (enablingCompetitiveMode) void offerCalibrationForCompetitiveEnable();
+
+	// The preload owns live renderer hooks. Sending the validated complete snapshot keeps those
+	// hooks coherent when several controls change in the same animation frame.
+	mainWindow.webContents.send('settings_runtime_preferences', userPrefs);
+	if (changedKeys.includes('fullscreen') || changedKeys.includes('display')) applyLiveGameplayWindowSettings();
+	if (changedKeys.includes('discordRPC') || changedKeys.includes('extendedRPC')) synchronizeDiscordRuntime?.();
+});
+
+function validSettingsCategory(value: unknown): number | undefined {
+	return Number.isInteger(value) && Number(value) >= 0 && Number(value) < 6 ? Number(value) : undefined;
+}
+
+let settingsReloadInFlight = false;
+ipcMain.on('settingsUI_reload_game', (event, category: unknown) => {
+	if (!isTrustedGameIpcSender(event) || settingsReloadInFlight) return;
+	settingsReloadInFlight = true;
+	pendingReopenSettingsCategory = validSettingsCategory(category);
+	void (async () => {
+		try {
+			if (requestHandler) {
+				requestHandlerStarted = await requestHandler.reconfigure({
+					blockerEnabled: userPrefs.hideAds === 'block',
+					customFiltersEnabled: Boolean(userPrefs.customFilters),
+					defaultFilters: userPrefs.hideAds === 'block' ? readFileSync(pathJoin($assets, 'blockFilters.txt'), 'utf-8') : '',
+					swapperEnabled: Boolean(userPrefs.resourceSwapper)
+				});
+			}
+			mainWindow.reload();
+		} catch (error) {
+			console.error('Failed to apply settings before reloading the game', error);
+			mainWindow.reload();
+		} finally {
+			settingsReloadInFlight = false;
+		}
+	})();
+});
+
+let settingsRelaunchInFlight = false;
+ipcMain.on('settingsUI_relaunch_wok', (event, category: unknown) => {
+	if (!isTrustedGameIpcSender(event) || settingsRelaunchInFlight) return;
+	settingsRelaunchInFlight = true;
+	void persistSettingsAndRelaunch(validSettingsCategory(category)).catch(error => {
+		settingsRelaunchInFlight = false;
+		console.error('Failed to relaunch WOK after applying settings', error);
+	});
 });
 
 // Allow the trusted preload to quit the entire Electron process.
@@ -1488,6 +1534,26 @@ function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
 	// Explicit placement only when the target is not primary: Electron's own centring already does
 	// the right thing there, and leaving it alone keeps the default launch byte-identical.
 	return resolveGameplayWindowGeometry(userPrefs.fullscreen, display, windowScale, !isPrimary);
+}
+
+/** Move the existing Windows game window without replacing its renderer or network connection. */
+function applyLiveGameplayWindowSettings(): void {
+	if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
+	const { display } = getGameplayDisplay();
+	const geometry = resolveGameplayWindowGeometry(userPrefs.fullscreen, display, windowScale, true);
+	if (
+		typeof geometry.x !== 'number'
+		|| typeof geometry.y !== 'number'
+		|| typeof geometry.width !== 'number'
+		|| typeof geometry.height !== 'number'
+	) return;
+
+	applyRuntimeWindowSettings(mainWindow, userPrefs.fullscreen, {
+		height: geometry.height,
+		width: geometry.width,
+		x: geometry.x,
+		y: geometry.y
+	});
 }
 
 const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATION_BENCHMARK_MS + 5_000;
@@ -1643,8 +1709,7 @@ async function showCalibrationDecision(state: CalibrationState): Promise<'apply'
 		await runBeforeDeadline(() => decisionWindow.loadURL(calibrationDataUrl(buildCalibrationResultPage(
 			state.results,
 			state.recommendedSelection,
-			markSvg,
-			state.competitiveModeWasEnabled
+			markSvg
 		))), deadlineAt, 'Calibration result navigation');
 		return decisionWindow.webContents.executeJavaScript('window.wokWaitForCalibrationDecision()') as Promise<'apply' | 'keep'>;
 	} catch (error) {
@@ -1677,7 +1742,7 @@ function prepareCalibrationForGraphicsIdentity(
 		recommendedBackend: graphicsProfileState.recommendedBackend
 	});
 	const previousCalibrationState = calibrationState;
-	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, Boolean(userPrefs.competitiveMode), process.platform);
+	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, false, process.platform);
 	if (preparedState !== previousCalibrationState) {
 		writeCalibrationStateSync(preparedState);
 		// Off Windows the candidate space offers no backend comparison, so calibration completes
@@ -1917,12 +1982,8 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 		if (applyRecommendation && calibrationState.activeSelection) {
 			graphicsProfileState = clearKeptGraphicsBackend(graphicsProfileState);
 			persistGraphicsProfile();
-			userPrefs.competitiveMode = true;
-			// Persist the measured winner as an explicit preference rather than 'auto'. Competitive
-			// mode governs the in-game settings preset; it must not be the only thing keeping the
-			// graphics backend this machine was measured to be fastest on. With 'auto' the client
-			// would discover the best backend and then silently stop using it the moment the mode
-			// was switched off, falling back to a generic recommendation.
+			// Persist the measured winner as an explicit preference rather than 'auto', so the
+			// measured backend remains active independently of the removed visual-reduction preset.
 			userPrefs.graphicsBackend = calibrationState.activeSelection.candidate.backend;
 			userPrefs.fpsUncap = calibrationState.activeSelection.candidate.framePolicy === 'uncapped';
 			writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
@@ -1948,15 +2009,16 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 // apply settings and flags
 applyCommandLineSwitches(userPrefs, graphicsSelection.backend, effectiveFramePolicy);
 
-if (userPrefs.resourceSwapper) {
-	protocol.registerSchemesAsPrivileged([ {
-		scheme: 'krunker-resource-swapper',
-		privileges: {
-			secure: true,
-			corsEnabled: true
-		}
-	} ]);
-}
+// Scheme privileges must be declared before app ready. The handler remains token-locked and has
+// an empty resource map while Resource Swapper is off, which lets the setting activate after a
+// game reload without broadening what local files the renderer can request.
+protocol.registerSchemesAsPrivileged([ {
+	scheme: 'krunker-resource-swapper',
+	privileges: {
+		secure: true,
+		corsEnabled: true
+	}
+} ]);
 
 const GPU_INFO_TIMEOUT_MS = 5_000;
 
@@ -2164,11 +2226,10 @@ app.on('ready', async () => {
 	// the background now that a window exists. The request handler indexes the resource
 	// swapper before these files land, so migrated resources are only served after its next
 	// indexing pass (next launch).
-	let requestHandlerStarted = false;
 	if (deferredMigrationSources.length > 0) {
 		const migrationSources = deferredMigrationSources;
 		deferredMigrationSources = [];
-		console.log(`Migrating remaining legacy Crankshaft configuration from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
+		console.log(`Migrating remaining legacy client configuration from ${migrationSources.map(source => source.label).join(', ')} in the background...`);
 		void migrateLegacyConfigsPhaseTwo(configPath, migrationSources).then(migration => {
 			if (!migration.completed) {
 				console.error('Legacy configuration migration did not finish cleanly; it will resume on the next launch.');
@@ -2178,17 +2239,103 @@ app.on('ready', async () => {
 			if (requestHandlerStarted && migration.copiedFiles > 0) {
 				console.log('Migration finished after resource indexing; any migrated swapped resources and CSS files appear after the next launch.');
 			}
-		}).catch(error => { console.error('Failed to migrate remaining legacy Crankshaft configuration. The original files were left untouched.', error); });
+		}).catch(error => { console.error('Failed to migrate remaining legacy client configuration. The original files were left untouched.', error); });
 	}
 
 	let discordRPCReady = false;
+	let discordRPCStarting = false;
+	let discordRPCGeneration = 0;
 	let updateDiscordRPC: ((data: RPCargs) => void) | undefined;
 	let destroyDiscordRPC: (() => Promise<void>) | undefined;
 	let pendingDiscordActivity: RPCargs | undefined;
+	let discordRpcStartTimer: ReturnType<typeof setTimeout> | undefined;
 
-	// The receiver stays registered from window creation (cheap); only the RPC client
-	// itself is deferred. While it is not ready yet, keep just the latest activity update
-	// and flush it once the client connects.
+	const clearDiscordRpcStartTimer = () => {
+		if (discordRpcStartTimer === undefined) return;
+		clearTimeout(discordRpcStartTimer);
+		discordRpcStartTimer = undefined;
+	};
+
+	const stopDiscordRPC = () => {
+		discordRPCGeneration++;
+		clearDiscordRpcStartTimer();
+		discordRPCReady = false;
+		discordRPCStarting = false;
+		updateDiscordRPC = undefined;
+		pendingDiscordActivity = undefined;
+		const destroy = destroyDiscordRPC;
+		destroyDiscordRPC = undefined;
+		if (destroy) void destroy().catch(console.error);
+	};
+
+	const startDiscordRPC = () => {
+		if (!userPrefs.discordRPC || discordRPCReady || discordRPCStarting || destroyDiscordRPC) return;
+		discordRPCStarting = true;
+		const generation = ++discordRPCGeneration;
+		void import('./discord-rpc.ts').then(({ DiscordRpcClient }) => {
+			if (generation !== discordRPCGeneration || !userPrefs.discordRPC) return;
+			const rpc = new DiscordRpcClient('988529967220523068');
+			const startTimestamp = new Date();
+			discordRPCStarting = false;
+			destroyDiscordRPC = () => rpc.destroy();
+
+			updateDiscordRPC = ({ details, state }: RPCargs) => {
+				const data: Parameters<typeof rpc.setActivity>[0] = {
+					details,
+					state,
+					timestamps: { start: Math.floor(startTimestamp.getTime() / 1000) },
+					assets: {
+						large_image: 'logo',
+						large_text: 'Playing Krunker'
+					}
+				};
+				if (userPrefs.extendedRPC) {
+					data.buttons = [
+						{ label: 'WOK Client', url: WEBSITE_URL },
+						{ label: 'WOK source', url: REPO_URL }
+					];
+				}
+				void rpc.setActivity(data).catch(console.error);
+			};
+
+			rpc.on('ready', () => {
+				if (generation !== discordRPCGeneration || !userPrefs.discordRPC) return;
+				discordRPCReady = true;
+				if (pendingDiscordActivity) {
+					const latestActivity = pendingDiscordActivity;
+					pendingDiscordActivity = undefined;
+					updateDiscordRPC?.(latestActivity);
+				}
+				if (!mainWindow.webContents.isLoading()) mainWindow.webContents.send('initDiscordRPC');
+			});
+			void rpc.login().catch(error => {
+				if (generation === discordRPCGeneration) console.error(error);
+			});
+		}).catch(error => {
+			discordRPCStarting = false;
+			if (generation === discordRPCGeneration) console.error('Failed to initialize Discord RPC', error);
+		});
+	};
+
+	const scheduleDiscordRPCStart = (delayMs: number) => {
+		if (!userPrefs.discordRPC || discordRPCReady || discordRPCStarting || destroyDiscordRPC || discordRpcStartTimer !== undefined) return;
+		discordRpcStartTimer = setTimeout(() => {
+			discordRpcStartTimer = undefined;
+			if (!mainWindow.isDestroyed()) startDiscordRPC();
+		}, delayMs);
+	};
+
+	synchronizeDiscordRuntime = () => {
+		if (!userPrefs.discordRPC) {
+			stopDiscordRPC();
+			return;
+		}
+		if (discordRPCReady) mainWindow.webContents.send('initDiscordRPC');
+		else scheduleDiscordRPCStart(0);
+	};
+
+	// The receiver stays registered while RPC is disabled; validated activity is ignored until the
+	// user enables it, so turning the feature back on needs no renderer or app restart.
 	ipcMain.on('preload_updates_DiscordRPC', (event, value: unknown) => {
 		if (!isTrustedGameIpcSender(event) || !value || typeof value !== 'object' || Array.isArray(value)) return;
 		const data = value as Record<string, unknown>;
@@ -2198,79 +2345,14 @@ app.on('ready', async () => {
 			|| typeof data.state !== 'string'
 			|| data.state.length > 128
 		) return;
-		if (discordRPCReady) {
-			updateDiscordRPC?.({ details: data.details, state: data.state });
-			return;
-		}
-		if (userPrefs.discordRPC) pendingDiscordActivity = { details: data.details, state: data.state };
+		if (discordRPCReady) updateDiscordRPC?.({ details: data.details, state: data.state });
+		else if (userPrefs.discordRPC) pendingDiscordActivity = { details: data.details, state: data.state };
 	});
 
-	if (userPrefs.discordRPC) {
-		const startDiscordRPC = () => {
-			void import('./discord-rpc.ts').then(({ DiscordRpcClient }) => {
-				const rpc = new DiscordRpcClient('988529967220523068');
-				const startTimestamp = new Date();
-				destroyDiscordRPC = () => rpc.destroy();
-
-				updateDiscordRPC = ({ details, state }: RPCargs) => {
-					const data: Parameters<typeof rpc.setActivity>[0] = {
-						details,
-						state,
-						timestamps: { start: Math.floor(startTimestamp.getTime() / 1000) },
-						assets: {
-							large_image: 'logo',
-							large_text: 'Playing Krunker'
-						}
-					};
-					if (userPrefs.extendedRPC) {
-						data.buttons = [
-							{ label: 'WOK Client', url: WEBSITE_URL },
-							{ label: 'Crankshaft upstream', url: UPSTREAM_REPO_URL }
-						];
-					}
-					void rpc.setActivity(data).catch(console.error);
-				};
-
-				rpc.on('ready', () => {
-					discordRPCReady = true;
-					if (pendingDiscordActivity) {
-						const latestActivity = pendingDiscordActivity;
-						pendingDiscordActivity = undefined;
-						updateDiscordRPC?.(latestActivity);
-					}
-					if (!mainWindow.webContents.isLoading()) mainWindow.webContents.send('initDiscordRPC');
-				});
-				void rpc.login().catch(console.error);
-			}).catch(error => { console.error('Failed to initialize Discord RPC', error); });
-		};
-
-		// RPC has no need to be ready before the page can provide activity data, so keep
-		// its dynamic import, client construction, and IPC login off the navigation/load
-		// burst: start it a short fixed delay after the first did-finish-load.
-		const DISCORD_RPC_START_DELAY_MS = 2_000;
-		let discordRpcStartTimer: ReturnType<typeof setTimeout> | undefined;
-		const clearDiscordRpcStartTimer = () => {
-			if (discordRpcStartTimer === undefined) return;
-			clearTimeout(discordRpcStartTimer);
-			discordRpcStartTimer = undefined;
-		};
-		app.on('before-quit', clearDiscordRpcStartTimer);
-		mainWindow.on('closed', clearDiscordRpcStartTimer);
-		mainWindow.webContents.once('did-finish-load', () => {
-			discordRpcStartTimer = setTimeout(() => {
-				discordRpcStartTimer = undefined;
-				if (mainWindow.isDestroyed()) return;
-				startDiscordRPC();
-			}, DISCORD_RPC_START_DELAY_MS);
-		});
-	}
-
-	app.on('before-quit', () => {
-		if (!destroyDiscordRPC) return;
-		const destroy = destroyDiscordRPC;
-		destroyDiscordRPC = undefined;
-		void destroy().catch(console.error);
-	});
+	// Keep RPC construction away from the initial navigation burst. Runtime enables start now.
+	mainWindow.webContents.once('did-finish-load', () => { scheduleDiscordRPCStart(2_000); });
+	app.on('before-quit', stopDiscordRPC);
+	mainWindow.on('closed', stopDiscordRPC);
 
 	/**
 	 * The launch intro owns the first reveal of the game window: it shows the window behind the
@@ -2341,9 +2423,7 @@ app.on('ready', async () => {
 			traceScheduled = true;
 			setTimeout(() => { void runDiagnosticTrace(); }, traceDelayMs);
 		}
-		const currentAdaptiveValidationState = userPrefs.competitiveMode
-			? prepareCurrentAdaptiveValidationState()
-			: undefined;
+		const currentAdaptiveValidationState: AdaptiveValidationState | undefined = undefined;
 		mainWindow.webContents.send('main_did-finish-load', userPrefs, getGraphicsRuntimeInfo(), {
 			adaptiveValidationState: currentAdaptiveValidationState,
 			hasGameSettingsBackup: Boolean(loadCompetitiveModeBackup())
@@ -2354,6 +2434,10 @@ app.on('ready', async () => {
 		if (clientUrlStartup) {
 			mainWindow.webContents.send('process-startup-url', clientUrlStartup);
 			clientUrlStartup = null;
+		}
+		if (pendingReopenSettingsCategory !== undefined) {
+			mainWindow.webContents.send('settingsUI_reopen', pendingReopenSettingsCategory);
+			pendingReopenSettingsCategory = undefined;
 		}
 		if (discordRPCReady) mainWindow.webContents.send('initDiscordRPC');
 	});
@@ -2396,7 +2480,7 @@ app.on('ready', async () => {
 				click: () => { void captureInMatchRuntimeProfile(); }
 			},
 			{ type: 'separator' },
-			...constructDevtoolsSubmenu(mainWindow, userPrefs.alwaysWaitForDevTools || null)
+			...constructDevtoolsSubmenu(mainWindow, () => userPrefs.alwaysWaitForDevTools ? true : null)
 		]
 	};
 
@@ -2429,7 +2513,7 @@ app.on('ready', async () => {
 		if (externalUrl) void shell.openExternal(externalUrl.toString());
 	});
 
-	const crankshaftFilterHandler = new RequestHandler(
+	requestHandler = new RequestHandler(
 		mainWindow,
 		swapperPath,
 		userPrefs.resourceSwapper,
@@ -2439,12 +2523,12 @@ app.on('ready', async () => {
 		filtersPath
 	);
 	try {
-		requestHandlerStarted = await crankshaftFilterHandler.start();
+		requestHandlerStarted = await requestHandler.start();
 		if (!requestHandlerStarted) {
 			// Registration failures are normally deterministic, but a single bounded retry
 			// covers transient session setup races without delaying the healthy startup path.
 			await new Promise(resolve => setTimeout(resolve, 100));
-			requestHandlerStarted = await crankshaftFilterHandler.start();
+			requestHandlerStarted = await requestHandler.start();
 			if (!requestHandlerStarted) console.error('WOK Client request filters remained unavailable after retry.');
 		}
 	} catch (error) {
@@ -2453,12 +2537,10 @@ app.on('ready', async () => {
 		requestHandlerStarted = false;
 		console.error('WOK Client request features are unavailable for this launch.', error);
 	}
-	if (userPrefs.resourceSwapper) {
-		protocol.registerFileProtocol('krunker-resource-swapper', (request, callback) => {
-			const localPath = crankshaftFilterHandler.resolveSwapProtocolRequest(request.url);
-			callback(localPath ?? { error: -6 });
-		});
-	}
+	protocol.registerFileProtocol('krunker-resource-swapper', (request, callback) => {
+		const localPath = requestHandler?.resolveSwapProtocolRequest(request.url);
+		callback(localPath ?? { error: -6 });
+	});
 
 	if (!calibrationBlocksStartup) {
 		// Keep ordinary gameplay on Chromium's basic cached adapter query. On Windows the complete
@@ -2499,9 +2581,7 @@ app.on('ready', async () => {
 						// no live complete query is needed to retain its one-time prompt (§5.2).
 						void maybeShowStaleCalibrationPrompt();
 					}
-					const currentAdaptiveValidationState = userPrefs.competitiveMode
-						? prepareCurrentAdaptiveValidationState()
-						: undefined;
+					const currentAdaptiveValidationState: AdaptiveValidationState | undefined = undefined;
 					if (!mainWindow.isDestroyed()) {
 						mainWindow.webContents.send('adaptiveValidation_stateUpdated', currentAdaptiveValidationState);
 					}

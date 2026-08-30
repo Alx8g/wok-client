@@ -23,7 +23,6 @@ export interface DiagnosticsReportInput {
 }
 
 const REPORTED_PREFERENCE_KEYS = [
-	'competitiveMode',
 	// Which monitor the launch targeted: "it opened on the wrong screen" reports are unactionable
 	// without it, since the key also says whether the choice was made at all.
 	'display',
@@ -33,8 +32,7 @@ const REPORTED_PREFERENCE_KEYS = [
 	'safeFlags_disableBackgrounding',
 	'safeFlags_gpuRasterizing',
 	'safeFlags_highPerformanceGpu',
-	'experimentalFlags_experimental',
-	'performanceOverlay'
+	'experimentalFlags_experimental'
 ] as const;
 
 function deviceLine(profile: GraphicsProfileState): string {

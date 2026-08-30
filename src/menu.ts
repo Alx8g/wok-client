@@ -1,15 +1,13 @@
 import { shell, type MenuItemConstructorOptions, type MenuItem, app, BrowserWindow } from 'electron';
 import type { OpenDevToolsOptions } from 'electron/main';
-import { APP_NAME, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
+import { APP_NAME, NOTICES_URL, WEBSITE_URL } from './branding.ts';
 
 // Menu
 /** submenu to replace the About screen */
 export const aboutSubmenu: MenuItemConstructorOptions[] = [
 	{ label: APP_NAME, enabled: false },
 	{ label: 'Website', registerAccelerator: false, click: () => shell.openExternal(WEBSITE_URL) },
-	{ type: 'separator' },
-	{ label: 'Based on the open-source Crankshaft client', enabled: false },
-	{ label: 'Crankshaft upstream source', registerAccelerator: false, click: () => shell.openExternal(UPSTREAM_REPO_URL) }
+	{ label: 'Open-source notices', registerAccelerator: false, click: () => shell.openExternal(NOTICES_URL) }
 ];
 
 /** the menu with the app name on mac (array, to be spread) */
@@ -30,8 +28,13 @@ export const macAppMenuArr: (MenuItemConstructorOptions | MenuItem)[] = process.
 	: [];
 
 /** make 2 menuItems that determine wether to use fallback or not, and then act accordingly */
-export function constructDevtoolsSubmenu(providedWindow: BrowserWindow, skipFallback: null | boolean = null, options?: OpenDevToolsOptions) {
+export function constructDevtoolsSubmenu(
+	providedWindow: BrowserWindow,
+	skipFallbackPreference: null | boolean | (() => null | boolean) = null,
+	options?: OpenDevToolsOptions
+) {
 	const maxLag = 500; // default timeout by asger-finding / Commander
+	let detectedSkipFallback = typeof skipFallbackPreference === 'function' ? null : skipFallbackPreference;
 
 	/** Fallback if openDevTools fails */
 	function fallbackDevtools() {
@@ -47,14 +50,18 @@ export function constructDevtoolsSubmenu(providedWindow: BrowserWindow, skipFall
 
 	/** test first time if should open fallback or not. then decide */
 	function openDevToolsWithFallback() {
+		const configuredPreference = typeof skipFallbackPreference === 'function'
+			? skipFallbackPreference()
+			: skipFallbackPreference;
+		const skipFallback = configuredPreference ?? detectedSkipFallback;
 		if (skipFallback === true) {
 			providedWindow.webContents.openDevTools(options);
 		} else if (skipFallback === false) {
 			fallbackDevtools();
-		} else if (skipFallback === null) {
+		} else {
 			providedWindow.webContents.openDevTools(options); // start opening devtools
-			const popupDevtoolTimeout = setTimeout(() => { skipFallback = false; fallbackDevtools(); }, maxLag); // wait maxLag. if times out, always run fallback
-			providedWindow.webContents.once('devtools-opened', () => { skipFallback = true; clearTimeout(popupDevtoolTimeout); }); // if opens devtools first, never run fallback
+			const popupDevtoolTimeout = setTimeout(() => { detectedSkipFallback = false; fallbackDevtools(); }, maxLag); // wait maxLag. if times out, always run fallback
+			providedWindow.webContents.once('devtools-opened', () => { detectedSkipFallback = true; clearTimeout(popupDevtoolTimeout); }); // if opens devtools first, never run fallback
 		}
 	}
 

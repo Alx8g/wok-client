@@ -1,5 +1,11 @@
 /** biome-ignore-all lint/correctness/noUnusedVariables: .d.ts file */
 type UserPrefs = {
+	/** Local-only rewritten identity styling; disabled by default. */
+	customIdentityRgbCycle?: boolean;
+	/** Hide selected menu promotions and controls without removing their DOM; enabled by default. */
+	wokMenuDeclutter?: boolean;
+	/** Sort Public server regions by measured latency and show ping; enabled by default. */
+	wokPublicServerPingSort?: boolean;
 	[preference: string]: UserPrefValue;
 };
 
@@ -82,7 +88,6 @@ interface Window {
 	OffCliV: boolean;
 	closeClient: Function;
 	wokPerformance?: WokPerformanceAPI;
-	crankshaftPerformance?: WokPerformanceAPI;
 	getGameActivity: Function;
 	showWindow: Function;
 	setSetting: (key: string, value: boolean | number | string) => void;

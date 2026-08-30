@@ -1,4 +1,4 @@
-﻿import { readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join as pathJoin, resolve as pathResolve } from 'path';
 import { ipcRenderer, webFrame } from 'electron';
@@ -19,10 +19,13 @@ import { formatIdentityContext, formatIdentityProbe, probeIdentitySources } from
 import { RollingPerformanceStats } from './performance-stats.ts';
 import { mountWeaponParticleLoader, type WeaponParticleLoader } from './weapon-particle-loader.ts';
 import { applyCustomIdentity, setCustomIdentityDiagnostic, stopCustomIdentityDisplay, withRealIdentity } from './custom-identity-display.ts';
+import { applyMenuDeclutterSettings } from './menu-declutter.ts';
+import { applyPublicServerPingSortSettings as applyPublicServerPingSortRuntime } from './public-server-ping-sort.ts';
 import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
 import { HUD_CONTAINMENT_CSS } from './hud-containment.ts';
 import { captureIdentityDiagnostic } from './preload-diagnostics.ts';
+import { renameClientSettingsTabs } from './settings-tab-label.ts';
 import type { MotionBlurController } from './motion-blur.ts';
 
 // Capture Node-backed diagnostic configuration during preload evaluation. Krunker can remove the
@@ -236,13 +239,12 @@ window.addEventListener('beforeunload', stopMotionBlurRuntime, { once: true });
 let settingsRenderPromise: Promise<void> | undefined;
 let stopAdaptiveValidationRuntime: (() => void) | undefined;
 let adaptiveValidationLoadGeneration = 0;
-let competitiveModeEnabled = false;
 
 function updateAdaptiveValidationRuntime(value: unknown) {
 	const adaptiveValidationGeneration = ++adaptiveValidationLoadGeneration;
 	stopAdaptiveValidationRuntime?.();
 	stopAdaptiveValidationRuntime = undefined;
-	if (!competitiveModeEnabled || value === undefined) return;
+	if (value === undefined) return;
 
 	void import('./adaptive-validation-runtime.ts')
 		.then(adaptiveValidation => {
@@ -258,16 +260,33 @@ function updateAdaptiveValidationRuntime(value: unknown) {
 		.catch(error => { strippedConsole.error('Failed to start adaptive gameplay validation', error); });
 }
 
+// Set by the settings UI module when it loads; lets the hotkey handler skip the keybind-capture
+// state without a document scan on every keydown.
+let keybindCaptureActive: () => boolean = () => false;
+
 function renderSettings() {
 	if (settingsRenderPromise) return;
 	settingsRenderPromise = import('./settingsui.ts')
 		.then(async settingsUI => {
+			keybindCaptureActive = settingsUI.isKeybindCaptureActive;
 			await settingsUI.settingsReady;
 			settingsUI.renderSettings();
 		})
 		.catch(error => { strippedConsole.error('Failed to load WOK Client settings UI', error); })
 		.finally(() => { settingsRenderPromise = undefined; });
 }
+
+ipcRenderer.on('settingsUI_reopen', (_event, categoryIndex: number) => {
+	void import('./settingsui.ts').then(async settingsUI => {
+		settingsUI.rememberSettingsCategory(categoryIndex);
+		await settingsUI.settingsReady;
+		window.showWindow(1);
+		const settingsWindow = window.windows[0];
+		const tabs = settingsWindow.tabs[settingsWindow.settingType];
+		settingsWindow.changeTab(tabs.length - 1);
+		settingsUI.renderSettings();
+	}).catch(error => { strippedConsole.error('Failed to reopen WOK settings', error); });
+});
 
 const $assets = pathResolve(import.meta.dirname, '..', 'assets');
 
@@ -476,28 +495,26 @@ ipcRenderer.on('adaptiveValidation_stateUpdated', (_event, value: unknown) => {
 	updateAdaptiveValidationRuntime(value);
 });
 
-ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
+ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, _graphicsRuntimeInfo: GraphicsRuntimeInfo, competitiveRuntimeInfo: CompetitiveModeRuntimeInfo) => {
 	applyRawMouseInputPreference(_userPrefs);
 	applyClientMotionBlurSettings(_userPrefs);
+	applyMenuDeclutterSettings(_userPrefs);
+	applyPublicServerPingSortSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
-	competitiveModeEnabled = Boolean(_userPrefs.competitiveMode);
 	updateAdaptiveValidationRuntime(competitiveRuntimeInfo.adaptiveValidationState);
 
-	if (_userPrefs.performanceOverlay) {
-		void import('./performance-monitor.ts')
-			.then(performanceMonitor => { performanceMonitor.startPerformanceMonitor(graphicsRuntimeInfo); })
-			.catch(error => { strippedConsole.error('Failed to start performance diagnostics', error); });
-	}
-
-	if (_userPrefs.competitiveMode || competitiveRuntimeInfo.hasGameSettingsBackup) {
+	// Competitive Mode was a visual-reduction preset. It is no longer exposed or enabled, but an
+	// existing backup must be restored once so users are not left on the reduced visual settings.
+	if (competitiveRuntimeInfo.hasGameSettingsBackup) {
 		void import('./competitive-mode.ts')
-			.then(competitiveMode => competitiveMode.synchronizeCompetitiveMode(Boolean(_userPrefs.competitiveMode), competitiveRuntimeInfo.hasGameSettingsBackup))
-			.catch(error => { strippedConsole.error('Failed to synchronize Competitive mode game settings', error); });
+			.then(competitiveMode => competitiveMode.synchronizeCompetitiveMode(false, true))
+			.catch(error => { strippedConsole.error('Failed to restore pre-Competitive-mode game settings', error); });
 	}
 	patchSettings(_userPrefs);
 
 	// fix fps dropping on scroll
 	// https://github.com/bigjakk/Krunker-Civilian-Client/blob/573de775d4b299db87d45d67d568264eb7d7e0f0/src/preload/index.ts#L29
+	const scrollableOverflowPattern = /^(?:auto|scroll)$/u;
 	window.addEventListener('wheel', (event: WheelEvent) => {
 		if (document.pointerLockElement) {
 			event.preventDefault();
@@ -510,7 +527,7 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 			if (!hasScrollableContent) continue;
 
 			const style = getComputedStyle(target);
-			if (/^(?:auto|scroll)$/u.test(style.overflowY) || /^(?:auto|scroll)$/u.test(style.overflowX)) return;
+			if (scrollableOverflowPattern.test(style.overflowY) || scrollableOverflowPattern.test(style.overflowX)) return;
 		}
 
 		event.preventDefault();
@@ -518,53 +535,56 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, graphicsR
 
 });
 
-ipcRenderer.once('initDiscordRPC', () => {
-	function updateRPC() {
-		strippedConsole.log('> updated RPC');
-		/*
-		 * Discord presence leaves this machine, so the text is read with the local display
-		 * identity undone. In practice these elements hold a class, a skin and a map name, but
-		 * "anything this client republishes is read through withRealIdentity" is the rule that
-		 * keeps the feature cosmetic instead of misleading. Free unless something is currently
-		 * rewritten, and the strings are captured inside the callback, not the elements.
-		 */
-		const presence = withRealIdentity(() => {
-			const skinElem = document.querySelector('#menuClassSubtext > span');
-			return {
-				className: document.getElementById('menuClassName')?.textContent ?? '',
-				hasSkinElement: skinElem !== null,
-				mapText: document.getElementById('mapInfo')?.textContent ?? null,
-				skinText: skinElem?.textContent ?? ''
-			};
-		});
+let discordRPCHooksInstalled = false;
 
-		const gameActivity = Object.hasOwn(window, 'getGameActivity') ? window.getGameActivity() as Partial<GameInfo> : {};
-		let overWriteDetails: string | false = false;
-		if (!Object.hasOwn(gameActivity, 'class')) gameActivity.class = { name: presence.className };
-		if (!Object.hasOwn(gameActivity, 'map') || !Object.hasOwn(gameActivity, 'mode')) overWriteDetails = presence.mapText ?? 'Loading game...';
-
-		const data: RPCargs = {
-			details: overWriteDetails || `${gameActivity.mode} on ${gameActivity.map}`,
-			state: `${gameActivity.class.name} • ${presence.skinText}`
+function updateDiscordRPC(): void {
+	strippedConsole.log('> updated RPC');
+	/*
+	 * Discord presence leaves this machine, so the text is read with the local display
+	 * identity undone. In practice these elements hold a class, a skin and a map name, but
+	 * "anything this client republishes is read through withRealIdentity" is the rule that
+	 * keeps the feature cosmetic instead of misleading. Free unless something is currently
+	 * rewritten, and the strings are captured inside the callback, not the elements.
+	 */
+	const presence = withRealIdentity(() => {
+		const skinElem = document.querySelector('#menuClassSubtext > span');
+		return {
+			className: document.getElementById('menuClassName')?.textContent ?? '',
+			hasSkinElement: skinElem !== null,
+			mapText: document.getElementById('mapInfo')?.textContent ?? null,
+			skinText: skinElem?.textContent ?? ''
 		};
-		if (!presence.hasSkinElement) { // as long as we have skinElem, we can fill in the other blanks
-			ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: new URL(WEBSITE_URL).hostname });
-		} else {
-			ipcRenderer.send('preload_updates_DiscordRPC', data);
-		}
-	}
-
-	// updating rpc
-	ipcRenderer.on('main_did-finish-load', updateRPC);
-	window.addEventListener('load', () => {
-		updateRPC();
-		setTimeout(() => {
-			// hook elements that update rpc
-			try { document.getElementById('windowCloser').addEventListener('click', updateRPC); } catch (e) { strippedConsole.error("didn't hook wincloser", e); }
-			try { document.getElementById('customizeButton').addEventListener('click', updateRPC); } catch (e) { strippedConsole.error("didn't hook customizeButton", e); }
-		}, 4000);
 	});
-	document.addEventListener('pointerlockchange', updateRPC); // thank God this exists
+
+	const gameActivity = Object.hasOwn(window, 'getGameActivity') ? window.getGameActivity() as Partial<GameInfo> : {};
+	let overWriteDetails: string | false = false;
+	if (!Object.hasOwn(gameActivity, 'class')) gameActivity.class = { name: presence.className };
+	if (!Object.hasOwn(gameActivity, 'map') || !Object.hasOwn(gameActivity, 'mode')) overWriteDetails = presence.mapText ?? 'Loading game...';
+
+	const data: RPCargs = {
+		details: overWriteDetails || `${gameActivity.mode} on ${gameActivity.map}`,
+		state: `${gameActivity.class.name} • ${presence.skinText}`
+	};
+	if (!presence.hasSkinElement) {
+		ipcRenderer.send('preload_updates_DiscordRPC', { details: 'Loading krunker...', state: new URL(WEBSITE_URL).hostname });
+	} else {
+		ipcRenderer.send('preload_updates_DiscordRPC', data);
+	}
+}
+
+ipcRenderer.on('initDiscordRPC', () => {
+	if (!discordRPCHooksInstalled) {
+		discordRPCHooksInstalled = true;
+		ipcRenderer.on('main_did-finish-load', updateDiscordRPC);
+		window.addEventListener('load', updateDiscordRPC);
+		document.addEventListener('pointerlockchange', updateDiscordRPC);
+		setTimeout(() => {
+			document.getElementById('windowCloser')?.addEventListener('click', updateDiscordRPC);
+			document.getElementById('customizeButton')?.addEventListener('click', updateDiscordRPC);
+		}, 4000);
+	}
+	// Enabling RPC after the load event still publishes current activity immediately.
+	updateDiscordRPC();
 });
 
 ipcRenderer.on('matchmakerRedirect', async (_event, _userPrefs: UserPrefs) => {
@@ -677,7 +697,7 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 	// the client. A matched matchmaker key is consumed before the game can treat it as an action.
 	window.addEventListener('keydown', event => {
 		if (event.code === 'Escape') document.exitPointerLock();
-		if (event.repeat || document.querySelector('.customKeybindSettingWrapper')) return;
+		if (event.repeat || keybindCaptureActive()) return;
 		const config = clientHotkeyConfig;
 		if (!config || !keyboardEventMatchesCustomSetting(config.matchmakerKey, event)) return;
 		if (config.matchmakerEnabled) {
@@ -690,6 +710,14 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 			window.location.href = `${config.overrideURL || 'https://krunker.io'}`;
 		}
 	}, { capture: true });
+}
+
+/** Apply Public-screen ping annotation and sorting through the trusted main-process probe. */
+export function applyPublicServerPingSortSettings(_userPrefs: UserPrefs): void {
+	applyPublicServerPingSortRuntime(
+		_userPrefs,
+		regions => ipcRenderer.invoke('matchmaker_measure_region_latency', regions)
+	);
 }
 
 /** Apply matchmaker enablement and its search key immediately from the settings renderer. */
@@ -863,7 +891,7 @@ async function mountClientSplash(
 
 	const splashBackground = createElement(
 		'div',
-		{ class: ['crankshaft-loading-background'] }
+		{ class: ['wok-loading-background'] }
 	);
 	splashBackground.setAttribute(
 		'aria-label',
@@ -994,7 +1022,7 @@ function ensureThemeElements(): boolean {
 	if (!document.body) return false;
 	themeBaseElement = createElement('style', { id: 'wokThemeBase' });
 	// Keeps the historical id: user CSS has always landed in this element.
-	themeElement = createElement('style', { id: 'crankshaftCustomCSS' });
+	themeElement = createElement('style', { id: 'wokCustomCSS' });
 	document.body.append(themeBaseElement, themeElement);
 	return true;
 }
@@ -1079,6 +1107,19 @@ async function ensureMatchmakerStylesheet(): Promise<void> {
 
 let latestUserPrefs: UserPrefs | undefined;
 let identityStarterHandle: number | undefined;
+
+/** Reconcile preferences that can change without replacing the game document. */
+function applyRuntimePreferences(preferences: UserPrefs): void {
+	latestUserPrefs = preferences;
+	applyRawMouseInputPreference(preferences);
+	applyClientMatchmakerSettings(preferences);
+	competitionAutomationEnabled = Boolean(preferences.competitionAutomation);
+}
+
+ipcRenderer.on('settings_runtime_preferences', (_event, preferences: UserPrefs) => {
+	if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) return;
+	applyRuntimePreferences(preferences);
+});
 let authoritativeUserPrefsReceived = false;
 let userPrefsRecoveryStarted = false;
 let userPrefsFetchInFlight = false;
@@ -1135,6 +1176,8 @@ function beginCustomIdentityWatch() {
 				applyRawMouseInputPreference(prefs);
 				applyClientMatchmakerSettings(prefs);
 				applyClientMotionBlurSettings(prefs);
+				applyMenuDeclutterSettings(prefs);
+				applyPublicServerPingSortSettings(prefs);
 				traceStartup('authoritative preferences fetched and applied');
 				tryStart();
 			})
@@ -1142,8 +1185,13 @@ function beginCustomIdentityWatch() {
 			.finally(() => { userPrefsFetchInFlight = false; });
 	};
 	fetchPrefs();
+	// Bounded: a document main never trusts would otherwise invoke IPC every 2 s for the whole
+	// session. Fifteen attempts cover the whole pre-trust window of a real launch several times
+	// over; after that, a push ('injectClientCSS') is the remaining delivery path.
+	const PREFS_POLL_MAX_ATTEMPTS = 15;
+	let prefsPollAttempts = 0;
 	const prefsPoll = window.setInterval(() => {
-		if (authoritativeUserPrefsReceived) {
+		if (authoritativeUserPrefsReceived || ++prefsPollAttempts >= PREFS_POLL_MAX_ATTEMPTS) {
 			window.clearInterval(prefsPoll);
 			return;
 		}
@@ -1171,13 +1219,13 @@ function startCustomIdentity(_userPrefs: UserPrefs) {
  * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
  */
 function injectKeyframeFix() {
-	if (document.getElementById('crankshaftKeyframeFix')) return;
+	if (document.getElementById('wokKeyframeFix')) return;
 	// document.body can still be null here: whenDOMReady runs immediately whenever readyState is
 	// past 'loading', which on a fast boot is before the body element exists. An unguarded
 	// appendChild threw and killed every step queued after it in the same callback.
 	const parent = document.body ?? document.head ?? document.documentElement;
 	if (!parent) return;
-	const keyframeStyle = createElement('style', { id: 'crankshaftKeyframeFix' });
+	const keyframeStyle = createElement('style', { id: 'wokKeyframeFix' });
 	keyframeStyle.textContent = '@keyframes chat-moveup { 0% { transform: translateY(375px); } 100% { transform: translateY(0px); } } @keyframes death-ui-moveup { 0% { transform: translateY(340px); } 100% { transform: translateY(0px); } }';
 	parent.appendChild(keyframeStyle);
 }
@@ -1190,6 +1238,8 @@ function injectKeyframeFix() {
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	latestUserPrefs = _userPrefs;
 	applyRawMouseInputPreference(_userPrefs);
+	applyMenuDeclutterSettings(_userPrefs);
+	applyPublicServerPingSortSettings(_userPrefs);
 	beginCustomIdentityWatch();
 	traceStartup(`applyClientVisuals entered; readyState=${document.readyState} body=${document.body ? 'present' : 'null'}`);
 	applyClientHotkeys(_userPrefs);
@@ -1326,19 +1376,8 @@ function patchSettings(_userPrefs: UserPrefs) {
 			return selectedTab === allTabsCount;
 		}
 
-		/**
-		 * Krunker labels the tab that hosts our settings "Client". Rename it in place so the
-		 * client is called what it is called everywhere else. The tab list is rebuilt by the game
-		 * on every settings render, so this reapplies each time rather than running once.
-		 */
-		function renameClientTab() {
-			for (const tab of document.querySelectorAll('#settingsTabs .tab, #settHolder .tab, .settingTab')) {
-				if (tab.textContent?.trim() === 'Client') tab.textContent = 'WOK';
-			}
-		}
-
 		function safeRenderSettings() {
-			renameClientTab();
+			renameClientSettingsTabs(document);
 			if (isClientTab()) renderSettings();
 		}
 
@@ -1369,6 +1408,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 			runHookExtras('showWindow', () => {
 				if (args[0] === 1) {
 					if (settingsWindow.settingType === 'basic') settingsWindow.toggleType({ checked: true });
+					renameClientSettingsTabs(document);
 					const advSliderElem = document.querySelector<HTMLInputElement>('.advancedSwitch input#typeBtn');
 					if (advSliderElem) {
 						advSliderElem.disabled = true;
@@ -1382,11 +1422,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 				if (args[0] === 4) {
 					// This makes the model viewer link open in a new window. Krunker doesn't currently have it set to target _blank for some reason.
-					const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find((elem: Element) => {
-						if (elem instanceof HTMLElement) {
-							elem.innerText === "Model Viewer"
-						}
-					});
+					const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find(elem => elem instanceof HTMLElement && elem.innerText === 'Model Viewer');
 					if (modelViewerElement) modelViewerElement.setAttribute('target', '_blank');
 				}
 			});
@@ -1408,7 +1444,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 		settingsWindow.getSettings = (...args: unknown[]) => {
 			const result: string = getSettingsHook(...args);
-			if (!_userPrefs.regionTimezones) return result;
+			if (!(latestUserPrefs ?? _userPrefs).regionTimezones) return result;
 
 			let patched = result;
 			runHookExtras('getSettings', () => {
@@ -1464,7 +1500,6 @@ function patchSettings(_userPrefs: UserPrefs) {
 			&& typeof window.showWindow === 'function'
 			&& Object.hasOwn(window, 'windows')
 			&& Array.isArray(window.windows)
-			&& window.windows.length >= 0
 			&& typeof window.windows[0] !== 'undefined'
 			&& typeof window.windows[0].changeTab === 'function'
 		) {

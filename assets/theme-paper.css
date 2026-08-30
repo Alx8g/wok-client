@@ -59,13 +59,13 @@
  * recolouring: the yellow, orange and red ladder still reads as a ladder, and this is the only
  * theme that needs it, which is why it lives here and not in the base layer.
  */
-.Crankshaft-settings .setting.safety-2 .desc-icon,
-.Crankshaft-settings .setting.safety-3 .desc-icon,
-.Crankshaft-settings .setting.safety-4 .desc-icon {
+.wok-settings .setting.safety-2 .desc-icon,
+.wok-settings .setting.safety-3 .desc-icon,
+.wok-settings .setting.safety-4 .desc-icon {
 	filter: brightness(.78) saturate(1.15);
 }
 
 /* The loading handoff stays dark: it covers the whole window before any panel exists. */
-.crankshaft-loading-background {
+.wok-loading-background {
 	background-color: #0A0A0A;
 }

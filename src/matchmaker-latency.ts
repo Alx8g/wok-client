@@ -17,6 +17,14 @@ export const MATCHMAKER_LATENCY_FALLBACK_PORT = 443;
  */
 export const MATCHMAKER_LATENCY_PROBE_ATTEMPTS = 2;
 export const MATCHMAKER_LATENCY_TARGET_STALE_TTL_MS = 5 * 60_000;
+/**
+ * How long a host:port pair that timed out or refused the probe is skipped outright. The ping
+ * list advertises the game port, which is dead on ordinary networks, so without this every
+ * re-measurement (one per cacheTtlMs per region) paid the full probe timeout for a port that is
+ * never going to answer. Trying it once per host per service lifetime is enough to pick up a
+ * future Krunker fix that makes the advertised port reachable again.
+ */
+export const MATCHMAKER_LATENCY_DEAD_PORT_TTL_MS = 10 * 60_000;
 export const MATCHMAKER_PING_LIST_MAX_RESPONSE_BYTES = 64 * 1024;
 export const MATCHMAKER_PING_LIST_MAX_TARGETS = 32;
 export const MATCHMAKER_PING_LIST_URL = 'https://matchmaker.krunker.io/ping-list?hostname=krunker.io';
@@ -50,6 +58,7 @@ export interface MatchmakerLatencyDependencies {
 
 export interface MatchmakerLatencyOptions {
 	cacheTtlMs?: number;
+	deadPortTtlMs?: number;
 	fetchTimeoutMs?: number;
 	maxConcurrency?: number;
 	probeTimeoutMs?: number;
@@ -133,6 +142,8 @@ async function runWithTimeout<T>(
 
 export class MatchmakerRegionLatencyService {
 	private readonly cacheTtlMs: number;
+	private readonly deadPortTtlMs: number;
+	private readonly deadPorts = new Map<string, number>();
 	private readonly dependencies: MatchmakerLatencyDependencies;
 	private readonly fetchTimeoutMs: number;
 	private readonly latencyCache = new Map<string, LatencyCacheEntry>();
@@ -149,6 +160,7 @@ export class MatchmakerRegionLatencyService {
 	) {
 		this.dependencies = dependencies;
 		this.cacheTtlMs = positiveInteger(options.cacheTtlMs, MATCHMAKER_LATENCY_CACHE_TTL_MS, 'cacheTtlMs');
+		this.deadPortTtlMs = positiveInteger(options.deadPortTtlMs, MATCHMAKER_LATENCY_DEAD_PORT_TTL_MS, 'deadPortTtlMs');
 		this.fetchTimeoutMs = positiveInteger(options.fetchTimeoutMs, MATCHMAKER_LATENCY_FETCH_TIMEOUT_MS, 'fetchTimeoutMs');
 		this.maxConcurrency = positiveInteger(options.maxConcurrency, MATCHMAKER_LATENCY_MAX_CONCURRENCY, 'maxConcurrency');
 		this.probeTimeoutMs = positiveInteger(options.probeTimeoutMs, MATCHMAKER_LATENCY_PROBE_TIMEOUT_MS, 'probeTimeoutMs');
@@ -239,12 +251,23 @@ export class MatchmakerRegionLatencyService {
 				if (item.target) {
 					// Try the advertised port first so a future Krunker change is picked up
 					// automatically, then the fallback. Each is sampled more than once because the
-					// first connect to a host also pays for DNS.
+					// first connect to a host also pays for DNS. A port that failed recently is
+					// skipped entirely: re-paying a dead port's timeout on every TTL refresh is
+					// pure latency on the matchmaker popup.
+					const nowMs = this.now();
+					this.pruneDeadPorts(nowMs);
 					const candidatePorts = item.target.port === MATCHMAKER_LATENCY_FALLBACK_PORT
 						? [item.target.port]
 						: [item.target.port, MATCHMAKER_LATENCY_FALLBACK_PORT];
 					for (const port of candidatePorts) {
 						const target = { host: item.target.host, port };
+						// Long-cache only the advertised game port. Port 443 is the recovery path and
+						// must be retried after a transient failure on the ordinary latency-cache cadence.
+						const deadPortKey = port === MATCHMAKER_LATENCY_FALLBACK_PORT
+							? undefined
+							: `${target.host}:${port}`;
+						if (deadPortKey && (this.deadPorts.get(deadPortKey) ?? 0) > nowMs) continue;
+						let portAnswered = false;
 						for (let attempt = 0; attempt < MATCHMAKER_LATENCY_PROBE_ATTEMPTS; attempt++) {
 							try {
 								const measured = await runWithTimeout(
@@ -254,11 +277,13 @@ export class MatchmakerRegionLatencyService {
 								if (typeof measured === 'number' && Number.isFinite(measured) && measured >= 0 && measured <= 60_000) {
 									const rounded = Math.round(measured);
 									if (latencyMs === undefined || rounded < latencyMs) latencyMs = rounded;
+									portAnswered = true;
 								} else break; // This port is not answering; move on rather than retrying it.
 							} catch (_error) {
 								break; // An unavailable port or region is omitted while other probes continue.
 							}
 						}
+						if (!portAnswered && deadPortKey) this.deadPorts.set(deadPortKey, this.now() + this.deadPortTtlMs);
 						if (latencyMs !== undefined) break;
 					}
 				}
@@ -273,6 +298,12 @@ export class MatchmakerRegionLatencyService {
 			{ length: Math.min(this.maxConcurrency, pending.length) },
 			() => worker()
 		));
+	}
+
+	private pruneDeadPorts(nowMs: number): void {
+		for (const [key, retryAt] of this.deadPorts) {
+			if (retryAt <= nowMs) this.deadPorts.delete(key);
+		}
 	}
 
 	private cacheFailures(regions: readonly string[]): void {

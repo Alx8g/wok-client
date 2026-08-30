@@ -1,10 +1,10 @@
 import { readdirSync } from 'fs';
 import { DISPLAY_PREFERENCE_AUTO, type DisplayOption } from './display-selection.ts';
-import * as os from "os";
 import { ipcRenderer, shell } from 'electron'; // add app if crashes
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
-import { UPSTREAM_REPO_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
-import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { NOTICES_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
+import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyPublicServerPingSortSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
+import { applyMenuDeclutterSettings } from './menu-declutter.ts';
 import { buildThemeOptions, normalizeThemeSelection } from './themes.ts';
 import {
 	MATCHMAKER_GAMEMODES,
@@ -13,9 +13,11 @@ import {
 	MATCHMAKER_REGIONS
 } from './matchmaker-data.ts';
 import { SettingsRefreshTracker, type SettingsRefreshRequirement } from './settings-refresh.ts';
+import { SETTINGS_VISIBILITY_CONTROLLER_KEYS, settingIsVisible } from './settings-visibility.ts';
 import {
 	CUSTOM_CLAN_PREFERENCE_KEY,
 	isCustomIdentityPreferenceKey,
+	isCustomIdentityTextPreferenceKey,
 	REAL_CLAN_PREFERENCE_KEY,
 	sanitizeCustomClan,
 	sanitizeCustomName
@@ -53,9 +55,10 @@ else requestUserPrefs();
 const displayOption: SelectSettingDescItem = {
 	title: 'Display',
 	type: 'sel',
-	desc: 'Which monitor the game opens on. Falls back to primary if unplugged.',
+	desc: 'Moves WOK to this monitor. Uses the primary monitor if the saved one is disconnected.',
 	safety: 0,
 	cat: 0,
+	instant: process.platform === 'win32',
 	opts: [DISPLAY_PREFERENCE_AUTO],
 	optLabels: ['Automatic (primary display)']
 };
@@ -63,7 +66,7 @@ const displayOption: SelectSettingDescItem = {
 const themeOption: SelectSettingDescItem = {
 	title: 'Theme',
 	type: 'sel',
-	desc: 'Restyles the whole client: menus, HUD, scoreboard, chat and shop. Your own .css files appear here too.',
+	desc: 'Changes menus, HUD, scoreboard, chat, and shop. Custom CSS files also appear here.',
 	safety: 0,
 	cat: 2,
 	instant: true,
@@ -97,7 +100,7 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 	refreshNotifElement?.remove();
 	refreshNotifElement = undefined;
 
-	settingsDesc.competitiveMode.button = { icon: 'speed', text: 'Run calibration', callback: () => ipcRenderer.send('calibration_request_rerun') };
+	settingsDesc.graphicsBackend.button = { icon: 'speed', text: 'Run calibration', callback: () => ipcRenderer.send('calibration_request_rerun') };
 	settingsDesc.resourceSwapper.button = { icon: 'folder', text: 'Swapper', callback: e => openPath(e, paths.swapperPath) };
 	settingsDesc.customFilters.button = { icon: 'filter_list', text: 'Filters file', callback: e => openPath(e, paths.filtersPath) };
 
@@ -142,67 +145,66 @@ function applyThemeSelection(value: string) {
  * optional props and their defaults:
  * desc (description): omitting it or leaving it "" will not render any description
  * cat (category): omitting will put the setting in the first (0th) category
- * instant: ommiting will not render an instant icon.
- * refreshOnly: ommiting will not render a refresh-only icon
+ * instant: true means the setting applies immediately.
+ * refreshOnly: true means the setting requires a page reload.
  *
- * note: instant and refreshOnly are exclusive. only use one at a time
+ * Neither flag means a full client restart. The flags are exclusive.
  *
  * note: settings will get rendered in the order you define them.
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	competitiveMode: { title: 'Competitive Mode', type: 'bool', desc: 'Measures your PC and applies the fastest graphics profile, plus lower in-game visuals for more FPS. Your Krunker settings are restored if you turn it off.', safety: 0, cat: 0 },
-	performanceOverlay: { title: 'FPS Overlay', type: 'bool', desc: 'FPS, frame times and ping in the corner. Alt+F8 hides it.', safety: 0, cat: 0, refreshOnly: true },
-	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Render as fast as your PC can. Competitive Mode sets this for you.', safety: 0, cat: 0 },
-	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Uses unadjusted Pointer Lock input to avoid Windows Chromium camera jumps and OS mouse acceleration. Restart required.', safety: 0, cat: 0 },
-	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Leave on auto. Competitive Mode picks whichever measured fastest here.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
-	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Fullscreen gives the smoothest frames.', safety: 0, cat: 0, opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
+	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: 'Removes promotions, Manage Ads, and low-value menu items while keeping balances and core controls.', safety: 0, cat: 2, instant: true },
+	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Shows each Public region’s ping and puts the fastest regions first. Fixed categories stay pinned.', safety: 0, cat: 3, instant: true },
+	fpsUncap: { title: 'Uncap FPS', type: 'bool', desc: 'Removes the frame cap so WOK can run as fast as the system allows.', safety: 0, cat: 0 },
+	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Prevents camera jumps on high-polling mice and ignores Windows mouse acceleration. Applies on the next mouse capture.', safety: 0, cat: 0, instant: true },
+	graphicsBackend: { title: 'Graphics Backend', type: 'sel', desc: 'Auto is recommended. Run calibration to measure which graphics option is fastest.', safety: 1, cat: 0, opts: ['auto', 'default', 'd3d11', 'd3d11on12', 'vulkan'] },
+	fullscreen: { title: 'Window Mode', type: 'sel', desc: 'Changes how WOK fills the screen. Fullscreen usually gives the smoothest frames.', safety: 0, cat: 0, instant: process.platform === "win32", opts: ['windowed', 'maximized', 'fullscreen', ...(process.platform !== "win32" ? ['borderless'] : [])] },
 	display: displayOption,
 
-	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Countdown to the next match on the menu.', safety: 0, cat: 1, instant: true },
-	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Switch class without opening the full menu.', safety: 0, cat: 1, instant: true },
-	customName: { title: 'Custom Name', type: 'text', desc: 'Shows this name instead of yours in chat, the scoreboard, the kill feed and the menu. Only on your screen; Krunker still gets your real one.', placeholder: 'Leave empty for your real name', safety: 0, cat: 1, instant: true },
-	customClan: { title: 'Custom Clan', type: 'text', desc: 'Shows this clan tag instead of yours, everywhere the game prints it. Only on your screen.', placeholder: 'Leave empty for your real clan', safety: 0, cat: 1, instant: true },
-	realName: { title: 'Your Real Name', type: 'text', desc: 'Only needed if the custom name is not being applied: the exact Krunker name to replace. The client normally detects this by itself.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
-	realClan: { title: 'Your Real Clan', type: 'text', desc: 'Only needed if the custom clan tag is not being applied: your real tag, without brackets.', placeholder: 'Detected automatically', safety: 0, cat: 1, instant: true },
-	regionTimezones: { title: 'Region Timezones', type: 'bool', desc: 'Shows local time next to each region.', safety: 0, cat: 1, refreshOnly: true },
-	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows what you are playing on your Discord profile.', safety: 0, cat: 1 },
-	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds links to your Discord status.', safety: 0, cat: 1, instant: true },
+	menuTimer: { title: 'Menu Timer', type: 'bool', desc: 'Shows the next-match countdown on the menu.', safety: 0, cat: 1, instant: true },
+	quickClassPicker: { title: 'Quick Class Picker', type: 'bool', desc: 'Shows class icons above the play buttons for one-click switching.', safety: 0, cat: 1, instant: true },
+	customName: { title: 'Custom Name', type: 'text', desc: 'Replaces your name in the local UI. Other players and Krunker still receive your real name.', placeholder: 'Real name when empty', safety: 0, cat: 2, instant: true },
+	customClan: { title: 'Custom Clan', type: 'text', desc: 'Replaces your clan tag in the local UI. Other players still see your real clan.', placeholder: 'Real clan when empty', safety: 0, cat: 2, instant: true },
+	customIdentityRgbCycle: { title: 'RGB Custom Identity', type: 'bool', desc: 'Animates your local name and clan in sync. Other players still see your real identity.', safety: 0, cat: 2, instant: true },
+	regionTimezones: { title: 'Region Local Times', type: 'bool', desc: 'Shows the local time for each region.', safety: 0, cat: 3, instant: true },
+	discordRPC: { title: 'Discord Rich Presence', type: 'bool', desc: 'Shows your current game on your Discord profile.', safety: 0, cat: 1, instant: true },
+	extendedRPC: { title: 'Discord Buttons', type: 'bool', desc: 'Adds join and project links to your Discord activity.', safety: 0, cat: 1, instant: true },
 
-	motionBlur: { title: 'Motion Blur', type: 'bool', desc: 'Blends recent game frames only while turning for montage-style trails. The HUD stays sharp.', safety: 0, cat: 2, instant: true },
-	motionBlurStrength: { title: 'Motion Blur Strength', type: 'num', min: 0, max: 100, desc: 'Controls the trail while turning. 50 is recommended; higher values feel dreamier.', safety: 0, cat: 2, instant: true },
-	motionBlurQuality: { title: 'Motion Blur Quality', type: 'sel', desc: 'Native preserves full sharpness. Lower resolutions reduce GPU work but soften the image while turning.', safety: 0, cat: 2, instant: true, opts: ['native', 'balanced', 'performance'], optLabels: ['Native (100%)', 'Balanced (75%)', 'Performance (50%)'] },
+	motionBlur: { title: 'Motion Blur', type: 'bool', desc: 'Adds trails while turning. The HUD stays sharp.', safety: 0, cat: 2, instant: true },
+	motionBlurStrength: { title: 'Motion Blur Strength', type: 'num', min: 0, max: 100, desc: 'Sets trail intensity. 50 is recommended.', safety: 0, cat: 2, instant: true },
+	motionBlurQuality: { title: 'Motion Blur Quality', type: 'sel', desc: 'Native stays sharpest. Lower modes use less GPU but look softer.', safety: 0, cat: 2, instant: true, opts: ['native', 'balanced', 'performance'], optLabels: ['Native (100%)', 'Balanced (75%)', 'Performance (50%)'] },
 	theme: themeOption,
-	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation while the game loads.', safety: 0, cat: 2 },
-	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Sound for the launch animation.', safety: 0, cat: 2 },
-	clientSplash: { title: 'Splash Screen', type: 'bool', desc: 'WOK screen while Krunker loads.', safety: 0, cat: 2, refreshOnly: true },
-	immersiveSplash: { title: 'Full-Screen Splash', type: 'bool', desc: 'Covers the Krunker loading screen behind it.', safety: 0, cat: 2, refreshOnly: true },
-	immersiveSplashBackgroundColor: { title: 'Splash Colour', type: 'color', desc: 'Background colour for the full-screen splash.', safety: 0, cat: 2, refreshOnly: true },
+	introAnimation: { title: 'Launch Animation', type: 'bool', desc: 'Plays the WOK animation on the next launch.', safety: 0, cat: 2, instant: true },
+	introAudio: { title: 'Launch Sound', type: 'bool', desc: 'Plays sound with the animation on the next launch.', safety: 0, cat: 2, instant: true },
+	clientSplash: { title: 'Splash Screen', type: 'bool', desc: 'Shows WOK branding during the next launch.', safety: 0, cat: 2, instant: true },
+	immersiveSplash: { title: 'Full-Screen Splash', type: 'bool', desc: 'Covers Krunker’s loading screen during the next launch.', safety: 0, cat: 2, instant: true },
+	immersiveSplashBackgroundColor: { title: 'Splash Colour', type: 'color', desc: 'Sets the splash background for the next launch.', safety: 0, cat: 2, instant: true },
 
-	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: 'Finds lobbies matching your filters. Unofficial matchmaking may conflict with game rules.', safety: 2, cat: 3, instant: true },
-	matchmakerKey: { title: 'Search Hotkey', type: 'keybind', desc: 'Starts a search.', safety: 0, cat: 3, instant: true },
-	matchmakerAcceptKey: { title: 'Accept Hotkey', type: 'keybind', desc: 'Joins the found lobby.', safety: 0, cat: 3, instant: true },
-	matchmakerCancelKey: { title: 'Cancel Hotkey', type: 'keybind', desc: 'Rejects the found lobby.', safety: 0, cat: 3, instant: true },
-	matchmaker_regions: { title: 'Regions', type: 'multisel', desc: 'Leave empty for any region.', safety: 0, cat: 3, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
-	matchmaker_gamemodes: { title: 'Gamemodes', type: 'multisel', desc: 'Leave empty for any mode.', safety: 0, cat: 3, opts: MATCHMAKER_GAMEMODES, cols: 4, instant: true },
-	matchmaker_mapScope: { title: 'Map Scope', type: 'sel', desc: 'Which maps to accept.', safety: 0, cat: 3, opts: MATCHMAKER_MAP_SCOPES, instant: true },
-	matchmaker_maps: { title: 'Maps', type: 'multisel', desc: 'Narrows Official or Selected scope to these maps. Leave empty with Official scope to allow every official map.', safety: 0, cat: 3, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
-	matchmaker_minPlayers: { title: 'Minimum Players', type: 'num', min: 0, max: 7, safety: 0, cat: 3, instant: true },
-	matchmaker_maxPlayers: { title: 'Maximum Players', type: 'num', min: 0, max: 7, desc: 'Strict filters may find nothing.', safety: 0, cat: 3, instant: true },
-	matchmaker_minRemainingTime: { title: 'Minimum Time Left', type: 'num', min: 0, max: 480, desc: 'Seconds remaining in the match.', safety: 0, cat: 3, instant: true },
-	matchmaker_openServerWindow: { title: 'Open Servers On Cancel', type: 'bool', safety: 0, cat: 3, instant: true },
+	matchmaker: { title: 'Custom Matchmaker', type: 'bool', desc: 'Finds a lobby using the filters below. This is unofficial and may conflict with game rules.', safety: 2, cat: 3, instant: true },
+	matchmakerKey: { title: 'Search Hotkey', type: 'keybind', desc: 'Starts custom matchmaking.', safety: 0, cat: 3, instant: true },
+	matchmakerAcceptKey: { title: 'Accept Hotkey', type: 'keybind', desc: 'Joins the offered lobby.', safety: 0, cat: 3, instant: true },
+	matchmakerCancelKey: { title: 'Cancel Hotkey', type: 'keybind', desc: 'Rejects the offered lobby.', safety: 0, cat: 3, instant: true },
+	matchmaker_regions: { title: 'Regions', type: 'multisel', desc: 'Searches only selected regions. Leave empty for any region.', safety: 0, cat: 3, opts: MATCHMAKER_REGIONS, cols: 16, instant: true },
+	matchmaker_gamemodes: { title: 'Gamemodes', type: 'multisel', desc: 'Searches only selected modes. Leave empty for any mode.', safety: 0, cat: 3, opts: MATCHMAKER_GAMEMODES, cols: 4, instant: true },
+	matchmaker_mapScope: { title: 'Map Scope', type: 'sel', desc: 'Allows official maps, selected maps, or every map.', safety: 0, cat: 3, opts: MATCHMAKER_MAP_SCOPES, instant: true },
+	matchmaker_maps: { title: 'Maps', type: 'multisel', desc: 'Searches only selected maps. Leave empty to allow the full chosen scope.', safety: 0, cat: 3, opts: MATCHMAKER_OFFICIAL_MAPS, cols: 4, instant: true },
+	matchmaker_minPlayers: { title: 'Minimum Players', type: 'num', min: 0, max: 7, desc: 'Rejects lobbies below this player count.', safety: 0, cat: 3, instant: true },
+	matchmaker_maxPlayers: { title: 'Maximum Players', type: 'num', min: 0, max: 7, desc: 'Rejects lobbies above this player count.', safety: 0, cat: 3, instant: true },
+	matchmaker_minRemainingTime: { title: 'Minimum Time Left', type: 'num', min: 0, max: 480, desc: 'Rejects matches with fewer seconds remaining.', safety: 0, cat: 3, instant: true },
+	matchmaker_openServerWindow: { title: 'Open Servers On Cancel', type: 'bool', desc: 'Opens Krunker’s server browser when a search is cancelled.', safety: 0, cat: 3, instant: true },
 
-	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'On laptops with two GPUs, uses the fast one. If diagnostics still show integrated graphics, set it for WOK in your OS graphics settings too.', safety: 1, cat: 4 },
-	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Uses more power, avoids catch-up when you return.', safety: 2, cat: 4 },
-	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Only forces it where your driver disabled it for safety. Leave off.', safety: 3, cat: 4 },
-	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Linux only. No proven benefit; may reduce stability.', safety: 4, cat: 4 },
-	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Disables the fallback that opens DevTools in a separate window.', safety: 3, cat: 4 },
-	overrideURL: { title: 'Override URL', desc: 'Testing only. HTTPS krunker.io addresses only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4 },
+	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'Asks Windows to use the faster GPU on PCs with two. Also set WOK to High performance in Windows if needed.', safety: 1, cat: 0 },
+	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Keeps WOK at full speed when another window is focused. Uses more power.', safety: 2, cat: 0 },
+	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Overrides Chromium’s driver safety block. No proven performance gain; leave off.', safety: 3, cat: 4 },
+	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Enables unproven Linux flags that may reduce stability.', safety: 4, cat: 4 },
+	alwaysWaitForDevTools: { title: 'Always Wait For DevTools', type: 'bool', desc: 'Keeps DevTools attached during startup. Developer debugging only.', safety: 3, cat: 4, instant: true },
+	overrideURL: { title: 'Override URL', desc: 'Uses another HTTPS krunker.io address the next time WOK navigates. Testing only.', type: 'text', placeholder: 'https://krunker.io', safety: 3, cat: 4, instant: true },
 
-	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from a local folder. Krunker has official mod support; prefer that. May conflict with game rules.', safety: 3, cat: 5 },
-	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Hides or blocks ads. May conflict with game rules. Restart required.', safety: 4, cat: 5, opts: ['off', 'hide', 'block'] },
-	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Your own rules can change or cancel game requests. May conflict with game rules. Restart required.', safety: 4, cat: 5 },
-	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. May conflict with game rules.', safety: 4, cat: 5, refreshOnly: true }
+	resourceSwapper: { title: 'Resource Swapper', type: 'bool', desc: 'Replaces game files from the local Swapper folder after a game reload. Use official mod support when possible.', safety: 3, cat: 4, refreshOnly: true },
+	hideAds: { title: 'Ad Controls', type: 'sel', desc: 'Chooses Off, Hide, or Block. Blocking stops ad requests after a game reload and may conflict with game rules.', safety: 4, cat: 1, opts: ['off', 'hide', 'block'], refreshOnly: true },
+	customFilters: { title: 'Custom Network Filters', type: 'bool', desc: 'Uses your Filters file after a game reload to cancel or redirect requests. Can break the game or conflict with its rules.', safety: 4, cat: 4, refreshOnly: true },
+	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. Competition tooling only.', safety: 4, cat: 4, instant: true }
 };
 
 /** index-based safety descriptions. goes in title attribute */
@@ -220,8 +222,7 @@ const categoryNames: CategoryName[] = [
 	{ name: 'Game', cat: 'gameSettings' },
 	{ name: 'Visuals', cat: 'styleSettings' },
 	{ name: 'Matchmaker', cat: 'matchmakerSettings' },
-	{ name: 'Advanced', cat: 'advSettings' },
-	{ name: 'Legacy', cat: 'legacySettings' },
+	{ name: 'Developer', cat: 'developerSettings' },
 	{ name: 'About', cat: 'aboutSettings' }
 ];
 
@@ -277,6 +278,24 @@ function updateRefreshNeededForKey(key: string) {
 	);
 }
 
+function runPendingSettingsAction(): void {
+	flushSettingsUpdates();
+	if (refreshNeeded === RefreshEnum.reloadApp) {
+		ipcRenderer.send('settingsUI_relaunch_wok', activeSettingsCategory);
+		return;
+	}
+	if (refreshNeeded === RefreshEnum.refresh) {
+		ipcRenderer.send('settingsUI_reload_game', activeSettingsCategory);
+	}
+}
+
+function renderRefreshNotification(): void {
+	if (!refreshNotifElement) return;
+	refreshNotifElement.innerHTML = skeleton.refreshElem(refreshNeeded);
+	refreshNotifElement.querySelector('.settings-apply-button')?.addEventListener('click', runPendingSettingsAction);
+	displayedRefreshNeeded = refreshNeeded;
+}
+
 function updateRefreshNotification() {
 	if (refreshNeeded === RefreshEnum.notNeeded) {
 		refreshNotifElement?.remove();
@@ -287,18 +306,14 @@ function updateRefreshNotification() {
 
 	if (!refreshNotifElement) {
 		refreshNotifElement = createElement('div', {
-			class: ['crankshaft-holder-update', 'refresh-popup'],
-			innerHTML: skeleton.refreshElem(refreshNeeded)
+			class: ['wok-holder-update', 'refresh-popup']
 		});
 		document.body.appendChild(refreshNotifElement);
-		displayedRefreshNeeded = refreshNeeded;
+		renderRefreshNotification();
 		return;
 	}
 
-	if (displayedRefreshNeeded !== refreshNeeded) {
-		refreshNotifElement.innerHTML = skeleton.refreshElem(refreshNeeded);
-		displayedRefreshNeeded = refreshNeeded;
-	}
+	if (displayedRefreshNeeded !== refreshNeeded) renderRefreshNotification();
 }
 
 function sanitizeString(string: string) {
@@ -352,9 +367,10 @@ class SettingElem {
 
 		this.#disabled = false;
 
-		// general stuff that every setting has
+		// Warnings and reload requirements need visible markers. Instant changes are the normal case
+		// and do not need an icon on every row.
 		if (this.props.safety > 0) this.HTML += skeleton.safetyIcon(safetyDesc[this.props.safety]);
-		else if (this.props.instant || this.props.refreshOnly) this.HTML += skeleton.refreshIcon(this.props.instant ? 'instant' : 'refresh-icon');
+		else if (this.props.refreshOnly) this.HTML += skeleton.refreshIcon();
 
 		if (this.props.key === 'matchmaker_regions' && userPrefs.regionTimezones) {
 			this.props.cols = 8;
@@ -419,7 +435,7 @@ class SettingElem {
 				const hasValidDescriptions = Object.hasOwn(this.props, 'optDescriptions') && this.props.opts.length === this.props.optDescriptions.length;
 				if (Object.hasOwn(this.props, 'optDescriptions') && !hasValidDescriptions) throw new Error(`Setting '${this.props.key}' declared 'optDescriptions', but a different amount than 'opts'!`);
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
-					<div class="crankshaft-multisel-parent s-update" ${props?.cols ? `style="grid-template-columns:repeat(${props.cols}, 1fr)"` : ''}>
+					<div class="wok-multiselect s-update" ${props?.cols ? `style="grid-template-columns:repeat(${props.cols}, 1fr)"` : ''}>
 						${props.opts.map((opt, i) => `<label class="hostOpt">
 							<span class="optName">${sanitize(opt)}</span>
 							${hasValidDescriptions ? `<span class="optDescription">${sanitize(this.props.optDescriptions[i])}</span>` : ''}
@@ -441,11 +457,11 @@ class SettingElem {
 				break;
 			case 'keybind':
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
-					<label class="setting-input-wrapper crankshaftKeybindSettingWrapper">
+					<label class="setting-input-wrapper wok-keybind-setting">
 							<input class="s-update keybinddummyinput" type="text" />
-							<span class="material-icons crankshaftKeybindConflict" title="This keybind conflicts with '_'.">warning</span>
-							<span class="keyIcon crankshaftKeyIcon">${ parseKeybindSettingDisplay(props.value as KeybindUserPref) }</span>
-							<span class="material-icons crankshaftUnbindButton">delete_forever</span>
+							<span class="material-icons wok-keybind-conflict" title="This keybind conflicts with '_'.">warning</span>
+							<span class="keyIcon wok-key-icon">${ parseKeybindSettingDisplay(props.value as KeybindUserPref) }</span>
+							<span class="material-icons wok-unbind-button">delete_forever</span>
 					</label>`;
 				this.updateKey = 'value';
 				this.updateMethod = 'onchange';
@@ -492,7 +508,7 @@ class SettingElem {
 
 		// Local display identity: coerce while typing so the stored value is always one the
 		// preference loader accepts, and reflect dropped characters straight back into the input.
-		if (isCustomIdentityPreferenceKey(this.props.key)) {
+		if (isCustomIdentityTextPreferenceKey(this.props.key)) {
 			const isClanKey = this.props.key === CUSTOM_CLAN_PREFERENCE_KEY || this.props.key === REAL_CLAN_PREFERENCE_KEY;
 			const sanitized = isClanKey ? sanitizeCustomClan(dirtyValue) : sanitizeCustomName(dirtyValue);
 			if (sanitized !== target.value) target.value = sanitized;
@@ -505,7 +521,7 @@ class SettingElem {
 			elem.querySelector('.keyIcon').innerHTML = parseKeybindSettingDisplay(value);
 
 			// Calculate whether or not this conflicts with any other keybinds
-			if (callback === "normal") {				const warningElement = elem.querySelector('.crankshaftKeybindConflict');
+			if (callback === "normal") {				const warningElement = elem.querySelector('.wok-keybind-conflict');
 				updateKeybindConflictDisplay(this.props.key, value, userPrefs[this.props.key] as KeybindUserPref, warningElement);
 			}
 		}
@@ -526,6 +542,8 @@ class SettingElem {
 			if (this.props.key === 'motionBlur' || this.props.key === 'motionBlurStrength' || this.props.key === 'motionBlurQuality') {
 				applyClientMotionBlurSettings(userPrefs);
 			}
+			if (this.props.key === 'wokMenuDeclutter') applyMenuDeclutterSettings(userPrefs);
+			if (this.props.key === 'wokPublicServerPingSort') applyPublicServerPingSortSettings(userPrefs);
 
 			// Live-applies: the replacement engine runs in this renderer, so there is nothing to
 			// reload. Clearing the values puts the game's own text straight back.
@@ -538,6 +556,7 @@ class SettingElem {
 			}
 			updateRefreshNeededForKey(this.props.key);
 			updateRefreshNotification();
+			if (SETTINGS_VISIBILITY_CONTROLLER_KEYS.has(this.props.key)) queueMicrotask(renderSettings);
 		} else {
 			callback(value);
 		}
@@ -571,7 +590,7 @@ class SettingElem {
 			// The reason we do this is to transmit the value when updating the value, since there's no <input> for JS objects themselves.
 			wrapper.querySelector('input').setAttribute("value", JSON.stringify(this.props.value));
 
-			wrapper.querySelector('.crankshaftUnbindButton').addEventListener('mousedown', () => {
+			wrapper.querySelector('.wok-unbind-button').addEventListener('mousedown', () => {
 				setKeybindSetting(this, {
 					shift: false,
 					alt: false,
@@ -580,7 +599,7 @@ class SettingElem {
 				})
 			})
 
-			const warningElement = wrapper.querySelector('.crankshaftKeybindConflict') as HTMLElement;
+			const warningElement = wrapper.querySelector('.wok-keybind-conflict') as HTMLElement;
 			if (this.props.callback === "normal") {				updateKeybindConflictDisplay(this.props.key, this.props.value as KeybindUserPref, this.props.value as KeybindUserPref, warningElement);
 			} else {
 				warningElement.style.display = "none";
@@ -613,7 +632,7 @@ function updateKeybindConflictDisplay(key: string, value: KeybindUserPref, oldVa
 	Object.keys(settingsDesc).forEach((settingKey: keyof typeof settingsDesc) => {
 		// If the setting type is a keybind, and the setting isn't the initiator, and the keybind change matches another setting before/after the change
 		if (settingsDesc[settingKey].type === "keybind" && settingKey !== key && (objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, value) || objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, oldValue))) {
-			if (settingElementPairs[settingKey]) warningElementsToModify.push(settingElementPairs[settingKey].elem.querySelector('.crankshaftKeybindConflict'));
+			if (settingElementPairs[settingKey]) warningElementsToModify.push(settingElementPairs[settingKey].elem.querySelector('.wok-keybind-conflict'));
 			if (objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, value)) conflictingOptions.push(settingsDesc[settingKey].title);
 		}
 	})
@@ -630,6 +649,12 @@ function updateKeybindConflictDisplay(key: string, value: KeybindUserPref, oldVa
 }
 
 let capturingKeybindSetting: false | SettingElem = false;
+
+/**
+ * True while the keybind-capture dialog is on screen. The preload's gameplay keydown handler
+ * checks this instead of scanning the document for the dialog class on every keypress.
+ */
+export const isKeybindCaptureActive = (): boolean => capturingKeybindSetting !== false;
 
 // Construct keybind overlay
 const keybindSettingDialogElement = createElement('div', {
@@ -764,13 +789,6 @@ function triggerKeybindSettingDialog(element: SettingElem) {
 
 /** a settings generation helper. has some skeleton elements and methods that make them. purpose: prevents code duplication */
 const skeleton = {
-	/** make a setting cateogry */
-	category: (title: string, innerHTML: string, elemClass = 'mainSettings') => `
-	<div class="setHed Crankshaft-setHed"><span class="material-icons plusOrMinus">keyboard_arrow_down</span> ${title}</div>
-	<div class="setBodH Crankshaft-setBodH ${elemClass}">
-			${innerHTML}
-	</div>`,
-
 	/**
 	 * make a setting with some text (notice)
 	 * @param desc description of the notice
@@ -779,7 +797,7 @@ const skeleton = {
 	notice: (notice: string, opts?: { desc?: string, iconHTML?: string }) => `
 	<div class="settName setting">
 		${(opts?.iconHTML ?? false) ? opts.iconHTML : ''}
-		<span class="setting-title crankshaft-gray">${notice}</span>
+		<span class="setting-title wok-muted">${notice}</span>
 		${(opts?.desc ?? false) ? `<div class="setting-desc-new">${opts.desc}</div>` : ''}
 	</div>`,
 
@@ -790,29 +808,23 @@ const skeleton = {
 	</span>`,
 
 	/** wrapped refresh icon (color gets applied through css) */
-	refreshIcon: (mode: 'instant' | 'refresh-icon') => `
-	<span class="desc-icon ${mode}" title="${mode === 'instant' ? 'Applies instantly! (No refresh of page required)' : 'Refresh page to see changes'}">
+	refreshIcon: () => `
+	<span class="desc-icon refresh-icon" title="Refresh page to see changes">
 		<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#000000"><path d="M12 6v1.79c0 .45.54.67.85.35l2.79-2.79c.2-.2.2-.51 0-.71l-2.79-2.79c-.31-.31-.85-.09-.85.36V4c-4.42 0-8 3.58-8 8 0 1.04.2 2.04.57 2.95.27.67 1.13.85 1.64.34.27-.27.38-.68.23-1.04C6.15 13.56 6 12.79 6 12c0-3.31 2.69-6 6-6zm5.79 2.71c-.27.27-.38.69-.23 1.04.28.7.44 1.46.44 2.25 0 3.31-2.69 6-6 6v-1.79c0-.45-.54-.67-.85-.35l-2.79 2.79c-.2.2-.2.51 0 .71l2.79 2.79c.31.31.85.09.85-.35V20c4.42 0 8-3.58 8-8 0-1.04-.2-2.04-.57-2.95-.27-.67-1.13-.85-1.64-.34z"/></svg>
 	</span>`,
 
-	/** make a settings category header element */
-	catHedElem: (title: string) => createElement('div', {
-		class: 'setHed Crankshaft-setHed'.split(' '),
-		innerHTML: `${title}`
-	}),
-
 	/** make a settings category body element */
 	catBodElem: (elemClass: string, content: string) => createElement('div', {
-		class: `setBodH Crankshaft-setBodH ${elemClass}`.split(' '),
+		class: `setBodH wok-set-body ${elemClass}`.split(' '),
 		innerHTML: content
 	}),
 
 	refreshElem: (level: (typeof RefreshEnum)[keyof typeof RefreshEnum]) => {
 		switch (level) {
 			case RefreshEnum.reloadApp:
-				return '<span class="restart-msg">Restart client fully to see changes</span>';
+				return '<span class="restart-msg">Restart WOK to apply these changes <button class="settings-apply-button" type="button">Restart WOK</button></span>';
 			case RefreshEnum.refresh:
-				return `<span class="reload-msg">${skeleton.refreshIcon('refresh-icon')}Reload page with <code>F5</code> or <code>${os.platform() === "darwin" ? "CMD" : "CTRL"} + R</code> to see changes</span>`;
+				return `<span class="reload-msg">${skeleton.refreshIcon()}Reload the game to apply these changes <button class="settings-apply-button" type="button">Reload game</button></span>`;
 			case RefreshEnum.notNeeded:
 			default:
 				return '';
@@ -841,10 +853,10 @@ function settingSearchFilter(setting: RenderReadySetting, query: string) {
 }
 
 /**
- * HTML Element that holds all of crankshaft's setting elements
+ * HTML element that holds WOK's settings.
  */
-const crankshaftSettingsHolder = createElement('div', {
-	class: ['Crankshaft-settings']
+const wokSettingsHolder = createElement('div', {
+	class: ['wok-settings']
 })
 
 /**
@@ -855,45 +867,37 @@ let settingElementPairs: { [key: string]: SettingElem } = {};
 /** Sidebar section the user last opened; survives re-renders so a refresh never dumps them back to the top. */
 let activeSettingsCategory = 0;
 
-function toggleSettingsCategory(header: Element) {
-	const sibling = header.nextElementSibling;
-	if (!sibling) return;
-	sibling.classList.toggle('setting-category-collapsed');
-
-	const iconElement = header.querySelector('.material-icons');
-	if (!iconElement) return;
-	iconElement.textContent = iconElement.textContent === 'keyboard_arrow_down'
-		? 'keyboard_arrow_right'
-		: 'keyboard_arrow_down';
+export function rememberSettingsCategory(categoryIndex: number): void {
+	if (Number.isInteger(categoryIndex) && categoryIndex >= 0 && categoryIndex < categoryNames.length) {
+		activeSettingsCategory = categoryIndex;
+	}
 }
 
-crankshaftSettingsHolder.addEventListener('click', event => {
-	if (!(event.target instanceof Element)) return;
-	const header = event.target.closest('.Crankshaft-setHed');
-	if (header && crankshaftSettingsHolder.contains(header)) toggleSettingsCategory(header);
-});
-
 export function renderSettings() {
-	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').toLowerCase();
+	const filter = ((document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? '').trim().toLowerCase();
 	Array.from(document.querySelectorAll('.setHed')).filter(element => element.innerHTML === 'No settings found').forEach(element => element.remove());
 
-	crankshaftSettingsHolder.remove();
-	crankshaftSettingsHolder.replaceChildren();
+	wokSettingsHolder.remove();
+	wokSettingsHolder.replaceChildren();
 	settingElementPairs = {};
 
 	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
+		.filter(setting => settingIsVisible(setting.key, userPrefs))
 		.filter(setting => settingSearchFilter(setting, filter));
+	// Krunker's own results remain in #settHolder. Add nothing when the query has no WOK match
+	// instead of showing empty Performance and About sections beside unrelated game results.
+	if (filter.length > 0 && settings.length === 0) return;
 	const categoryBodies = new Map<number, HTMLElement>();
 	const categorySections = new Map<number, HTMLElement>();
 	// Sidebar layout: sections are chosen from a persistent nav rather than hunted for by
 	// scrolling through stacked collapsibles. One section is visible at a time, so the list the
 	// user is reading is never buried under the ones they are not.
-	const nav = createElement('div', { class: ['Crankshaft-settings-nav'] });
-	const pane = createElement('div', { class: ['Crankshaft-settings-pane'] });
-	crankshaftSettingsHolder.append(nav, pane);
+	const nav = createElement('div', { class: ['wok-settings-nav'] });
+	const pane = createElement('div', { class: ['wok-settings-pane'] });
+	wokSettingsHolder.append(nav, pane);
 	const navButtons = new Map<number, HTMLElement>();
-	const showCategory = (categoryIndex: number) => {
-		activeSettingsCategory = categoryIndex;
+	const showCategory = (categoryIndex: number, remember = true) => {
+		if (remember) activeSettingsCategory = categoryIndex;
 		for (const [index, button] of navButtons) button.classList.toggle('active', index === categoryIndex);
 		for (const [index, section] of categorySections) section.classList.toggle('hidden', index !== categoryIndex);
 	};
@@ -902,10 +906,10 @@ export function renderSettings() {
 		if (existing) return existing;
 		const category = categoryNames[categoryIndex];
 		const body = skeleton.catBodElem(category.cat, category.note ? skeleton.notice(category.note) : '');
-		const section = createElement('div', { class: ['Crankshaft-settings-section'] });
-		section.append(skeleton.catHedElem(category.name), body);
+		const section = createElement('div', { class: ['wok-settings-section'] });
+		section.append(body);
 		pane.append(section);
-		const button = createElement('div', { class: ['Crankshaft-settings-navitem'], innerHTML: category.name });
+		const button = createElement('div', { class: ['wok-settings-navitem'], innerHTML: category.name });
 		button.addEventListener('click', () => { showCategory(categoryIndex); });
 		nav.append(button);
 		navButtons.set(categoryIndex, button);
@@ -914,8 +918,12 @@ export function renderSettings() {
 		return body;
 	};
 
-	// Preserve the basic client category even when a search filters out all of its settings.
-	if (!settings.some(setting => setting.cat === 0)) ensureCategory(0);
+	// Create visible sections in the declared navigation order before settings are appended. Building
+	// sections from the settings object instead made the first setting in each category control the UI order.
+	for (const categoryIndex of categoryNames.keys()) {
+		const hasVisibleSetting = settings.some(setting => (setting.cat ?? 0) === categoryIndex);
+		if (hasVisibleSetting || (filter.length === 0 && categoryIndex === ABOUT_CATEGORY_INDEX)) ensureCategory(categoryIndex);
+	}
 
 	for (const setting of settings) {
 		const settingElement = new SettingElem(setting);
@@ -925,18 +933,23 @@ export function renderSettings() {
 
 	// Links and file shortcuts live in About: they are reference material, not things anyone
 	// came into settings to change, so they must not sit above the settings people did come for.
-	const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
-	const supportHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
-	supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
-	supportHolder.appendChild(skeleton.settingButton('code', 'WOK on GitHub', _ => shell.openExternal(REPO_URL)));
-	supportHolder.appendChild(skeleton.settingButton('code', 'Crankshaft (upstream)', _ => shell.openExternal(UPSTREAM_REPO_URL)));
+	if (filter.length === 0) {
+		const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
+		const supportHolder = createElement('div', { class: ['wok-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});
+		supportHolder.appendChild(skeleton.settingButton('language', 'Website', _ => shell.openExternal(WEBSITE_URL)));
+		supportHolder.appendChild(skeleton.settingButton('code', 'WOK on GitHub', _ => shell.openExternal(REPO_URL)));
+		supportHolder.appendChild(skeleton.settingButton('description', 'Open-source notices', _ => shell.openExternal(NOTICES_URL)));
 
-	const buttonsHolder = createElement('div', { class: ['crankshaft-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
-	buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
-	buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
-	aboutCategory.append(supportHolder, buttonsHolder);
+		const buttonsHolder = createElement('div', { class: ['wok-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Quick open:</span>' });
+		buttonsHolder.appendChild(skeleton.settingButton('file_open', 'Settings file', e => openPath(e, userPrefsPath)));
+		buttonsHolder.appendChild(skeleton.settingButton('folder', 'WOK folder', e => openPath(e, paths.configPath)));
+		aboutCategory.append(supportHolder, buttonsHolder);
+	}
 
-	showCategory(categorySections.has(activeSettingsCategory) ? activeSettingsCategory : [...categorySections.keys()][0] ?? 0);
+	const categoryToShow = categorySections.has(activeSettingsCategory)
+		? activeSettingsCategory
+		: [...categorySections.keys()][0] ?? 0;
+	showCategory(categoryToShow, categorySections.has(activeSettingsCategory));
 
-	document.getElementById('settHolder').appendChild(crankshaftSettingsHolder);
+	document.getElementById('settHolder').appendChild(wokSettingsHolder);
 }

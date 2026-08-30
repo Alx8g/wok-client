@@ -1,14 +1,14 @@
 /* this css gets injected regardless of userPrefs, because it is required for settings to render correctly */
 :root {
-	--crankshaft-gray: rgba(255,255,255,.6);
+	--wok-muted: rgba(255,255,255,.6);
 }
 
-.Crankshaft-settings .settName,
-.Crankshaft-settings .settName .setting-title {
-	color: var(--crankshaft-gray) !important;
+.wok-settings .settName,
+.wok-settings .settName .setting-title {
+	color: var(--wok-muted) !important;
 }
 
-.Crankshaft-settings .settName {
+.wok-settings .settName {
 	display: grid;
 	grid-auto-columns: 1fr;
 	grid-template-columns: 0fr 1fr 0fr;
@@ -18,25 +18,25 @@
 	grid-template-rows: 0fr min-content;
 	align-items: center;
 }
-.Crankshaft-settings .settName.multisel {
+.wok-settings .settName.multisel {
 	grid-template-rows: min-content 1fr;
 	grid-template-columns: 0fr 1fr;
 	grid-template-areas: 
 	"icon title" 
 	"input input";
 }
-.Crankshaft-settings .settName.has-button {
+.wok-settings .settName.has-button {
 	grid-template-areas: 
 	"icon title button input"
 	"desc desc desc desc";
 	grid-template-columns: 0fr 1fr min-content 0fr;
 }
-.Crankshaft-settings .settName.has-button .settingsBtn { 
+.wok-settings .settName.has-button .settingsBtn {
 	grid-area: button;
 	margin: 0 .5rem;
 }
 
-.Crankshaft-settings .settName.crankshaft-button-holder { 
+.wok-settings .settName.wok-button-holder {
 	grid-template-columns: 1fr;
 	grid-auto-columns: min-content;
 	column-gap: 0.25rem;
@@ -44,25 +44,25 @@
 	grid-template-rows: 0fr;
 	grid-auto-flow: column;
 }
-.Crankshaft-settings .crankshaft-button-holder .buttons-title,
-.Crankshaft-settings .material-icons {
+.wok-settings .wok-button-holder .buttons-title,
+.wok-settings .material-icons {
 	color: inherit;
 }
-.Crankshaft-settings .crankshaft-button-holder .settingsBtn, 
-.Crankshaft-settings .settName.has-button .settingsBtn { 
-	width: max-content 
+.wok-settings .wok-button-holder .settingsBtn,
+.wok-settings .settName.has-button .settingsBtn {
+	width: max-content
 }
 
 /* type: num */
-.Crankshaft-settings .settName.num .setting-input-wrapper {
+.wok-settings .settName.num .setting-input-wrapper {
 	display: flex;
 }
-.Crankshaft-settings .settName.num .setting-input-wrapper .slidecontainer {
+.wok-settings .settName.num .setting-input-wrapper .slidecontainer {
 	margin-top: -8px;
 }
 
 /* type: multisel */
-.Crankshaft-settings .crankshaft-multisel-parent {
+.wok-settings .wok-multiselect {
 	display: grid;
 	grid-template-columns: repeat(5, 1fr);
 	grid-auto-rows: 1fr;
@@ -72,12 +72,12 @@
 	border-radius: 10px;
 	margin-top: 0.8rem;
 }
-.Crankshaft-settings .crankshaft-multisel-parent label.hostOpt {
+.wok-settings .wok-multiselect label.hostOpt {
 	width: 100%;
 	margin: 0;
 	box-sizing: border-box;
 }
-.Crankshaft-settings span.optDescription {
+.wok-settings span.optDescription {
     color: #fff;
     z-index: 2;
     font-size: 14px;
@@ -85,29 +85,29 @@
     right: 0;
 }
 
-.Crankshaft-settings .settName.multisel label {
+.wok-settings .settName.multisel label {
 	font-size: 1.1rem;
 }
-.Crankshaft-settings .settName.multisel input {
+.wok-settings .settName.multisel input {
 	margin-left: .25rem;
 }
 
 /* general settings */
-.Crankshaft-settings .settName .setting-title {
+.wok-settings .settName .setting-title {
 	grid-area: title;
 }
 
-.Crankshaft-settings .settName .s-update:disabled,
-.Crankshaft-settings .settName .s-update:disabled+.slider.round {
+.wok-settings .settName .s-update:disabled,
+.wok-settings .settName .s-update:disabled+.slider.round {
 	opacity: 0.5;
 	pointer-events: none;
 }
 
-.Crankshaft-settings .setting .switch {
+.wok-settings .setting .switch {
 	box-sizing: border-box;
 }
 
-.Crankshaft-settings .setting .desc-icon {
+.wok-settings .setting .desc-icon {
 	grid-area: icon;
 	font-size: 1rem;
 	width: 2.2rem;
@@ -123,70 +123,60 @@
 	align-items: center;
 }
 
-.Crankshaft-settings .setting .desc-icon.instant {
-	background-color: rgba(1, 89, 220, 0.16);
-	border: 2px solid rgba(3, 133, 255, 0.81);
-}
-
-.Crankshaft-settings .setting .desc-icon.instant svg path {
-	color: #0385ff;
-	fill: currentColor;
-}
-
-.Crankshaft-settings .setting.settName .inputGrey2,
-.Crankshaft-settings .setting.settName .switch,
-.Crankshaft-settings .setting.settName .crankshaft-multisel-parent,
-.Crankshaft-settings .setting.settName .setting-input-wrapper {
+.wok-settings .setting.settName .inputGrey2,
+.wok-settings .setting.settName .switch,
+.wok-settings .setting.settName .wok-multiselect,
+.wok-settings .setting.settName .setting-input-wrapper {
 	grid-area: input;
 }
 
-.Crankshaft-settings .setting.safety-1 .desc-icon,
-.Crankshaft-settings .setting .desc-icon.refresh-icon {
+.wok-settings .setting.safety-1 .desc-icon,
+.wok-settings .setting .desc-icon.refresh-icon {
 	background-color: rgba(99, 99, 99, 0.16);
 	border: 2px solid rgba(78, 78, 78, 0.81);
 }
 
-.Crankshaft-settings .setting.safety-1 .desc-icon svg path,
-.Crankshaft-settings .setting .desc-icon.refresh-icon svg path {
+.wok-settings .setting.safety-1 .desc-icon svg path,
+.wok-settings .setting .desc-icon.refresh-icon svg path {
 	color: #969696;
 	fill: currentColor;
 }
 
-.Crankshaft-settings .setting.safety-2 .desc-icon {
+.wok-settings .setting.safety-2 .desc-icon {
 	background-color: rgba(220, 180, 1, 0.16);
 	border: 2px solid rgba(241, 186, 6, 0.81);
 }
 
-.Crankshaft-settings .setting.safety-2 .desc-icon svg path {
+.wok-settings .setting.safety-2 .desc-icon svg path {
 	color: #ffd903;
 	fill: currentColor;
 }
 
-.Crankshaft-settings .setting.safety-3 .desc-icon {
+.wok-settings .setting.safety-3 .desc-icon {
 	background-color: rgba(220, 118, 1, 0.16);
 	border: 2px solid rgba(241, 131, 6, 0.81);
 }
 
-.Crankshaft-settings .setting.safety-3 .desc-icon svg path {
+.wok-settings .setting.safety-3 .desc-icon svg path {
 	color: #ff9203;
 	fill: currentColor;
 }
 
-.Crankshaft-settings .setting.safety-4 .desc-icon {
+.wok-settings .setting.safety-4 .desc-icon {
 	background-color: rgba(220, 17, 1, 0.16);
 	border: 2px solid rgba(239, 6, 6, 0.81);
 }
 
-.Crankshaft-settings .setting.safety-4 .desc-icon svg path {
+.wok-settings .setting.safety-4 .desc-icon svg path {
 	color: #ff0303;
 	fill: currentColor;
 }
 
-.Crankshaft-settings .desc-icon {
+.wok-settings .desc-icon {
 	position: relative;
 }
 
-.Crankshaft-settings .setting-desc-new {
+.wok-settings .setting-desc-new {
 	display: block;
 	width: fit-content;
 	max-width: 50ch;
@@ -201,13 +191,9 @@
 	grid-area: desc;
 }
 
-.Crankshaft-settings .setting-desc-new a {
+.wok-settings .setting-desc-new a {
 	font-size: inherit !important;
 	font-family: inherit !important;
-}
-
-.Crankshaft-settings .setting-category-collapsed {
-	display: none;
 }
 
 .setBodH.safetyLegend {
@@ -235,27 +221,27 @@ input:checked+.advancedSlider:hover {
 }
 
 /* floating toasts css that is required */
-.crankshaft-holder-l,
-.crankshaft-holder-r, 
-.crankshaft-holder-update {
+.wok-holder-left,
+.wok-holder-right,
+.wok-holder-update {
 	position: absolute;
 	font-size: 1.125rem !important;
 	color: rgba(255, 255, 255, 0.7);
 	display: block !important;
 }
 
-.crankshaft-holder-r {
+.wok-holder-right {
 	right: 20px;
 	bottom: 20px;
 	text-align: right;
 }
 
-.crankshaft-holder-l {
+.wok-holder-left {
 	left: 20px;
 	bottom: 20px;
 	text-align: left;
 }
-.crankshaft-holder-update {
+.wok-holder-update {
 	top: 20px;
 	left: 20px;
 	background-color: black;
@@ -296,6 +282,21 @@ input:checked+.advancedSlider:hover {
     padding: 0.08rem 0.4rem;
     border-radius: 3px;
     border: 2px solid #333333
+}
+
+.refresh-popup .settings-apply-button {
+	margin-left: .4rem;
+	padding: .45rem .65rem;
+	border: 1px solid rgba(255, 255, 255, .2);
+	border-radius: 4px;
+	background: #FBC02D;
+	color: #151515;
+	font: 700 .8rem/1 inherit;
+	cursor: pointer;
+}
+
+.refresh-popup .settings-apply-button:hover {
+	background: #FFD54F;
 }
 
 .hiddenClasses-hideAds-bottomOffset { bottom: 80px !important; }
@@ -345,14 +346,14 @@ input:checked+.advancedSlider:hover {
 }
 
 .customKeybindSettingDialogTitle {
-	color: var(--crankshaft-gray);
+	color: var(--wok-muted);
 	white-space: nowrap;
 	font-size: 2.2em;
 	padding-right: 5em;
 }
 
 .customKeybindSettingDialogSubTitle {
-	color: var(--crankshaft-gray);
+	color: var(--wok-muted);
 	filter: brightness(0.7);
 	white-space: nowrap;
 	margin-right: 2.4em;
@@ -379,7 +380,7 @@ input:checked+.advancedSlider:hover {
 	border: 0.2em solid rgba(255, 255, 255, 0.4);
 	padding: 0.3em;
 	font-size: 0.7em;
-	color: var(--crankshaft-gray);
+	color: var(--wok-muted);
 }
 
 .customKeybindSettingDialogIndicator.activeIndicator {
@@ -387,36 +388,36 @@ input:checked+.advancedSlider:hover {
 	background: var(--blue);
 }
 
-.keyIcon.crankshaftKeyIcon:hover {
+.keyIcon.wok-key-icon:hover {
 	transform: scale(1.25);
 	cursor: pointer;
 }
 
-.keyIcon.crankshaftKeyIcon {
+.keyIcon.wok-key-icon {
 	display: inline-block;
 	transition: 0s;
 }
 
-.crankshaftKeybindSettingWrapper {
+.wok-keybind-setting {
 	display: flex;
 }
 
-.material-icons.crankshaftUnbindButton {
+.material-icons.wok-unbind-button {
 	color: red;
 	font-size: 2em !important;
 	padding-left: 0.2em;
 }
 
-.crankshaftUnbindButton:hover {
+.wok-unbind-button:hover {
 	cursor: pointer;
 	transform: scale(1.2);
 }
 
-.crankshaftKeybindConflict.hidden {
+.wok-keybind-conflict.hidden {
 	display: none;
 }
 
-.crankshaftKeybindConflict {
+.wok-keybind-conflict {
 	color: #ffad00;
 	font-size: 1.4em !important;
 	margin: 0.1em 0.6em;
@@ -454,13 +455,13 @@ input:checked+.advancedSlider:hover {
 
 /* Sidebar settings layout: pick a section from a persistent nav instead of scrolling
    through stacked collapsibles. Only the chosen section is mounted in the viewport. */
-.Crankshaft-settings {
+.wok-settings {
 	display: flex;
 	align-items: flex-start;
 	gap: 18px;
 }
 
-.Crankshaft-settings-nav {
+.wok-settings-nav {
 	flex: 0 0 168px;
 	position: sticky;
 	top: 0;
@@ -471,7 +472,7 @@ input:checked+.advancedSlider:hover {
 	border-right: 1px solid rgba(255, 255, 255, .08);
 }
 
-.Crankshaft-settings-navitem {
+.wok-settings-navitem {
 	padding: 10px 12px;
 	border-left: 3px solid transparent;
 	color: rgba(255, 255, 255, .62);
@@ -483,44 +484,34 @@ input:checked+.advancedSlider:hover {
 	transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
 }
 
-.Crankshaft-settings-navitem:hover {
+.wok-settings-navitem:hover {
 	color: #fff;
 	background: rgba(255, 255, 255, .05);
 }
 
-.Crankshaft-settings-navitem.active {
+.wok-settings-navitem.active {
 	color: #fff;
 	background: rgba(251, 192, 45, .10);
 	border-left-color: #FBC02D;
 }
 
-.Crankshaft-settings-pane {
+.wok-settings-pane {
 	flex: 1 1 auto;
 	min-width: 0;
 }
 
-.Crankshaft-settings-section.hidden {
+.wok-settings-section.hidden {
 	display: none;
 }
 
-/* The section title is redundant with the highlighted nav item, so keep it quiet. */
-.Crankshaft-settings-section .Crankshaft-setHed {
-	cursor: default;
-	margin-top: 0;
-	opacity: .55;
-	font-size: 13px;
-	letter-spacing: .08em;
-	text-transform: uppercase;
-}
-
 /* Group headings inside a section. */
-.Crankshaft-settings .setting.heading {
+.wok-settings .setting.heading {
 	padding: 18px 0 2px;
 	border: 0;
 	background: none;
 }
 
-.Crankshaft-settings .setting.heading .setting-title {
+.wok-settings .setting.heading .setting-title {
 	font-size: 13px;
 	font-weight: 700;
 	letter-spacing: .10em;
@@ -529,6 +520,6 @@ input:checked+.advancedSlider:hover {
 	margin: 0;
 }
 
-.Crankshaft-settings .setting.heading:first-child {
+.wok-settings .setting.heading:first-child {
 	padding-top: 4px;
 }

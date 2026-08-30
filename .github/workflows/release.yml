@@ -142,7 +142,7 @@ jobs:
             printf '%s  %s\n' "$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
           done < <(find artifacts -type f -print0 | sort -z)
           cat > release-notes.txt <<EOF
-          WOK Client ${version} adds plain WOK.SOCIAL branding to the gameplay HUD and restores the default patched Electron 44 nightly runtime after real-play testing identified a network-latency regression in the optimized qualified runtime.
+          WOK Client ${version} removes disabled validation and overlay code, reduces the shipped JavaScript, and removes the Stream Krunker self-promotion while preserving genuine Live Streams.
 
           The Windows x64 installer uses the patched Electron 44 nightly archive whose SHA-256 is b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e.
 

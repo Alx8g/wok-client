@@ -1,3 +1,14 @@
+## WOK Client 1.1.0-rc.12 (2026-08-30)
+
+### Cleanup
+- Removed the disabled adaptive gameplay validator and unreachable renderer/main-process integration.
+- Removed the already-unshipped performance/network overlay implementation, dead theme variables, six unused exports, and two unreferenced repository images.
+- Reduced runtime JavaScript outputs from 16 to 13 and removed 38,294 bytes from the bundled JavaScript.
+- Removed 2,686 lines while preserving migration, compatibility, active diagnostics, launch media, input, networking, visuals and calibration.
+
+### Menu
+- Added a static Clean Menu UI fallback that removes `Stream Krunker and get Featured!` from Live Streams while preserving genuine stream cards and layout.
+
 ## WOK Client 1.1.0-rc.11 (2026-08-30)
 
 ### Branding

@@ -19,6 +19,7 @@ const EVENT_METRICS = new Map([
 ]);
 const PRESENTATION_SPAN = 'SubmitCompositorFrameToPresentationCompositorFrame';
 const WOK_SUBMIT_EVENT = 'WokFrameSubmitted';
+const WOK_FEEDBACK_EVENT = 'WokFramePresentationFeedback';
 const WOK_TERMINAL_EVENT = 'WokFrameTerminal';
 
 function parseTraceEvent(line) {
@@ -89,8 +90,12 @@ export async function analyzeFrameTrace(tracePath) {
 	const presentationEndTimestamps = new Set();
 	const commitFrameSequenceIds = new Set();
 	const submittedFrameTokens = new Set();
+	const feedbackFrameTokens = new Set();
+	const gpuCompleteFrameTokens = new Set();
 	const terminalFrameTokens = new Set();
+	const gpuCompletionDurations = [];
 	const outcomeCounts = { not_presented: 0, presented: 0, unknown: 0 };
+	const feedbackFlags = { failure: 0, hw_clock: 0, hw_completion: 0, vsync: 0, zero_copy: 0 };
 	let maximumPendingSwaps = 0;
 	let swapThrottledCount = 0;
 	let maximumDcompPendingFrames = 0;
@@ -165,6 +170,24 @@ export async function analyzeFrameTrace(tracePath) {
 			const token = args.frame_token;
 			if (typeof token === 'string' || typeof token === 'number') submittedFrameTokens.add(String(token));
 		}
+		if (name === WOK_FEEDBACK_EVENT) {
+			const token = args.frame_token;
+			if (typeof token === 'string' || typeof token === 'number') feedbackFrameTokens.add(String(token));
+			const flags = numeric(args.feedback_flags) ?? 0;
+			if ((flags & 1) !== 0) feedbackFlags.vsync++;
+			if ((flags & 2) !== 0) feedbackFlags.hw_clock++;
+			if ((flags & 4) !== 0) feedbackFlags.hw_completion++;
+			if ((flags & 8) !== 0) feedbackFlags.zero_copy++;
+			if ((flags & 16) !== 0 || args.feedback_failed === true) feedbackFlags.failure++;
+			const swapStart = numeric(args.swap_start_timestamp_us);
+			const writesDone = numeric(args.writes_done_timestamp_us);
+			if (writesDone !== undefined && writesDone > 0 && typeof token !== 'undefined') {
+				gpuCompleteFrameTokens.add(String(token));
+				if (swapStart !== undefined && swapStart > 0 && writesDone >= swapStart) {
+					gpuCompletionDurations.push(writesDone - swapStart);
+				}
+			}
+		}
 		if (name === WOK_TERMINAL_EVENT) {
 			const token = args.frame_token;
 			if (typeof token === 'string' || typeof token === 'number') terminalFrameTokens.add(String(token));
@@ -187,6 +210,7 @@ export async function analyzeFrameTrace(tracePath) {
 	const stageMetrics = {};
 	for (const [metric, values] of durations) stageMetrics[metric] = summarizeDurations(values);
 	stageMetrics.submit_to_presentation_feedback = summarizeDurations(presentationDurations);
+	stageMetrics.swap_start_to_gpu_writes_done = summarizeDurations(gpuCompletionDurations);
 
 	return {
 		trace_path: tracePath,
@@ -202,6 +226,8 @@ export async function analyzeFrameTrace(tracePath) {
 			dxgi_present_call_fps: rate(counts.get('dxgi_present') ?? 0),
 			presentation_feedback_fps: rate(presentationEndTimestamps.size),
 			ledger_submitted_fps: rate(submittedFrameTokens.size),
+			ledger_gpu_complete_fps: rate(gpuCompleteFrameTokens.size),
+			ledger_presentation_feedback_fps: rate(feedbackFrameTokens.size),
 			ledger_presented_fps: rate(outcomeCounts.presented)
 		},
 		counts: {
@@ -214,7 +240,10 @@ export async function analyzeFrameTrace(tracePath) {
 			presentation_reporter_spans: presentationDurations.length,
 			presentation_feedbacks: presentationEndTimestamps.size,
 			ledger_submitted_frames: submittedFrameTokens.size,
+			ledger_gpu_complete_frames: gpuCompleteFrameTokens.size,
+			ledger_presentation_feedback_frames: feedbackFrameTokens.size,
 			ledger_terminal_frames: terminalFrameTokens.size,
+			ledger_feedback_flags: feedbackFlags,
 			ledger_outcomes: outcomeCounts
 		},
 		queue: {

@@ -25,6 +25,7 @@ import { resolveTheme } from './themes.ts';
 import { installRawPointerLock } from './raw-pointer-lock.ts';
 import { HUD_CONTAINMENT_CSS } from './hud-containment.ts';
 import { captureIdentityDiagnostic } from './preload-diagnostics.ts';
+import { renameClientSettingsTabs } from './settings-tab-label.ts';
 import type { MotionBlurController } from './motion-blur.ts';
 
 // Capture Node-backed diagnostic configuration during preload evaluation. Krunker can remove the
@@ -1347,19 +1348,8 @@ function patchSettings(_userPrefs: UserPrefs) {
 			return selectedTab === allTabsCount;
 		}
 
-		/**
-		 * Krunker labels the tab that hosts our settings "Client". Rename it in place so the
-		 * client is called what it is called everywhere else. The tab list is rebuilt by the game
-		 * on every settings render, so this reapplies each time rather than running once.
-		 */
-		function renameClientTab() {
-			for (const tab of document.querySelectorAll('#settingsTabs .tab, #settHolder .tab, .settingTab')) {
-				if (tab.textContent?.trim() === 'Client') tab.textContent = 'WOK';
-			}
-		}
-
 		function safeRenderSettings() {
-			renameClientTab();
+			renameClientSettingsTabs(document);
 			if (isClientTab()) renderSettings();
 		}
 
@@ -1390,6 +1380,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 			runHookExtras('showWindow', () => {
 				if (args[0] === 1) {
 					if (settingsWindow.settingType === 'basic') settingsWindow.toggleType({ checked: true });
+					renameClientSettingsTabs(document);
 					const advSliderElem = document.querySelector<HTMLInputElement>('.advancedSwitch input#typeBtn');
 					if (advSliderElem) {
 						advSliderElem.disabled = true;

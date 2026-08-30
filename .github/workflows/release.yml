@@ -144,15 +144,22 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           : > SHA256SUMS.txt
+          if [[ -e release-assets ]]; then
+            echo "release-assets already exists" >&2
+            exit 1
+          fi
+          mkdir release-assets
           declare -A checksum_names=()
           while IFS= read -r -d '' file; do
             name="$(basename "$file")"
+            name="${name// /.}"
             if [[ -n "${checksum_names[$name]:-}" ]]; then
               echo "Duplicate release asset name: $name" >&2
               exit 1
             fi
             checksum_names[$name]=1
-            printf '%s  %s\n' "$(sha256sum "$file" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
+            cp -- "$file" "release-assets/$name"
+            printf '%s  %s\n' "$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
           done < <(find artifacts -type f -print0 | sort -z)
           cat > release-notes.txt <<EOF
           WOK Client ${version} adds RGB local identity, Public-region ping display and sorting, corrected matchmaking and preload behavior, scoped menu cleanup, clearer settings, live application for supported settings, and expanded frame-presentation diagnostics.
@@ -183,5 +190,5 @@ jobs:
             --notes-file release-notes.txt
           while IFS= read -r -d '' file; do
             gh release upload "${GITHUB_REF_NAME}" "$file" --clobber
-          done < <(find artifacts -type f -print0)
+          done < <(find release-assets -type f -print0 | sort -z)
           gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber

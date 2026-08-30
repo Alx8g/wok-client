@@ -1,3 +1,30 @@
+## WOK Client 1.1.0-rc.10 (2026-08-30)
+
+### Added
+- Added optional synchronized RGB treatment for the local name and clan display. Identity changes remain local; Krunker and other players still receive the real account identity.
+- Added numeric Public-region ping display and stable fastest-first sorting while keeping fixed categories pinned.
+- Added frame-trace analysis that reports callback, commit, Viz swap, present call, GPU-complete feedback, presentation feedback, failed frames, queue depth and stage percentiles separately.
+
+### Settings
+- Reorganized WOK settings into Performance, Game, Visuals, Matchmaker, Developer and About.
+- Removed Competitive Mode, the duplicate FPS overlay and obsolete identity controls without changing Krunker visual effects.
+- Added conditional visibility for dependent controls and shorter behavior-first descriptions.
+- Applied raw input, window/display, Discord, timezone and supported developer changes without restarting WOK.
+- Added explicit Reload game and Restart WOK actions only where the underlying Electron or Chromium boundary requires them, reopening the same settings section afterward.
+
+### Matchmaking and menu
+- Integrated corrected matchmaking latency refresh and preload hot-path fixes, including safe refresh rejection handling and dead-port-only long caching.
+- Added scoped menu cleanup for selected promotions and low-value controls while preserving balances and core actions.
+- Fixed stale matchmaking popups surviving gameplay entry.
+
+### Performance
+- Kept Windows on the qualified Electron 44 / Chromium 152 runtime. The rejected lower-throughput scheduler experiment is not included.
+- Scoped Clean Menu UI and Public-region observers to their owned surfaces so unrelated HUD, chat and killfeed mutations no longer trigger reconciliation.
+
+### Packaging and project identity
+- Presented WOK independently in product-facing menus, metadata, Discord and documentation while retaining GPL provenance in packaged open-source notices and historical records.
+- Changed release checksums to use downloadable asset filenames, so `sha256sum -c SHA256SUMS.txt` works after downloading flattened release assets.
+
 ## WOK Client 1.1.0-rc.9 (2026-08-29)
 
 ### Performance

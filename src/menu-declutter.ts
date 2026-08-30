@@ -7,6 +7,8 @@
  * replaced after startup.
  */
 
+import { mutationRecordsTouchSelector } from './mutation-relevance.ts';
+
 export const MENU_DECLUTTER_PREFERENCE_KEY = 'wokMenuDeclutter';
 export const MENU_DECLUTTER_ATTRIBUTE = 'data-wok-menu-declutter';
 export const MENU_DECLUTTER_COLLAPSE_ATTRIBUTE = 'data-wok-menu-declutter-collapse';
@@ -20,6 +22,39 @@ export const MENU_DECLUTTER_STATIC_CSS = `
 #mapInfoHld > #mapInfo { font-size: 20px !important; }
 `;
 export const STREAM_PROMOTION_TEXT = 'Stream Krunker and get featured!';
+
+const MENU_DECLUTTER_SURFACE_SELECTOR = [
+	'#signedInHeaderBar',
+	'#menuHolder',
+	'#mainMenu',
+	'#dailySpinDiv',
+	'#homeStoreAd',
+	'#termsInfo',
+	'#topLeftAdHolder',
+	'#menuBtnBattlepass',
+	'#menuBtnCustomGames',
+	'#menuBtnGuide',
+	'#menuBtnLeaderboards',
+	'#menuBtnNotifications',
+	'#menuBtnSideCommunity',
+	'#menuBtnWallet',
+	'#leaderboardsButton',
+	'#notificationsButton',
+	'#walletButton',
+	'.menuItem',
+	'.ph-item',
+	'.headerBarLeft',
+	'.headerBarRight',
+	'.nav-item',
+	'.nav-notif-section',
+	'.nav-wallet-section',
+	'.streams-overlay',
+	'.stream-card',
+	'.featured-section',
+	'.top-ad-row',
+	'.shop-badge',
+	'.kr-sale-info'
+].join(', ');
 
 export interface MenuDeclutterElement {
 	textContent: string | null;
@@ -604,7 +639,9 @@ function createBrowserEnvironment(): MenuDeclutterEnvironment {
 			currentDocument: () => typeof document === 'undefined' ? undefined : document,
 			createMutationObserver: mutationCallback => {
 				if (typeof MutationObserver !== 'function') return undefined;
-				const observer = new MutationObserver(mutationCallback);
+				const observer = new MutationObserver(records => {
+					if (mutationRecordsTouchSelector(records, MENU_DECLUTTER_SURFACE_SELECTOR)) mutationCallback();
+				});
 				return {
 					disconnect: () => { observer.disconnect(); },
 					observe: target => {

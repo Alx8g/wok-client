@@ -183,7 +183,9 @@ function createRuntimeHarness(): RuntimeHarness {
 		}
 
 		public trigger(): void {
-			if (!this.disconnected) this.callback([], this as unknown as MutationObserver);
+			if (this.disconnected) return;
+			const target = document.getElementById('serverHolder') ?? document.body;
+			this.callback([{ target } as unknown as MutationRecord], this as unknown as MutationObserver);
 		}
 	}
 

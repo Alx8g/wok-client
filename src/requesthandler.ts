@@ -297,7 +297,6 @@ export default class RequestHandler {
 	 * Set the target window.
 	 * @param browserWindow - The target window.
 	 */
-	// FIXME: better way to enable/disable?
 	public constructor(browserWindow: Electron.BrowserWindow, swapDir: string, swapperEnabled: boolean, blockerEnabled: boolean, customFiltersEnabled: boolean, defaultFiltersStr: string, customFiltersPath: string) {
 		this.browserWindow = browserWindow;
 		this.swapDir = swapDir;

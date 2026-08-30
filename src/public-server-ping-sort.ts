@@ -8,6 +8,7 @@
  */
 
 import { matchmakerRegionLatency } from './matchmaker-selection.ts';
+import { mutationRecordsTouchSelector } from './mutation-relevance.ts';
 import {
 	formatPublicServerPingLabel,
 	resolvePublicServerRegionCode,
@@ -20,6 +21,7 @@ export const PUBLIC_SERVER_PING_STYLE_ID = 'wokPublicServerPingSortStyle';
 export const PUBLIC_SERVER_PING_REFRESH_MS = 60_000;
 
 const TEXT_NODE = 3;
+const PUBLIC_SERVER_SURFACE_SELECTOR = '#serverHolder';
 
 export interface PublicServerRegionBlock<T = HTMLElement> {
 	heading: T;
@@ -270,7 +272,7 @@ function reconcile(): void {
 	for (const holder of originalOrders.keys()) {
 		if (!holder.isConnected) originalOrders.delete(holder);
 	}
-	for (const holder of document.querySelectorAll<HTMLElement>('#serverHolder')) {
+	for (const holder of document.querySelectorAll<HTMLElement>(PUBLIC_SERVER_SURFACE_SELECTOR)) {
 		reconcileHolder(holder);
 	}
 }
@@ -317,7 +319,9 @@ export function applyPublicServerPingSortSettings(
 	enabled = true;
 	ensureStylesheet();
 	if (!observer && typeof MutationObserver === 'function' && document.documentElement) {
-		observer = new MutationObserver(scheduleReconcile);
+		observer = new MutationObserver(records => {
+			if (mutationRecordsTouchSelector(records, PUBLIC_SERVER_SURFACE_SELECTOR)) scheduleReconcile();
+		});
 		observer.observe(document.documentElement, { childList: true, subtree: true });
 	}
 	reconcile();

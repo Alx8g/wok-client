@@ -87,8 +87,9 @@ test('waits until Krunker creates the top-left HUD shell', () => {
 	assert.equal(document.getElementById(GAMEPLAY_BRANDING_STYLE_ID), null);
 });
 
-test('branding is static, click-through, and free of per-frame animation', () => {
+test('branding is plain white, static, click-through, and free of decorative chrome', () => {
+	assert.match(GAMEPLAY_BRANDING_CSS, /color:\s*#fff/u);
 	assert.match(GAMEPLAY_BRANDING_CSS, /pointer-events:\s*none/u);
 	assert.match(GAMEPLAY_BRANDING_CSS, /contain:\s*layout style paint/u);
-	assert.doesNotMatch(GAMEPLAY_BRANDING_CSS, /animation|transition/u);
+	assert.doesNotMatch(GAMEPLAY_BRANDING_CSS, /animation|transition|background|border/u);
 });

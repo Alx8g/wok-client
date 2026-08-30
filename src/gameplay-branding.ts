@@ -2,29 +2,23 @@ export const GAMEPLAY_BRANDING_ID = 'wokGameplayBranding';
 export const GAMEPLAY_BRANDING_STYLE_ID = 'wokGameplayBrandingStyle';
 export const GAMEPLAY_BRANDING_CSS = `
 #${GAMEPLAY_BRANDING_ID} {
-	display: flex;
-	align-items: baseline;
-	gap: 7px;
+	display: block;
 	width: max-content;
 	margin: 1px 0 5px;
-	padding: 3px 7px 3px 6px;
-	border-left: 3px solid #fbc02d;
-	border-radius: 2px;
-	background: rgba(0, 0, 0, 0.58);
-	color: rgba(255, 255, 255, 0.82);
+	padding: 0;
+	color: #fff;
 	font-size: 13px;
 	font-weight: 700;
 	line-height: 16px;
-	letter-spacing: 0.03em;
+	letter-spacing: 0.04em;
+	opacity: 0.88;
 	text-shadow: 1px 1px 0 #202020, -1px -1px 0 #202020;
 	pointer-events: none;
 	user-select: none;
 	contain: layout style paint;
 }
 #${GAMEPLAY_BRANDING_ID} .wok-gameplay-brand-url {
-	color: #fbc02d;
-	font-size: 15px;
-	letter-spacing: 0.05em;
+	color: #fff;
 }
 `;
 

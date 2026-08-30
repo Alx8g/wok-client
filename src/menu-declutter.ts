@@ -266,6 +266,11 @@ export function collectMenuDeclutterTargets(
 	for (const saleInfo of environment.queryAll('.kr-sale-info')) targets.add(saleInfo);
 	// Contact, Terms, and Changelog are the only children of this dedicated footer container.
 	for (const footerLinks of environment.queryAll('#termsInfo')) targets.add(footerLinks);
+	// Krunker exposes this generated settings control only when its ad-consent provider is active.
+	// Match its exact visible label so Import, Export, Reset, and future settings actions stay intact.
+	for (const settingsButton of environment.queryAll('.settingsBtn')) {
+		if (normalizeLabel(settingsButton.textContent) === 'manage ads') targets.add(settingsButton);
+	}
 	for (const headerChild of environment.queryAll('#signedInHeaderBar > *')) {
 		if (isVerticalSeparator(headerChild)) targets.add(headerChild);
 	}

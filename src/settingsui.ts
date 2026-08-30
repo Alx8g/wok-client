@@ -154,7 +154,7 @@ function applyThemeSelection(value: string) {
  * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
  */
 const settingsDesc: SettingsDesc = {
-	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: 'Removes promotional and low-value menu items while keeping balances and core controls.', safety: 0, cat: 2, instant: true },
+	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: 'Removes promotions, Manage Ads, and low-value menu items while keeping balances and core controls.', safety: 0, cat: 2, instant: true },
 	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Shows each Public region’s ping and puts the fastest regions first. Fixed categories stay pinned.', safety: 0, cat: 3, instant: true },
 	fpsUncap: { title: 'Un-cap FPS', type: 'bool', desc: 'Removes the frame cap so WOK can run as fast as the system allows.', safety: 0, cat: 0 },
 	rawMouseInput: { title: 'High-Polling Mouse Fix', type: 'bool', desc: 'Prevents camera jumps on high-polling mice and ignores Windows mouse acceleration. Restart required.', safety: 0, cat: 0 },

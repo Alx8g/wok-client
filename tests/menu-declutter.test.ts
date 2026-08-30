@@ -480,6 +480,19 @@ test('hides only Store promo badges and the dedicated legal footer container', (
 	assert.equal(targets.has(storeTitle), false, 'the Store title remains visible');
 });
 
+test('hides only the exact Manage Ads settings button', () => {
+	const root = new FakeMenuElement('body');
+	const manageAds = new FakeMenuElement('div', '', ['settingsBtn'], ' Manage Ads ');
+	const exportSettings = new FakeMenuElement('div', '', ['settingsBtn'], 'Export');
+	const adHelp = new FakeMenuElement('div', '', ['settingsBtn'], 'Manage Ads Help');
+	root.append(manageAds, exportSettings, adHelp);
+
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	assert.equal(targets.has(manageAds), true);
+	assert.equal(targets.has(exportSettings), false);
+	assert.equal(targets.has(adHelp), false);
+});
+
 test('accepts exact accessible labels while rejecting partial control names', () => {
 	const root = new FakeMenuElement('body');
 	const wallet = new FakeMenuElement('div', '', ['nav-item'], 'payments 125');

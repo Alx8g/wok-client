@@ -1,9 +1,5 @@
 name: Build WOK Client release
 
-env:
-  WOK_QUALIFIED_ELECTRON_RELEASE: wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54
-  WOK_QUALIFIED_ELECTRON_ARCHIVE: electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip
-
 on:
   push:
     tags:
@@ -99,22 +95,6 @@ jobs:
       - name: Install dependencies and verified patched Electron
         run: pnpm install --frozen-lockfile
 
-      - name: Download qualified Chromium 152 runtime
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $runtimeDirectory = Join-Path $env:RUNNER_TEMP 'wok-qualified-electron'
-          New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
-          gh release download $env:WOK_QUALIFIED_ELECTRON_RELEASE `
-            --repo $env:GITHUB_REPOSITORY `
-            --pattern $env:WOK_QUALIFIED_ELECTRON_ARCHIVE `
-            --dir $runtimeDirectory
-          $archive = Join-Path $runtimeDirectory $env:WOK_QUALIFIED_ELECTRON_ARCHIVE
-          if (-not (Test-Path $archive)) { throw "Qualified Electron archive was not downloaded: $archive" }
-          "WOK_QUALIFIED_ELECTRON_ZIP=$archive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
       - name: Build platform package
         run: pnpm run make -- --arch=${{ matrix.arch }}
 
@@ -162,12 +142,12 @@ jobs:
             printf '%s  %s\n' "$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
           done < <(find artifacts -type f -print0 | sort -z)
           cat > release-notes.txt <<EOF
-          WOK Client ${version} adds RGB local identity, Public-region ping display and sorting, corrected matchmaking and preload behavior, scoped menu cleanup, clearer settings, live application for supported settings, and expanded frame-presentation diagnostics.
+          WOK Client ${version} adds plain WOK.SOCIAL branding to the gameplay HUD and restores the default patched Electron 44 nightly runtime after real-play testing identified a network-latency regression in the optimized qualified runtime.
 
-          The Windows x64 installer contains the qualified custom Electron 44 / Chromium 152 runtime. Its pinned source-archive SHA-256 is 20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0.
+          The Windows x64 installer uses the patched Electron 44 nightly archive whose SHA-256 is b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e.
 
           Included platforms:
-          - Windows x64 installer with the qualified Chromium 152 runtime
+          - Windows x64 installer with the default patched Electron 44 nightly runtime
           - Linux x64 AppImage
           - macOS arm64 DMG
 

@@ -123,18 +123,37 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          find artifacts -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          : > SHA256SUMS.txt
+          if [[ -e release-assets ]]; then
+            echo "release-assets already exists" >&2
+            exit 1
+          fi
+          mkdir release-assets
+          declare -A checksum_names=()
+          while IFS= read -r -d '' file; do
+            name="$(basename "$file")"
+            name="${name// /.}"
+            if [[ -n "${checksum_names[$name]:-}" ]]; then
+              echo "Duplicate release asset name: $name" >&2
+              exit 1
+            fi
+            checksum_names[$name]=1
+            cp -- "$file" "release-assets/$name"
+            printf '%s  %s\n' "$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
+          done < <(find artifacts -type f -print0 | sort -z)
           cat > release-notes.txt <<EOF
-          WOK Client ${version} contains the unified WOK client, including the adaptive startup-video system, hardware calibration and graphics selection, and hardened IPC and packaging.
+          WOK Client ${version} removes disabled validation and overlay code, reduces the shipped JavaScript, and removes the Stream Krunker self-promotion while preserving genuine Live Streams.
+
+          The Windows x64 installer uses the patched Electron 44 nightly archive whose SHA-256 is b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e.
 
           Included platforms:
-          - Windows x64 installer
+          - Windows x64 installer with the default patched Electron 44 nightly runtime
           - Linux x64 AppImage
           - macOS arm64 DMG
 
           These binaries are unsigned. Windows may display a SmartScreen warning, and the Linux and macOS packages have not yet received native gameplay smoke testing. Treat this as a release candidate and verify SHA256SUMS.txt before use.
 
-          WOK Client is a GPL-3.0 project based on Crankshaft. It is not affiliated with, endorsed by, or approved by FRVR. Performance results vary by hardware, drivers, thermals, game updates, and scene complexity. Terms-sensitive legacy features remain disabled by default.
+          WOK Client is an independent GPL-3.0 project. It is not affiliated with, endorsed by, or approved by FRVR. Performance results vary by hardware, drivers, thermals, game updates, and scene complexity. Terms-sensitive legacy features remain disabled by default.
           EOF
 
       - name: Publish GitHub prerelease
@@ -151,5 +170,5 @@ jobs:
             --notes-file release-notes.txt
           while IFS= read -r -d '' file; do
             gh release upload "${GITHUB_REF_NAME}" "$file" --clobber
-          done < <(find artifacts -type f -print0)
+          done < <(find release-assets -type f -print0 | sort -z)
           gh release upload "${GITHUB_REF_NAME}" SHA256SUMS.txt --clobber

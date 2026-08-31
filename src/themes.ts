@@ -77,10 +77,7 @@ export const THEME_VARIABLES: readonly ThemeVariable[] = [
 	{ name: '--wok-hud-border', description: 'HUD panel border. transparent is a valid answer.' },
 	{ name: '--wok-hud-text', description: 'Neutral HUD text. Never used for anything colour-coded.' },
 	{ name: '--wok-scrollbar-track', description: 'Scrollbar trough.' },
-	{ name: '--wok-scrollbar-thumb', description: 'Scrollbar thumb.' },
-	{ name: '--wok-overlay-bg', description: 'FPS overlay background. It sits over live gameplay, not over a WOK panel.' },
-	{ name: '--wok-overlay-border', description: 'FPS overlay border colour.' },
-	{ name: '--wok-overlay-text', description: 'FPS overlay text colour.' }
+	{ name: '--wok-scrollbar-thumb', description: 'Scrollbar thumb.' }
 ];
 export function themeAssetName(id: string): string {
 	return `theme-${id}.css`;

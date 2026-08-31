@@ -1,3 +1,72 @@
+## WOK Client 1.1.0-rc.12 (2026-08-30)
+
+### Cleanup
+- Removed the disabled adaptive gameplay validator and unreachable renderer/main-process integration.
+- Removed the already-unshipped performance/network overlay implementation, dead theme variables, six unused exports, and two unreferenced repository images.
+- Reduced runtime JavaScript outputs from 16 to 13 and removed 38,294 bytes from the bundled JavaScript.
+- Removed 2,686 lines while preserving migration, compatibility, active diagnostics, launch media, input, networking, visuals and calibration.
+
+### Menu
+- Added a static Clean Menu UI fallback that removes `Stream Krunker and get Featured!` from Live Streams while preserving genuine stream cards and layout.
+
+## WOK Client 1.1.0-rc.11 (2026-08-30)
+
+### Branding
+- Added plain white `WOK.SOCIAL` branding between the gameplay timer and mode/map details so recordings and streams identify where to get the client.
+- Kept the watermark click-through and static. Its temporary parser observer disconnects after mounting; no timer, animation frame or per-frame JavaScript remains.
+
+### Runtime
+- Restored Windows releases to WOK's default patched Electron 44 nightly runtime after real-play A/B testing reproduced the reported network-latency issue only with the optimized qualified Chromium runtime.
+- Verified all 17 compared Chromium payload files in the accepted isolated build are byte-identical to the default patched nightly payload.
+- Retained the optimized qualified Chromium archive as an explicit local diagnostic override only.
+
+## WOK Client 1.1.0-rc.10 (2026-08-30)
+
+### Added
+- Added optional synchronized RGB treatment for the local name and clan display. Identity changes remain local; Krunker and other players still receive the real account identity.
+- Added numeric Public-region ping display and stable fastest-first sorting while keeping fixed categories pinned.
+- Added frame-trace analysis that reports callback, commit, Viz swap, present call, GPU-complete feedback, presentation feedback, failed frames, queue depth and stage percentiles separately.
+
+### Settings
+- Reorganized WOK settings into Performance, Game, Visuals, Matchmaker, Developer and About.
+- Removed Competitive Mode, the duplicate FPS overlay and obsolete identity controls without changing Krunker visual effects.
+- Added conditional visibility for dependent controls and shorter behavior-first descriptions.
+- Applied raw input, window/display, Discord, timezone and supported developer changes without restarting WOK.
+- Added explicit Reload game and Restart WOK actions only where the underlying Electron or Chromium boundary requires them, reopening the same settings section afterward.
+
+### Matchmaking and menu
+- Integrated corrected matchmaking latency refresh and preload hot-path fixes, including safe refresh rejection handling and dead-port-only long caching.
+- Added scoped menu cleanup for selected promotions and low-value controls while preserving balances and core actions.
+- Fixed stale matchmaking popups surviving gameplay entry.
+
+### Performance
+- Kept Windows on the qualified Electron 44 / Chromium 152 runtime. The rejected lower-throughput scheduler experiment is not included.
+- Scoped Clean Menu UI and Public-region observers to their owned surfaces so unrelated HUD, chat and killfeed mutations no longer trigger reconciliation.
+
+### Packaging and project identity
+- Presented WOK independently in product-facing menus, metadata, Discord and documentation while retaining GPL provenance in packaged open-source notices and historical records.
+- Changed release checksums to use downloadable asset filenames, so `sha256sum -c SHA256SUMS.txt` works after downloading flattened release assets.
+
+## WOK Client 1.1.0-rc.9 (2026-08-29)
+
+### Performance
+- Windows now ships the qualified custom Electron 44 / Chromium 152 runtime built with official-build optimization, PGO phase 2, ThinLTO and V8 builtins PGO.
+- The qualified runtime measured a 6.69% paired geometric rAF callback-rate gain in the controlled workload, a 7.46% mean callback-rate gain in real gameplay, a 9.56% mean callback-rate 1%-low gain and an 11.45% p95 callback-interval reduction against official Electron 44 stable. These measurements do not establish submitted, GPU-completed or presented frame rates.
+- Isolated WOK's telemetry HUD rendering so its updates invalidate less of the page.
+
+### Diagnostics
+- Added a 10-second in-match renderer CPU profiler, available through Ctrl+Shift+F9 or `--capture-runtime-profile`.
+- Added a profile analyzer that separates page, WOK, runtime, garbage-collector, program and idle self-time and reports inclusive hot paths.
+- Kept ordinary profile capture low-overhead by leaving broad Chromium tracing disabled unless explicitly requested.
+
+### Packaging
+- Windows release builds download the qualified Chromium 152 archive from its dedicated repository release and reject any archive whose SHA-256 differs from `20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0`.
+- Added installed-runtime provenance and verified local NSIS installation, shortcuts, registry entries and live Chromium identity.
+
+### Fixed
+- Prevented graphics calibration from accepting a D3D11on12 result backed by the WARP software adapter.
+- Updated public branding links to WOK's canonical website.
+
 ## WOK Client 1.1.0-rc.8 (2026-08-17)
 
 ### Visuals

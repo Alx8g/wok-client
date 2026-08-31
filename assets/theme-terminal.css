@@ -45,17 +45,13 @@
 
 	--wok-scrollbar-track: #000000;
 	--wok-scrollbar-thumb: #1F5C2E;
-
-	--wok-overlay-bg: rgba(0, 0, 0, .84);
-	--wok-overlay-border: rgba(59, 224, 122, .66);
-	--wok-overlay-text: #B8F5CD;
 }
 
 /*
  * Scanlines over the section list only. A static gradient, never animated: this runs in the same
  * renderer as the game and a moving full-panel background would cost frames for a joke.
  */
-.Crankshaft-settings-pane {
+.wok-settings-pane {
 	background-image: repeating-linear-gradient(
 		180deg,
 		rgba(59, 224, 122, .035) 0px,
@@ -65,16 +61,16 @@
 	);
 }
 
-.Crankshaft-settings .setting.heading .setting-title {
+.wok-settings .setting.heading .setting-title {
 	text-shadow: 0 0 10px rgba(59, 224, 122, .55);
 }
 
-.Crankshaft-settings-navitem.active {
+.wok-settings-navitem.active {
 	text-shadow: 0 0 8px rgba(59, 224, 122, .45);
 }
 
 /* Prompt marker in front of the active section, the way a shell would show it. */
-.Crankshaft-settings-navitem.active::before {
+.wok-settings-navitem.active::before {
 	content: '> ';
 	color: var(--wok-accent);
 }

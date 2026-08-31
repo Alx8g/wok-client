@@ -47,14 +47,10 @@
 
 	--wok-scrollbar-track: #0B0B0B;
 	--wok-scrollbar-thumb: #303030;
-
-	--wok-overlay-bg: rgba(5, 5, 5, .86);
-	--wok-overlay-border: rgba(251, 192, 45, .72);
-	--wok-overlay-text: #F5F5F5;
 }
 
 /* A single accent rail along the top edge, so the theme announces itself once per surface. */
-.Crankshaft-settings {
+.wok-settings {
 	border-top: 2px solid var(--wok-accent);
 }
 

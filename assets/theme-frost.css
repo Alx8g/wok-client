@@ -43,17 +43,13 @@
 
 	--wok-scrollbar-track: #0B1119;
 	--wok-scrollbar-thumb: #2C3D50;
-
-	--wok-overlay-bg: rgba(8, 12, 17, .84);
-	--wok-overlay-border: rgba(76, 201, 240, .66);
-	--wok-overlay-text: #EAF2F8;
 }
 
 /* Softer than the base layer's hairline: sections read as cards floating on the panel. */
-.Crankshaft-settings .Crankshaft-setBodH {
+.wok-settings .wok-set-body {
 	box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04);
 }
 
-.Crankshaft-settings .setting.settName:not(.heading) {
+.wok-settings .setting.settName:not(.heading) {
 	border-bottom-color: rgba(34, 48, 64, .55);
 }

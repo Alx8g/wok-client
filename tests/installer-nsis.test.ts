@@ -14,7 +14,7 @@ const baseOptions: InstallerScriptOptions = {
 	windowsVersion: '1.1.0.0',
 	publisher: 'WOK contributors',
 	copyright: 'Copyright 2026 WOK contributors',
-	description: 'Hardware-adaptive, performance-focused Krunker desktop client',
+	description: 'The fastest Krunker client. Ever.',
 	sourceDir: 'C:\\build\\WOK Client-win32-x64',
 	outFile: 'C:\\dist\\make\\nsis\\x64\\WOK Client-1.1.0-rc.4-x64-setup.exe',
 	uninstallKey: 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\WOK Client',
@@ -22,7 +22,7 @@ const baseOptions: InstallerScriptOptions = {
 	licensePath: 'C:\\temp\\license.txt',
 	headerBitmapPath,
 	sideBitmapPath,
-	homepageUrl: 'https://client.wok.social',
+	homepageUrl: 'https://wok.social',
 	supportUrl: 'https://github.com/nzalexgarciagil-ctrl/wok-client/issues',
 	updatesUrl: 'https://github.com/nzalexgarciagil-ctrl/wok-client',
 	protocolSchemes: ['wok', 'crankshaft']

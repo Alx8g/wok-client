@@ -28,6 +28,7 @@ import {
 	type CalibrationState
 } from '../src/calibration.ts';
 import { WORKLOAD_VERSION } from '../src/calibration-workload.ts';
+
 const d3d11on12Renderer = 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, D3D11on12 vs_5_0 ps_5_0, D3D11)';
 const stableMetrics: CalibrationMetrics = {
 	averageFps: 300,
@@ -42,7 +43,9 @@ const stableMetrics: CalibrationMetrics = {
 	webglRenderer: d3d11on12Renderer,
 	worstFrameTimeMs: 8
 };
+
 const signature = createCalibrationSignature('2.0.0', '44.0.0', '8086:46a6', 'driver-a');
+
 function createWindowsCandidates() {
 	return createCalibrationCandidates({
 		currentBackend: 'd3d11on12',
@@ -51,6 +54,7 @@ function createWindowsCandidates() {
 		recommendedBackend: 'd3d11on12'
 	});
 }
+
 function unstableMetrics(overrides: Partial<CalibrationMetrics> = {}): CalibrationMetrics {
 	return {
 		...stableMetrics,
@@ -62,16 +66,20 @@ function unstableMetrics(overrides: Partial<CalibrationMetrics> = {}): Calibrati
 		...overrides
 	};
 }
+
 function signatureWith(overrides: Partial<CalibrationSignature>): CalibrationSignature {
 	return { ...signature, ...overrides };
 }
+
+/** Starts the run with a plan-creation time whose counterbalancing coin flip stages the wanted candidate first. */
 function startRunWithOrder(state: CalibrationState, firstCandidateId: string): CalibrationState {
-	for (let now = 1000; now < 1200; now++) {
+	for (let now = 1_000; now < 1_200; now++) {
 		const started = startCalibrationRun(state, now);
 		if (started.plan[0]?.candidateId === firstCandidateId) return started;
 	}
 	throw new Error(`Could not stage ${firstCandidateId} first`);
 }
+
 test('driver invalidation ignores backend-dependent GL renderer strings', () => {
 	const d3d11 = collectStableGraphicsDriverFields({
 		driverVendor: 'Intel',
@@ -83,39 +91,35 @@ test('driver invalidation ignores backend-dependent GL renderer strings', () => 
 		driverVersion: '32.0.101.9999',
 		glRenderer: 'ANGLE D3D11on12'
 	});
+
 	assert.deepEqual(d3d11, d3d11on12);
 });
+
 test('stages a short uncapped-first Windows candidate plan', () => {
 	const candidates = createWindowsCandidates();
-	assert.deepEqual(
-		candidates.map((candidate) => candidate.id),
-		['d3d11on12:uncapped', 'default:uncapped']
-	);
-	assert.equal(
-		candidates.some((candidate) => candidate.framePolicy === 'capped'),
-		false
-	);
+
+	assert.deepEqual(candidates.map(candidate => candidate.id), [
+		'd3d11on12:uncapped',
+		'default:uncapped'
+	]);
+	assert.equal(candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 });
+
 test('never stages a capped (vsync) recovery candidate, even after severe uncapped instability', () => {
 	const candidates = createWindowsCandidates();
 	let healthyState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	healthyState = recordCalibrationResult(healthyState, candidates[0], stableMetrics);
-	assert.equal(
-		healthyState.candidates.some((candidate) => candidate.framePolicy === 'capped'),
-		false
-	);
+	assert.equal(healthyState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+
+	// A competitive preset never auto-applies vsync on synthetic evidence: instability that is
+	// real gets caught by the real-gameplay validation loop, not traded for hidden latency.
 	let unstableState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	unstableState = recordCalibrationResult(unstableState, candidates[0], unstableMetrics());
-	assert.equal(
-		unstableState.candidates.some((candidate) => candidate.framePolicy === 'capped'),
-		false
-	);
-	assert.equal(
-		unstableState.plan.some((slot) => slot.stage === 'recovery'),
-		false
-	);
+	assert.equal(unstableState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+	assert.equal(unstableState.plan.some(slot => slot.stage === 'recovery'), false);
 	assert.equal(getPendingCalibrationCandidate(unstableState)?.id, 'default:uncapped');
 });
+
 test('never schedules blocked or Windows-only profiles where unsupported', () => {
 	const windowsCandidates = createCalibrationCandidates({
 		blockedBackends: ['d3d11on12'],
@@ -124,39 +128,52 @@ test('never schedules blocked or Windows-only profiles where unsupported', () =>
 		platform: 'win32',
 		recommendedBackend: 'd3d11on12'
 	});
-	assert.equal(
-		windowsCandidates.some((candidate) => candidate.backend === 'd3d11on12'),
-		false
-	);
+	assert.equal(windowsCandidates.some(candidate => candidate.backend === 'd3d11on12'), false);
+
 	const linuxCandidates = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'uncapped',
 		platform: 'linux',
 		recommendedBackend: 'd3d11'
 	});
-	assert.deepEqual(
-		linuxCandidates.map((candidate) => candidate.id),
-		['default:uncapped']
-	);
+	assert.deepEqual(linuxCandidates.map(candidate => candidate.id), ['default:uncapped']);
+
 	const macCandidates = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'uncapped',
 		platform: 'darwin',
 		recommendedBackend: 'd3d11on12'
 	});
+	assert.deepEqual(macCandidates.map(candidate => candidate.id), ['default:uncapped']);
+});
+
+test('verifies explicit effective renderer backends and treats default conservatively', () => {
 	assert.deepEqual(
-		macCandidates.map((candidate) => candidate.id),
-		['default:uncapped']
+		verifyEffectiveRendererBackend('d3d11', 'ANGLE (NVIDIA, GeForce RTX, D3D11 vs_5_0 ps_5_0, D3D11)'),
+		{ candidateBackend: 'd3d11', detectedBackend: 'd3d11', status: 'verified' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('d3d11on12', d3d11on12Renderer),
+		{ candidateBackend: 'd3d11on12', detectedBackend: 'd3d11on12', status: 'verified' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('vulkan', 'ANGLE (AMD, Radeon RX, Vulkan 1.3.0)'),
+		{ candidateBackend: 'vulkan', detectedBackend: 'vulkan', status: 'verified' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('d3d11on12', 'ANGLE (Intel, Iris Xe, D3D11 vs_5_0 ps_5_0, D3D11)'),
+		{ candidateBackend: 'd3d11on12', detectedBackend: 'd3d11', status: 'mismatch' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('default', d3d11on12Renderer),
+		{ candidateBackend: 'default', detectedBackend: 'd3d11on12', status: 'indeterminate' }
+	);
+	assert.deepEqual(
+		verifyEffectiveRendererBackend('vulkan', 'Unknown renderer'),
+		{ candidateBackend: 'vulkan', status: 'indeterminate' }
 	);
 });
-test('verifies explicit effective renderer backends and treats default conservatively', () => {
-	assert.deepEqual(verifyEffectiveRendererBackend('d3d11', 'ANGLE (NVIDIA, GeForce RTX, D3D11 vs_5_0 ps_5_0, D3D11)'), { candidateBackend: 'd3d11', detectedBackend: 'd3d11', status: 'verified' });
-	assert.deepEqual(verifyEffectiveRendererBackend('d3d11on12', d3d11on12Renderer), { candidateBackend: 'd3d11on12', detectedBackend: 'd3d11on12', status: 'verified' });
-	assert.deepEqual(verifyEffectiveRendererBackend('vulkan', 'ANGLE (AMD, Radeon RX, Vulkan 1.3.0)'), { candidateBackend: 'vulkan', detectedBackend: 'vulkan', status: 'verified' });
-	assert.deepEqual(verifyEffectiveRendererBackend('d3d11on12', 'ANGLE (Intel, Iris Xe, D3D11 vs_5_0 ps_5_0, D3D11)'), { candidateBackend: 'd3d11on12', detectedBackend: 'd3d11', status: 'mismatch' });
-	assert.deepEqual(verifyEffectiveRendererBackend('default', d3d11on12Renderer), { candidateBackend: 'default', detectedBackend: 'd3d11on12', status: 'indeterminate' });
-	assert.deepEqual(verifyEffectiveRendererBackend('vulkan', 'Unknown renderer'), { candidateBackend: 'vulkan', status: 'indeterminate' });
-});
+
 test('scores factual throughput and consistency without a frame-policy penalty', () => {
 	const unstable = unstableMetrics({
 		averageFps: 330,
@@ -166,13 +183,16 @@ test('scores factual throughput and consistency without a frame-policy penalty',
 		p95FrameTimeMs: 14,
 		worstFrameTimeMs: 80
 	});
+
 	assert.ok(calculateCalibrationScore(stableMetrics) > calculateCalibrationScore(unstable));
 	assert.equal(calculateCalibrationScore(stableMetrics, 'uncapped'), calculateCalibrationScore(stableMetrics, 'capped'));
 });
+
 test('records every first-pass trial and recommends the strongest measured backend', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	assert.equal(getPendingCalibrationCandidate(state)?.id, candidates[0].id);
+
 	state = recordCalibrationResult(state, candidates[0], stableMetrics);
 	state = recordCalibrationResult(state, candidates[1], {
 		...stableMetrics,
@@ -181,12 +201,14 @@ test('records every first-pass trial and recommends the strongest measured backe
 		p95FrameTimeMs: 5.5
 	});
 	state = finalizeCalibration(state);
+
 	assert.equal(state.status, 'awaiting-confirmation');
 	assert.equal(state.recommendedSelection?.candidate.id, candidates[0].id);
 	state = completeCalibration(state, true);
 	assert.equal(state.status, 'complete');
 	assert.equal(state.activeSelection?.candidate.id, candidates[0].id);
 });
+
 test('does not accept an explicit candidate whose renderer reports another backend', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
@@ -202,30 +224,28 @@ test('does not accept an explicit candidate whose renderer reports another backe
 		onePercentLowFps: 180
 	});
 	state = finalizeCalibration(state);
+
 	assert.equal(state.results[0].backendVerification.status, 'mismatch');
 	assert.match(state.results[0].failureReason ?? '', /requested d3d11on12/i);
 	assert.equal(state.recommendedSelection?.candidate.backend, 'default');
 });
+
 test('recommends only uncapped profiles from the automatic path, even under instability', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], unstableMetrics());
-	state = recordCalibrationResult(
-		state,
-		candidates[1],
-		unstableMetrics({
-			averageFps: 130,
-			webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
-		})
-	);
+	state = recordCalibrationResult(state, candidates[1], unstableMetrics({
+		averageFps: 130,
+		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
+	}));
 	state = finalizeCalibration(state);
+
 	assert.equal(state.recommendedSelection?.candidate.framePolicy, 'uncapped');
-	assert.equal(
-		state.candidates.some((candidate) => candidate.framePolicy === 'capped'),
-		false
-	);
+	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 });
+
 test('legacy persisted capped evidence is only used when no uncapped evidence exists', () => {
+	// A resumed pre-removal plan can still hold capped results; they may win only by default.
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	const legacyCapped = { backend: 'd3d11on12' as const, framePolicy: 'capped' as const, id: 'd3d11on12:capped' };
@@ -237,21 +257,30 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 		p95FrameTimeMs: 8
 	});
 	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'capped');
+
 	state = recordCalibrationResult(state, candidates[0], stableMetrics);
 	assert.equal(finalizeCalibration(state).recommendedSelection?.candidate.framePolicy, 'uncapped');
 });
+
 test('v5 signatures stamp the current benchmark and workload versions', () => {
+	// Benchmark 5 adds independent animation-callback corroboration to the depth-6 fence pacing
+	// policy; workload 4 remains the measured Krunker render and main-thread entity lanes.
 	assert.equal(CALIBRATION_VERSION, 5);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
 	assert.equal(WORKLOAD_VERSION, 4);
 });
+
 test('completed v4 evidence stays active but becomes stale under the v5 benchmark policy', () => {
 	const candidates = createWindowsCandidates();
 	const versionFourSignature = signatureWith({ benchmarkVersion: 4 });
-	let completed = startRunWithOrder(prepareCalibrationState(undefined, versionFourSignature, candidates, true), candidates[0].id);
+	let completed = startRunWithOrder(
+		prepareCalibrationState(undefined, versionFourSignature, candidates, true),
+		candidates[0].id
+	);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
+
 	const prepared = prepareCalibrationState(completed, signature, candidates, true);
 	assert.equal(prepared.signatureStale, true);
 	assert.equal(prepared.status, 'complete');
@@ -259,6 +288,7 @@ test('completed v4 evidence stays active but becomes stale under the v5 benchmar
 	assert.equal(prepared.activeSelection?.candidate.id, completed.activeSelection?.candidate.id);
 	assert.equal(calibrationResumeRequired(prepared), false);
 });
+
 test('treats app version as informational while relevant signature fields invalidate', () => {
 	const appOnlyChange = signatureWith({ appVersion: '2.1.0' });
 	assert.equal(calibrationSignaturesEqual(signature, appOnlyChange), true);
@@ -267,6 +297,7 @@ test('treats app version as informational while relevant signature fields invali
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ electronVersion: '45.0.0' })), false);
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ hardwareFingerprint: '10de:2684' })), false);
 	assert.equal(calibrationSignaturesEqual(signature, signatureWith({ driverFingerprint: 'driver-b' })), false);
+
 	const candidates = createWindowsCandidates();
 	const state = prepareCalibrationState(undefined, signature, candidates, false);
 	const appUpdated = prepareCalibrationState(state, appOnlyChange, candidates, false);
@@ -279,24 +310,33 @@ test('treats app version as informational while relevant signature fields invali
 	assert.notEqual(prepareCalibrationState(state, signatureWith({ hardwareFingerprint: '10de:2684' }), candidates, false), state);
 	assert.notEqual(prepareCalibrationState(state, signatureWith({ driverFingerprint: 'driver-b' }), candidates, false), state);
 });
+
 test('preserves a known-good selection for an explicit rerun but not a relevant signature change', () => {
 	const candidates = createWindowsCandidates();
 	let completed = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
 	assert.ok(completed.activeSelection);
+
 	const explicitRerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, candidates, true);
 	assert.equal(explicitRerun.activeSelection?.candidate.id, completed.activeSelection.candidate.id);
-	const driverInvalidated = prepareCalibrationState(completed, signatureWith({ driverFingerprint: 'driver-b' }), candidates, true);
+
+	const driverInvalidated = prepareCalibrationState(
+		completed,
+		signatureWith({ driverFingerprint: 'driver-b' }),
+		candidates,
+		true
+	);
 	assert.equal(driverInvalidated.activeSelection, undefined);
 });
+
 test('preserves backward-compatible parsing while an old benchmark version reruns', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], stableMetrics);
 	const legacyState = {
 		...state,
-		results: state.results.map((result) => ({
+		results: state.results.map(result => ({
 			candidate: result.candidate,
 			metrics: {
 				averageFps: result.metrics.averageFps,
@@ -314,6 +354,7 @@ test('preserves backward-compatible parsing while an old benchmark version rerun
 		signature: { ...state.signature, benchmarkVersion: 1 }
 	};
 	const parsed = parseCalibrationState(legacyState);
+
 	assert.ok(parsed);
 	assert.equal(parsed.signature.benchmarkVersion, 1);
 	assert.deepEqual(parsed.results[0].metrics.lowConfidenceReasons, []);
@@ -321,14 +362,17 @@ test('preserves backward-compatible parsing while an old benchmark version rerun
 	assert.equal(parsed.results[0].backendVerification.status, 'verified');
 	assert.notEqual(prepareCalibrationState(parsed, signature, candidates, false), parsed);
 });
+
 test('uses a meaningful-win threshold and keeps known-good active selection on marginal low-confidence evidence', () => {
 	assert.equal(isMeaningfulCalibrationScoreWin(104.99, 100), false);
 	assert.equal(isMeaningfulCalibrationScoreWin(106, 100), true);
+
 	const candidates = createWindowsCandidates();
 	let completed = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
 	assert.equal(completed.activeSelection?.candidate.id, candidates[0].id);
+
 	let rerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, candidates, true);
 	const marginalLowConfidenceMetrics: CalibrationMetrics = {
 		...stableMetrics,
@@ -338,16 +382,22 @@ test('uses a meaningful-win threshold and keeps known-good active selection on m
 		p95FrameTimeMs: 3.95
 	};
 	rerun = recordCalibrationResult(rerun, candidates[1], marginalLowConfidenceMetrics);
-	assert.equal(isMeaningfulCalibrationScoreWin(rerun.results[0].score, completed.activeSelection?.score ?? 0), false);
+	assert.equal(
+		isMeaningfulCalibrationScoreWin(rerun.results[0].score, completed.activeSelection?.score ?? 0),
+		false
+	);
 	rerun = finalizeCalibration(rerun);
+
 	assert.deepEqual(rerun.results[0].metrics.lowConfidenceReasons, ['window-blurred']);
 	assert.equal(rerun.recommendedSelection?.candidate.id, completed.activeSelection?.candidate.id);
 });
+
 test('allows warn-and-continue evidence to win only when the measured gain is meaningful', () => {
 	const candidates = createWindowsCandidates();
 	let completed = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	completed = recordCalibrationResult(completed, candidates[0], stableMetrics);
 	completed = completeCalibration(finalizeCalibration(completed), true);
+
 	let rerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, candidates, true);
 	rerun = recordCalibrationResult(rerun, candidates[1], {
 		...stableMetrics,
@@ -357,12 +407,18 @@ test('allows warn-and-continue evidence to win only when the measured gain is me
 		p95FrameTimeMs: 3.5,
 		worstFrameTimeMs: 7
 	});
-	assert.equal(isMeaningfulCalibrationScoreWin(rerun.results[0].score, completed.activeSelection?.score ?? 0), true);
+	assert.equal(
+		isMeaningfulCalibrationScoreWin(rerun.results[0].score, completed.activeSelection?.score ?? 0),
+		true
+	);
 	rerun = finalizeCalibration(rerun);
+
 	assert.equal(rerun.recommendedSelection?.candidate.id, candidates[1].id);
 });
+
 test('benchmark page reports contamination and keeps measured-loop UI work bounded', () => {
 	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
+
 	assert.match(page, /UI_UPDATE_INTERVAL_MS = 200/);
 	assert.match(page, /frameTimeSum \+= frameTime/);
 	assert.match(page, /window\.addEventListener\('blur'/);
@@ -375,13 +431,18 @@ test('benchmark page reports contamination and keeps measured-loop UI work bound
 	assert.doesNotMatch(page, /\.toFixed\(/);
 	assert.doesNotMatch(page, /gl\.finish\(/);
 });
+
 test('trial page embeds the workload and completion-honest measurement modules', () => {
 	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
+
+	// The unit-tested modules are serialized into the page, so page and tests cannot drift.
 	assert.match(page, /const createWorkload = /);
 	assert.match(page, /const createEntitySimulation = /);
 	assert.match(page, /const createWorkloadSpin = /);
 	assert.match(page, /const runBenchmarkTrial = /);
 	assert.match(page, /"jsSpinIterations":160000/);
+	// v4 constants travel with the page: the main-thread entity lane and the census-shaped
+	// render lane inside WORKLOAD_SPEC, the depth-6 pacing through the embedded-constant block.
 	assert.match(page, /"entityCount":12288/);
 	assert.match(page, /"entitySubsteps":4/);
 	assert.match(page, /"entityNeighborChecks":24576/);
@@ -392,19 +453,25 @@ test('trial page embeds the workload and completion-honest measurement modules',
 	assert.match(page, /const BENCHMARK_FENCE_QUEUE_DEPTH = 6;/);
 	assert.match(page, /const BENCHMARK_FENCE_RING_SIZE = 7;/);
 	assert.match(page, /bufferSubData/);
+	// The entity lane must run inside the measured frame, before submission.
 	assert.match(page, /spin: \(\) => \{ spinSink \+= simulateEntities\(\) \+ spin\(\); return spinSink; \}/);
 	assert.match(page, /EXT_disjoint_timer_query_webgl2/);
 	assert.match(page, /fenceSync/);
 	assert.match(page, /"desynchronized":false/);
 	assert.match(page, /"depth":true/);
+	// Full-window canvas at real dimensions x devicePixelRatio, plus the CSS-only DOM overlay.
 	assert.match(page, /window\.innerWidth \* devicePixelRatioValue/);
 	assert.match(page, /overlay-gradient/);
 	assert.match(page, /data-feed-row/);
 	assert.doesNotMatch(page, /desynchronized: true/);
 });
+
 test('retry orchestration counts launched retries independently from rejected diagnostics', async () => {
 	const candidates = createWindowsCandidates();
-	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
+	let state = startRunWithOrder(
+		prepareCalibrationState(undefined, signature, candidates, false),
+		candidates[0].id
+	);
 	const firstRejected: CalibrationMetrics = {
 		...stableMetrics,
 		lowConfidenceReasons: ['window-blurred'],
@@ -423,10 +490,10 @@ test('retry orchestration counts launched retries independently from rejected di
 		candidate: candidates[0],
 		getState: () => state,
 		isRunTimeBudgetExhausted: () => false,
-		persistState: (nextState) => {
+		persistState: nextState => {
 			state = nextState;
 		},
-		runAttempt: async (attempt) => {
+		runAttempt: async attempt => {
 			firstTrialAttempts.push(attempt);
 			return {
 				aborted: false,
@@ -437,7 +504,12 @@ test('retry orchestration counts launched retries independently from rejected di
 	assert.deepEqual(firstTrialAttempts, [1, 2]);
 	assert.equal(firstTrial.metrics, firstRejected);
 	assert.equal(state.runRetriesUsed, 1);
-	assert.equal(state.rejectedAttempts.length, 2, 'both rejected attempts remain available as diagnostics');
+	assert.equal(
+		state.rejectedAttempts.length,
+		2,
+		'both rejected attempts remain available as diagnostics'
+	);
+
 	const laterRejected: CalibrationMetrics = {
 		...stableMetrics,
 		lowConfidenceReasons: ['window-blurred'],
@@ -448,10 +520,10 @@ test('retry orchestration counts launched retries independently from rejected di
 		candidate: candidates[1],
 		getState: () => state,
 		isRunTimeBudgetExhausted: () => false,
-		persistState: (nextState) => {
+		persistState: nextState => {
 			state = nextState;
 		},
-		runAttempt: async (attempt) => {
+		runAttempt: async attempt => {
 			laterTrialAttempts.push(attempt);
 			return {
 				aborted: false,
@@ -464,27 +536,32 @@ test('retry orchestration counts launched retries independently from rejected di
 	assert.equal(state.runRetriesUsed, 2);
 	assert.equal(state.rejectedAttempts.length, 3);
 });
+
 test('retry orchestration fails closed when the retry-count transition cannot persist', async () => {
 	const candidates = createWindowsCandidates();
-	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
+	let state = startRunWithOrder(
+		prepareCalibrationState(undefined, signature, candidates, false),
+		candidates[0].id
+	);
 	const rejected: CalibrationMetrics = {
 		...stableMetrics,
 		lowConfidenceReasons: ['window-blurred'],
 		rejectionReasons: ['window-blurred']
 	};
 	const attempts: number[] = [];
+
 	await assert.rejects(
 		orchestrateCalibrationTrialRetry({
 			candidate: candidates[0],
 			getState: () => state,
 			isRunTimeBudgetExhausted: () => false,
-			persistState: (nextState) => {
+			persistState: nextState => {
 				if (nextState.runRetriesUsed > state.runRetriesUsed) {
 					throw new Error('retry-count-write-failed');
 				}
 				state = nextState;
 			},
-			runAttempt: async (attempt) => {
+			runAttempt: async attempt => {
 				attempts.push(attempt);
 				return {
 					aborted: false,
@@ -498,6 +575,7 @@ test('retry orchestration fails closed when the retry-count transition cannot pe
 	assert.equal(state.runRetriesUsed, 0);
 	assert.equal(state.rejectedAttempts.length, 1);
 });
+
 test('trial page renders the prior rejection reason only for a second attempt', () => {
 	const candidate = createWindowsCandidates()[0];
 	const firstAttempt = buildCalibrationTrialPage(candidate, 1, 2, '<svg></svg>');
@@ -506,22 +584,34 @@ test('trial page renders the prior rejection reason only for a second attempt', 
 		previousEventLoopWorstMs: 115.6,
 		previousRejectionReasons: ['severe-event-loop-disturbance', 'power-state-changed']
 	});
+
 	assert.doesNotMatch(firstAttempt, /class="pill retry"/);
 	assert.doesNotMatch(firstAttempt, /115\.6 ms timer delay/);
 	assert.match(retryAttempt, /class="pill retry"/);
-	assert.match(retryAttempt, /severe event-loop disturbance \(115\.6 ms timer delay\), AC\/battery power changed/);
+	assert.match(
+		retryAttempt,
+		/severe event-loop disturbance \(115\.6 ms timer delay\), AC\/battery power changed/
+	);
 	assert.match(retryAttempt, /running again/iu);
 	assert.match(retryAttempt, /warning visible/);
 });
+
 test('result page displays low-confidence and backend-verification evidence without a latency claim', () => {
 	const candidates = createWindowsCandidates();
 	let state = prepareCalibrationState(undefined, signature, candidates, false);
 	state = recordCalibrationResult(state, candidates[0], {
 		...stableMetrics,
-		lowConfidenceReasons: ['window-blurred', 'document-visibility-changed', 'window-resized', 'webgl-context-lost', 'severe-event-loop-disturbance']
+		lowConfidenceReasons: [
+			'window-blurred',
+			'document-visibility-changed',
+			'window-resized',
+			'webgl-context-lost',
+			'severe-event-loop-disturbance'
+		]
 	});
 	const result = state.results[0];
-	const page = buildCalibrationResultPage([result], result, '<svg></svg>', false);
+	const page = buildCalibrationResultPage([result], result, '<svg></svg>');
+
 	assert.match(page, /Lower confidence/);
 	assert.match(page, /window lost focus/);
 	assert.match(page, /document visibility changed/);
@@ -529,9 +619,11 @@ test('result page displays low-confidence and backend-verification evidence with
 	assert.match(page, /WebGL context loss/);
 	assert.match(page, /severe event-loop disturbance/);
 	assert.match(page, /Effective renderer verified as d3d11on12/);
+	// The page must never imply it measured input latency; it measures frame delivery only.
 	assert.ok(!/input.?latency/iu.test(page), 'the results page must not claim a latency measurement');
 	assert.doesNotMatch(page, /renderer-response estimate/);
 });
+
 test('result page reports GPU-timing status honestly and lists repeated trials', () => {
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
@@ -544,17 +636,23 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 280, webglRenderer: 'Unknown renderer' });
 	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 282, webglRenderer: 'Unknown renderer' });
 	const finalized = finalizeCalibration(state);
-	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>');
+
 	assert.match(page, /GPU completion measured directly \(p95 4\.20 ms\)/);
 	assert.match(page, /GPU completion inferred from bounded-queue frame delivery/);
 	assert.match(page, /2 trials, median shown/);
 	assert.match(page, /Trial 1:/);
 	assert.match(page, /Trial 2:/);
+	// The page must still promise provisional application and automatic revert, in plain language.
 	assert.match(page, /check this profile/iu);
 	assert.match(page, /runs badly.*switches back on its own/iu);
 	assert.match(page, /runs badly.*switches back on its own/iu);
 });
+
 test('a fence-pacing artifact invalidates the comparison and keeps the current backend', () => {
+	// Field reproduction (Iris Xe): the benchmark stalled 75% of ticks on d3d11on12 with ~2 ms of
+	// measured GPU time, scored it 2x below default, and switched a machine whose real gameplay
+	// runs 2x FASTER on d3d11on12. The artifact flag must keep the benchmark from deciding.
 	const artifactMetrics: CalibrationMetrics = {
 		...stableMetrics,
 		averageFps: 106.29,
@@ -577,21 +675,23 @@ test('a fence-pacing artifact invalidates the comparison and keeps the current b
 		stallRatio: 0,
 		webglRenderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, Direct3D11 vs_5_0 ps_5_0, D3D11)'
 	};
+
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], artifactMetrics);
-	assert.equal(
-		state.candidates.some((candidate) => candidate.framePolicy === 'capped'),
-		false
-	);
+
+	// Synthetic instability from the artifact must not stage a capped recovery launch.
+	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
+
 	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
-	assert.equal(
-		state.plan.some((slot) => slot.stage === 'repeat'),
-		false
-	);
+
+	// Repeating trials reproduces a deterministic artifact; no ABAB stage may be scheduled.
+	assert.equal(state.plan.some(slot => slot.stage === 'repeat'), false);
+
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
 });
+
 test('the same slow trial without the artifact flag still lets the numeric winner switch backends', () => {
 	const honestSlowMetrics: CalibrationMetrics = {
 		...stableMetrics,
@@ -609,25 +709,29 @@ test('the same slow trial without the artifact flag still lets the numeric winne
 		p95FrameTimeMs: 6.6,
 		webglRenderer: 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, Direct3D11 vs_5_0 ps_5_0, D3D11)'
 	};
+
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], honestSlowMetrics);
 	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
+
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'default:uncapped');
 });
+
 test('non-Intel Windows machines retain hardware D3D11 instead of probing a WARP fallback', () => {
+	// Chromium default on Windows is already ANGLE-D3D11. Field verification on AMD showed that
+	// forcing d3d11on12 can resolve to d3d11-warp-webgl, so it is not a generic challenger.
 	const amdOrNvidiaCandidates = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'uncapped',
 		platform: 'win32',
 		recommendedBackend: 'default'
 	});
-	assert.deepEqual(
-		amdOrNvidiaCandidates.map((candidate) => candidate.id),
-		['default:uncapped']
-	);
+	assert.deepEqual(amdOrNvidiaCandidates.map(candidate => candidate.id), ['default:uncapped']);
 	assert.equal(calibrationOffersBackendComparison(amdOrNvidiaCandidates, 'win32'), false);
+
+	// Explicit D3D11 is equivalent to Chromium default on Windows, not another backend.
 	const explicitD3d11Candidates = createCalibrationCandidates({
 		currentBackend: 'd3d11',
 		currentFramePolicy: 'uncapped',
@@ -636,6 +740,7 @@ test('non-Intel Windows machines retain hardware D3D11 instead of probing a WARP
 	});
 	assert.equal(calibrationOffersBackendComparison(explicitD3d11Candidates, 'win32'), false);
 });
+
 test('the results page explains an artifact-affected verdict instead of claiming a measured win', () => {
 	const artifactResult: CalibrationMetrics = {
 		...stableMetrics,
@@ -650,15 +755,21 @@ test('the results page explains an artifact-affected verdict instead of claiming
 	state = recordCalibrationResult(state, candidates[0], artifactResult);
 	state = recordCalibrationResult(state, candidates[1], { ...stableMetrics, averageFps: 151.15, webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)' });
 	const finalized = finalizeCalibration(state);
-	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>', true);
+
+	const page = buildCalibrationResultPage(finalized.results, finalized.recommendedSelection, '<svg></svg>');
 	assert.ok(page.includes('could not compare these fairly'), 'summary must explain the invalidated comparison');
 	assert.ok(page.includes('Benchmark artifact'), 'the artifact card must be labeled');
 	assert.ok(page.includes('not comparable'), 'the artifact score must not print as a number');
 	assert.ok(!page.includes('The strongest measured profile'), 'must not claim a measured win');
 });
+
 test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped profile', () => {
-	const candidates = createWindowsCandidates();
+	// Exact field reproduction: default:uncapped trips the low-ratio instability heuristic and
+	// stages default:capped recovery; d3d11on12 wins the uncapped bracket via the artifact
+	// guard; the capped rescue must not then use the artifact numbers to swap in default:capped.
+	const candidates = createWindowsCandidates(); // d3d11on12 current, default challenger
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[1].id);
+
 	state = recordCalibrationResult(state, candidates[1], {
 		...stableMetrics,
 		averageFps: 127.96,
@@ -668,10 +779,12 @@ test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped 
 		stallRatio: 0.01,
 		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
 	});
-	assert.deepEqual(
-		state.candidates.map((candidate) => candidate.id),
-		['d3d11on12:uncapped', 'default:uncapped']
-	);
+	// Even genuine instability no longer stages a capped (vsync) candidate.
+	assert.deepEqual(state.candidates.map(candidate => candidate.id), [
+		'd3d11on12:uncapped',
+		'default:uncapped'
+	]);
+
 	state = recordCalibrationResult(state, candidates[0], {
 		...stableMetrics,
 		averageFps: 68.89,
@@ -686,6 +799,7 @@ test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped 
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, 'd3d11on12:uncapped');
 });
+
 function createLinuxCandidates() {
 	return createCalibrationCandidates({
 		currentBackend: 'default',
@@ -694,10 +808,13 @@ function createLinuxCandidates() {
 		recommendedBackend: 'default'
 	});
 }
+
 test('only genuinely different renderer backends count as a comparison on every platform', () => {
 	const singleDefault = createLinuxCandidates();
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'linux'), false);
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'darwin'), false);
+
+	// A frame-policy pair of one backend is still one backend: nothing to compare off Windows.
 	const policyPair = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'capped',
@@ -706,6 +823,8 @@ test('only genuinely different renderer backends count as a comparison on every 
 	});
 	assert.equal(policyPair.length, 2);
 	assert.equal(calibrationOffersBackendComparison(policyPair, 'linux'), false);
+
+	// A manual vulkan selection contributes a genuinely different backend on Linux.
 	const vulkanChallenge = createCalibrationCandidates({
 		currentBackend: 'vulkan',
 		currentFramePolicy: 'uncapped',
@@ -713,14 +832,20 @@ test('only genuinely different renderer backends count as a comparison on every 
 		recommendedBackend: 'default'
 	});
 	assert.equal(calibrationOffersBackendComparison(vulkanChallenge, 'linux'), true);
+
+	// Intel D3D11on12 versus default D3D11 remains a real Windows comparison; one default is not.
 	assert.equal(calibrationOffersBackendComparison(createWindowsCandidates(), 'win32'), true);
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'win32'), false);
 });
+
 test('non-Windows calibration completes immediately with the default profile, clearly reasoned', () => {
 	const state = prepareCalibrationState(undefined, signature, createLinuxCandidates(), false, 'linux');
+
 	assert.equal(state.status, 'complete');
 	assert.equal(state.completionReason, CALIBRATION_NO_COMPARISON_REASON);
 	assert.equal(typeof state.completedAt, 'number');
+	// Nothing was applied or planned: the automatic default profile stays in charge and no
+	// consent, relaunch, or trial cycle is owed on the next startup.
 	assert.equal(state.activeSelection, undefined);
 	assert.equal(state.recommendedSelection, undefined);
 	assert.deepEqual(state.plan, []);
@@ -729,14 +854,17 @@ test('non-Windows calibration completes immediately with the default profile, cl
 	assert.equal(calibrationResumeRequired(state), false);
 	assert.equal(getPendingCalibrationCandidate(state), undefined);
 });
+
 test('an explicit rerun off Windows never enters the running state', () => {
 	const completed = prepareCalibrationState(undefined, signature, createLinuxCandidates(), false, 'linux');
 	const rerun = prepareCalibrationState(requestCalibrationRerun(completed), signature, createLinuxCandidates(), false, 'linux');
+
 	assert.equal(rerun.status, 'complete');
 	assert.equal(rerun.rerunRequested, false);
 	assert.equal(rerun.completionReason, CALIBRATION_NO_COMPARISON_REASON);
 	assert.equal(calibrationResumeRequired(rerun), false);
 });
+
 test('a genuine backend comparison still runs off Windows', () => {
 	const vulkanChallenge = createCalibrationCandidates({
 		currentBackend: 'vulkan',
@@ -746,11 +874,13 @@ test('a genuine backend comparison still runs off Windows', () => {
 	});
 	const prepared = prepareCalibrationState(undefined, signature, vulkanChallenge, false, 'linux');
 	assert.equal(prepared.status, 'uncalibrated');
+
 	const running = prepareCalibrationState(requestCalibrationRerun(prepared), signature, vulkanChallenge, false, 'linux');
 	assert.equal(running.status, 'running');
 	assert.equal(running.completionReason, undefined);
 	assert.equal(running.plan.length, 2);
 });
+
 test('single-backend Windows plans complete without a pointless restart cycle', () => {
 	const cappedPair = createCalibrationCandidates({
 		currentBackend: 'default',
@@ -758,29 +888,40 @@ test('single-backend Windows plans complete without a pointless restart cycle', 
 		platform: 'win32',
 		recommendedBackend: 'default'
 	});
-	assert.deepEqual(
-		cappedPair.map((candidate) => candidate.id),
-		['default:capped', 'default:uncapped']
-	);
+	assert.deepEqual(cappedPair.map(candidate => candidate.id), ['default:capped', 'default:uncapped']);
+
 	const prepared = prepareCalibrationState(undefined, signature, cappedPair, false, 'win32');
 	assert.equal(prepared.status, 'complete');
 	assert.equal(prepared.completionReason, CALIBRATION_NO_COMPARISON_REASON);
 	assert.equal(prepareCalibrationState(requestCalibrationRerun(prepared), signature, cappedPair, false, 'win32').status, 'complete');
 });
+
 test('the unmeasured completion reason survives the persistence round trip', () => {
 	const state = prepareCalibrationState(undefined, signature, createLinuxCandidates(), false, 'linux');
 	const parsed = parseCalibrationState(JSON.parse(JSON.stringify(state)));
+
 	assert.ok(parsed);
 	assert.equal(parsed.status, 'complete');
 	assert.equal(parsed.completionReason, CALIBRATION_NO_COMPARISON_REASON);
+	// A later same-signature prepare leaves the completed state untouched.
 	assert.equal(prepareCalibrationState(parsed, signature, createLinuxCandidates(), false, 'linux'), parsed);
 });
+
 test('every constant the serialized trial function references is embedded in the page', () => {
+	// runBenchmarkTrial is injected into the calibration page by function serialization, so a
+	// constant it closes over is NOT carried with it: it must be written into the same scope by
+	// the page generator. Missing one throws a ReferenceError on the first frame and the trial
+	// silently never starts. Field regression: BENCHMARK_PROGRESS_WARMUP_SHARE shipped unembedded
+	// and calibration hung on "Preparing renderer".
 	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
 	const source = runBenchmarkTrial.toString();
 	const referenced = new Set(source.match(/\bBENCHMARK_[A-Z0-9_]+\b/gu) ?? []);
 	assert.ok(referenced.size > 0, 'expected the trial function to reference benchmark constants');
+
 	for (const name of referenced) {
-		assert.ok(new RegExp(`const ${name} = `, 'u').test(page), `${name} is referenced by runBenchmarkTrial but never declared in the trial page`);
+		assert.ok(
+			new RegExp(`const ${name} = `, 'u').test(page),
+			`${name} is referenced by runBenchmarkTrial but never declared in the trial page`
+		);
 	}
 });

@@ -1,6 +1,14 @@
 import type { CalibrationCandidate, CalibrationLowConfidenceReason, CalibrationResult, EffectiveBackendVerification } from './calibration.ts';
 import { CALIBRATION_BENCHMARK_MS, CALIBRATION_MIN_SAMPLES } from './calibration.ts';
-import { createEntitySimulation, createWorkload, createWorkloadSpec, createWorkloadSpin, mulberry32, WORKLOAD_CONSTANTS, WORKLOAD_CONTEXT_ATTRIBUTES } from './calibration-workload.ts';
+import {
+	createEntitySimulation,
+	createWorkload,
+	createWorkloadSpec,
+	createWorkloadSpin,
+	mulberry32,
+	WORKLOAD_CONSTANTS,
+	WORKLOAD_CONTEXT_ATTRIBUTES
+} from './calibration-workload.ts';
 import {
 	BENCHMARK_EVENT_LOOP_SAMPLE_MS,
 	BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG,
@@ -21,12 +29,25 @@ import {
 	BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS,
 	runBenchmarkTrial
 } from './calibration-benchmark.ts';
+
+/**
+ * 'capped' is not a frame-rate cap: it is simply the uncap switches absent, i.e. compositor
+ * vsync left on. Krunker has no in-browser frame-cap setting, so the honest user-facing label
+ * is display synchronization, not a cap.
+ */
 function framePolicyLabel(framePolicy: CalibrationCandidate['framePolicy']): string {
 	return framePolicy === 'capped' ? 'display-synced' : framePolicy;
 }
+
 function escapeHtml(value: string): string {
-	return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+	return value
+		.replaceAll('&', '&amp;')
+		.replaceAll('<', '&lt;')
+		.replaceAll('>', '&gt;')
+		.replaceAll('"', '&quot;')
+		.replaceAll("'", '&#39;');
 }
+
 const lowConfidenceLabels: Record<CalibrationLowConfidenceReason, string> = {
 	'document-visibility-changed': 'document visibility changed',
 	'gpu-disjoint-excessive': 'excessive GPU timer disruption',
@@ -38,9 +59,16 @@ const lowConfidenceLabels: Record<CalibrationLowConfidenceReason, string> = {
 	'window-blurred': 'window lost focus',
 	'window-resized': 'window was resized'
 };
+
 function embedJson(value: unknown): string {
 	return JSON.stringify(value).replaceAll('<', '\\u003c');
 }
+
+/**
+ * The measurement logic lives in `calibration-workload.ts` / `calibration-benchmark.ts` (unit
+ * tested with injected fakes); the page embeds those exact functions by serialization, together
+ * with the constants they reference, so page and tests can never drift apart.
+ */
 function embeddedModulesScript(): string {
 	const constants: Record<string, unknown> = {
 		BENCHMARK_EVENT_LOOP_SAMPLE_MS,
@@ -71,6 +99,7 @@ function embeddedModulesScript(): string {
 			const createWorkloadSpin = ${createWorkloadSpin.toString()};
 			const runBenchmarkTrial = ${runBenchmarkTrial.toString()};`;
 }
+
 function sharedStyles(): string {
 	return `
 			:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
@@ -114,6 +143,21 @@ function sharedStyles(): string {
 			canvas { position: fixed; inset: 0; z-index: 0; width: 100vw; height: 100vh; image-rendering: auto; pointer-events: none; }
 		`;
 }
+
+/**
+ * DOM/UI compositing overlay (design §1.2): the game composites a large HTML UI over its canvas,
+ * so the workload does too. Panel and HUD animate through compositor-driven CSS keyframes only;
+ * the feed text updates at most 5 Hz through the throttled updater. Zero per-frame JS DOM writes.
+ *
+ * The keyframes use stepped timing (~14 updates/s): lane tuning showed that smooth compositor-only
+ * animations let the uncapped compositor free-run presents far past the workload frame rate
+ * (461/s vs 135 canvas frames/s on the reference machine), untethering the present path from the
+ * scene under test and inflating GPU-process busy ~35% beyond the design §1.4 lane gate. Stepped
+ * timing keeps the persistent composited overlay layers and their per-present composite cost while
+ * the canvas drives present cadence, matching the measured menu behavior. `will-change` pins the
+ * layer promotion so it cannot vary across Chromium versions. Part of the WORKLOAD_VERSION 1
+ * freeze: changing this overlay changes the measured lane shape.
+ */
 function overlayStyles(): string {
 	return `
 			.overlay-gradient { position: fixed; inset: -12vh -12vw; z-index: 10; pointer-events: none; opacity: .06; background: linear-gradient(115deg, #FBC02D 0%, #202840 45%, #7B3131 100%); animation: wok-pan 7s steps(96) infinite alternate; will-change: transform; }
@@ -127,34 +171,50 @@ function overlayStyles(): string {
 			.feed div { padding: 5px 8px; border: 1px solid #2C2C2C; background: rgba(20, 20, 20, .8); color: #9A9A9A; font: 600 10px/1.3 ui-monospace, SFMono-Regular, Consolas, monospace; }
 		`;
 }
+
 function brandMarkup(markSvg: string): string {
 	return `<div class="brand">${markSvg}<div class="brand-copy"><div class="brand-name">WOK CLIENT</div><div class="brand-subtitle">Competitive calibration</div></div></div>`;
 }
+
 function overlayMarkup(): string {
 	const hudCells = Array.from({ length: 24 }, () => '<span></span>').join('');
 	const feedRows = Array.from({ length: 6 }, (_unused, index) => `<div data-feed-row="${index}">standby</div>`).join('');
 	return `<div class="overlay-gradient"></div><div class="hud">${hudCells}</div><div class="feed" id="feed">${feedRows}</div>`;
 }
+
 export interface CalibrationTrialPageExtras {
+	/** 1-based attempt number; 2 renders the retry messaging (design §2.4). */
 	attempt?: number;
 	onBattery?: boolean;
+	/** Diagnostics from the rejected attempt that caused this retry. */
 	previousEventLoopWorstMs?: number;
 	previousRejectionReasons?: CalibrationLowConfidenceReason[];
 	refreshRateHz?: number;
 }
-export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step: number, total: number, markSvg: string, extras: CalibrationTrialPageExtras = {}): string {
+
+export function buildCalibrationTrialPage(
+	candidate: CalibrationCandidate,
+	step: number,
+	total: number,
+	markSvg: string,
+	extras: CalibrationTrialPageExtras = {}
+): string {
 	const attempt = extras.attempt ?? 1;
 	const isRetry = attempt > 1;
 	const previousRejectionReasons = extras.previousRejectionReasons ?? [];
 	const previousReasonText = previousRejectionReasons
-		.map((reason) => {
+		.map(reason => {
 			const label = lowConfidenceLabels[reason];
-			return reason === 'severe-event-loop-disturbance' && typeof extras.previousEventLoopWorstMs === 'number' && Number.isFinite(extras.previousEventLoopWorstMs)
+			return reason === 'severe-event-loop-disturbance'
+				&& typeof extras.previousEventLoopWorstMs === 'number'
+				&& Number.isFinite(extras.previousEventLoopWorstMs)
 				? `${label} (${extras.previousEventLoopWorstMs.toFixed(1)} ms timer delay)`
 				: label;
 		})
 		.join(', ');
-	const retryWarning = previousReasonText ? `Interrupted: ${previousReasonText}. Running again.` : 'Interrupted &mdash; running this test again.';
+	const retryWarning = previousReasonText
+		? `Interrupted: ${previousReasonText}. Running again.`
+		: 'Interrupted &mdash; running this test again.';
 	const trialDefaults = {
 		benchmarkMs: CALIBRATION_BENCHMARK_MS,
 		minSamples: CALIBRATION_MIN_SAMPLES,
@@ -167,6 +227,7 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 		onBattery: extras.onBattery ?? null,
 		refreshRateHz: extras.refreshRateHz ?? null
 	};
+
 	return `<!doctype html>
 	<html lang="en">
 	<head>
@@ -192,7 +253,9 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 				</div>
 				<div class="progress-track"><div class="progress-fill" id="progress"></div></div>
 				<div class="status"><span id="phase">Preparing renderer</span><span id="live">Collecting samples</span></div>
-				<div class="warning${isRetry ? ' visible' : ''}" id="warning">${isRetry ? escapeHtml(retryWarning) : 'This test was disturbed; the result will be marked lower confidence.'}</div>
+				<div class="warning${isRetry ? ' visible' : ''}" id="warning">${isRetry
+					? escapeHtml(retryWarning)
+					: 'This test was disturbed; the result will be marked lower confidence.'}</div>
 				<div class="privacy">Runs locally. Nothing is sent anywhere.</div>
 			</section>
 		</main>
@@ -215,6 +278,7 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 				const feedRows = Array.from(document.querySelectorAll('#feed div'));
 				const round = value => Math.round(value * 100) / 100;
 
+				// Full-window canvas at the real window dimensions x devicePixelRatio (design §1.2).
 				const devicePixelRatioValue = window.devicePixelRatio || 1;
 				canvas.width = Math.max(1, Math.round(window.innerWidth * devicePixelRatioValue));
 				canvas.height = Math.max(1, Math.round(window.innerHeight * devicePixelRatioValue));
@@ -240,7 +304,7 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 						const battery = await navigator.getBattery();
 						onBattery = !battery.charging;
 					}
-				} catch (_error) { }
+				} catch (_error) { /* battery status is diagnostic only */ }
 
 				let workload;
 				let simulateEntities;
@@ -274,6 +338,7 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 						phase.textContent = 'Measuring';
 						live.textContent = 'Collecting samples';
 					}
+					// Feed text updates at most 5 Hz through this throttled updater (design §1.2).
 					feedTick++;
 					const row = feedRows[feedTick % feedRows.length];
 					if (row) row.textContent = 'evt ' + feedTick + ' \\u00b7 ' + update.phase;
@@ -294,6 +359,9 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 					onProgress: update => updateUi(update, false),
 					renderFrame: frameIndex => { if (!contextLost) workload.renderFrame(frameIndex); },
 					requestFrame: callback => requestAnimationFrame(callback),
+					// The main-thread lane, run per frame before any GL call, exactly as a game runs
+					// its simulation before submitting the frame it produced: the v3 entity update
+					// plus the residual unstructured spin.
 					spin: () => { spinSink += simulateEntities() + spin(); return spinSink; },
 					startSampler: (callback, intervalMs) => {
 						const timer = setInterval(callback, intervalMs);
@@ -332,6 +400,7 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 				phase.textContent = 'Trial complete';
 				live.textContent = 'Reporting (' + round(trial.stallRatio * 100) + '% stalled ticks)';
 
+				// Round-1 compatible warn-and-continue field; the main process decides rejection/retry.
 				const lowConfidenceReasons = trial.rejectionReasons.slice();
 				if (trial.contaminationFlags.indexOf(BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG) >= 0) lowConfidenceReasons.push(BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG);
 				return Object.assign({}, trial, { lowConfidenceReasons });
@@ -340,6 +409,7 @@ export function buildCalibrationTrialPage(candidate: CalibrationCandidate, step:
 	</body>
 	</html>`;
 }
+
 function backendVerificationText(verification: EffectiveBackendVerification): string {
 	if (verification.status === 'verified') return `Effective renderer verified as ${verification.candidateBackend}.`;
 	if (verification.status === 'mismatch') return `Effective renderer mismatch: requested ${verification.candidateBackend}, reported ${verification.detectedBackend ?? 'an unknown backend'}.`;
@@ -350,6 +420,7 @@ function backendVerificationText(verification: EffectiveBackendVerification): st
 	}
 	return `The effective ${verification.candidateBackend} backend could not be verified from the renderer string.`;
 }
+
 function gpuTimingText(result: CalibrationResult): string {
 	const status = result.metrics.gpuTimingStatus;
 	if (status === 'measured' && typeof result.metrics.gpuTimeP95Ms === 'number') {
@@ -358,46 +429,53 @@ function gpuTimingText(result: CalibrationResult): string {
 	if (status === 'unreliable') return 'GPU timer queries were unreliable on this backend; completion inferred from bounded-queue frame delivery.';
 	return 'GPU completion inferred from bounded-queue frame delivery.';
 }
+
 interface CandidateResultGroup {
 	candidate: CalibrationCandidate;
 	representative: CalibrationResult;
 	trials: CalibrationResult[];
 }
+
 function groupResultsByCandidate(results: CalibrationResult[]): CandidateResultGroup[] {
 	const groups: CandidateResultGroup[] = [];
 	for (const result of results) {
-		const existing = groups.find((group) => group.candidate.id === result.candidate.id);
+		const existing = groups.find(group => group.candidate.id === result.candidate.id);
 		if (existing) existing.trials.push(result);
 		else groups.push({ candidate: result.candidate, representative: result, trials: [result] });
 	}
 	for (const group of groups) {
 		const scores = [...group.trials].sort((left, right) => left.score - right.score);
 		const median = scores[Math.floor((scores.length - 1) / 2)].score;
-		group.representative = group.trials.reduce((closest, trial) => (Math.abs(trial.score - median) < Math.abs(closest.score - median) ? trial : closest), group.trials[0]);
+		group.representative = group.trials.reduce((closest, trial) => (
+			Math.abs(trial.score - median) < Math.abs(closest.score - median) ? trial : closest
+		), group.trials[0]);
 	}
 	return groups;
 }
+
 function trialListMarkup(group: CandidateResultGroup): string {
 	if (group.trials.length < 2) return '';
-	const rows = group.trials
-		.map((trial, index) => {
-			const label = trial.metrics.success ? `${trial.metrics.averageFps.toFixed(1)} FPS avg · ${trial.metrics.onePercentLowFps.toFixed(1)} 1% low · score ${trial.score.toFixed(2)}` : 'failed';
-			const flags = (trial.metrics.lowConfidenceReasons ?? []).length > 0 ? ' · lower confidence' : '';
-			return `<li>Trial ${index + 1}: ${escapeHtml(label)}${flags}</li>`;
-		})
-		.join('');
+	const rows = group.trials.map((trial, index) => {
+		const label = trial.metrics.success
+			? `${trial.metrics.averageFps.toFixed(1)} FPS avg · ${trial.metrics.onePercentLowFps.toFixed(1)} 1% low · score ${trial.score.toFixed(2)}`
+			: 'failed';
+		const flags = (trial.metrics.lowConfidenceReasons ?? []).length > 0 ? ' · lower confidence' : '';
+		return `<li>Trial ${index + 1}: ${escapeHtml(label)}${flags}</li>`;
+	}).join('');
 	return `<ul class="trial-list">${rows}</ul>`;
 }
+
 function resultMarkup(group: CandidateResultGroup, recommendedId?: string): string {
 	const { candidate, representative } = group;
 	const metrics = representative.metrics;
 	const recommended = candidate.id === recommendedId;
 	const lowConfidenceReasons = metrics.lowConfidenceReasons ?? [];
-	const lowConfidenceMarkup =
-		lowConfidenceReasons.length > 0
-			? `<div class="result-note low-confidence">Lower confidence: ${escapeHtml(lowConfidenceReasons.map((reason) => lowConfidenceLabels[reason]).join(', '))}. The trial was retained as warn-and-continue evidence.</div>`
-			: '';
-	const failureMarkup = representative.failureReason ? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>` : '';
+	const lowConfidenceMarkup = lowConfidenceReasons.length > 0
+		? `<div class="result-note low-confidence">Lower confidence: ${escapeHtml(lowConfidenceReasons.map(reason => lowConfidenceLabels[reason]).join(', '))}. The trial was retained as warn-and-continue evidence.</div>`
+		: '';
+	const failureMarkup = representative.failureReason
+		? `<div class="result-note failure">${escapeHtml(representative.failureReason)}</div>`
+		: '';
 	const fencePacingAffected = (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
 	const fencePacingMarkup = fencePacingAffected
 		? '<div class="result-note low-confidence">Benchmark artifact: the test\'s own frame pacing, not this backend, set these numbers. They are not comparable evidence and did not count against this profile.</div>'
@@ -415,15 +493,20 @@ function resultMarkup(group: CandidateResultGroup, recommendedId?: string): stri
 			${failureMarkup}
 		</div>`;
 }
-export function buildCalibrationResultPage(results: CalibrationResult[], recommended: CalibrationResult | undefined, markSvg: string, wasCompetitiveModeEnabled: boolean): string {
+
+export function buildCalibrationResultPage(
+	results: CalibrationResult[],
+	recommended: CalibrationResult | undefined,
+	markSvg: string
+): string {
 	const hasRecommendation = Boolean(recommended);
 	const groups = groupResultsByCandidate(results);
-	const retainedKnownGood = Boolean(recommended && !results.some((result) => result.candidate.id === recommended.candidate.id));
+	const retainedKnownGood = Boolean(recommended && !results.some(result => result.candidate.id === recommended.candidate.id));
 	if (recommended && retainedKnownGood) groups.unshift({ candidate: recommended.candidate, representative: recommended, trials: [recommended] });
-	const resultsHtml = groups.map((group) => resultMarkup(group, recommended?.candidate.id)).join('');
-	const applyLabel = wasCompetitiveModeEnabled ? 'Apply new profile' : 'Enable Competitive mode';
-	const keepLabel = wasCompetitiveModeEnabled ? 'Keep previous profile' : 'Keep current settings';
-	const artifactAffected = results.some((result) => (result.metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
+	const resultsHtml = groups.map(group => resultMarkup(group, recommended?.candidate.id)).join('');
+	const applyLabel = 'Apply new profile';
+	const keepLabel = 'Keep current profile';
+	const artifactAffected = results.some(result => (result.metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG));
 	const summary = recommended
 		? retainedKnownGood
 			? `Nothing beat your current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile, so it stays.`
@@ -431,6 +514,7 @@ export function buildCalibrationResultPage(results: CalibrationResult[], recomme
 				? `The test could not compare these fairly, so your current <strong>${escapeHtml(recommended.candidate.backend)}</strong> profile is kept.`
 				: `Fastest profile: <strong>${escapeHtml(recommended.candidate.backend)}</strong>.`
 		: 'Not enough clean measurements. Keeping your current settings.';
+
 	return `<!doctype html>
 	<html lang="en">
 	<head>

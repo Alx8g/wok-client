@@ -610,7 +610,7 @@ function renderSideBitmap() {
 		tracking: productTracking
 	});
 	fillRect(canvas, 28, 268, width - 56, 1, BRAND.rule);
-	const footer = 'CLIENT.WOK.SOCIAL';
+	const footer = 'WOK.SOCIAL';
 	const footerTracking = 2;
 	const footerX = Math.round((width - captionWidth(footer, 1, footerTracking)) / 2) + 1;
 	drawCaption(canvas, footer, footerX, 282, { color: BRAND.muted, tracking: footerTracking });

@@ -1,27 +1,34 @@
 import { webFrame } from 'electron';
 import { strippedConsole } from './preload.ts';
-import * as os from 'os';
-import { UPSTREAM_REPO_ID } from './branding.ts';
+import * as os from "os";
 import { keyboardEventMatchesKeybind } from './keybind-matching.ts';
-export const upstreamRepoID = UPSTREAM_REPO_ID;
+
+// create element util function. source is my utils lib: https://github.com/KraXen72/roseboxlib/blob/master/esm/lib.js
+/**
+ * create a dom element given an object of properties
+ * @param type element type, e.g. "div"
+ * @param options options for the element. like class, id, etc
+ * @returns element
+ */
 export function createElement(type: string, options: Object = {}) {
 	const element = document.createElement(type);
+
 	Object.entries(options).forEach(([key, value]) => {
 		if (key === 'class') {
-			if (Array.isArray(value))
-				value.forEach((cls: string) => {
-					element.classList.add(cls);
-				});
+			if (Array.isArray(value)) value.forEach((cls: string) => { element.classList.add(cls); });
 			else element.classList.add(value);
 			return;
 		}
+
 		if (key === 'dataset') {
-			Object.entries(value).forEach((entry) => {
+			Object.entries(value).forEach(entry => {
 				const [dataKey, dataValue] = entry;
-				element.dataset[dataKey] = dataValue as string;
+
+				element.dataset[dataKey] = (dataValue as string);
 			});
 			return;
 		}
+
 		if (key === 'text') {
 			element.textContent = value;
 			return;
@@ -36,13 +43,21 @@ export function createElement(type: string, options: Object = {}) {
 		}
 		element.setAttribute(key, value);
 	});
+
 	return element;
 }
+
 const insertedCSS: InsertedCSS = {};
-export function toggleSettingCSS(css: string, identifier: string, value: 'toggle' | boolean = 'toggle') {
+
+/**
+ * inject or uninject css to hide ads
+ * @param value 'toggle'|Boolean
+ */
+export function toggleSettingCSS(css: string, identifier: string, value: ('toggle' | boolean) = 'toggle') {
 	function inject() {
 		insertedCSS[identifier] = webFrame.insertCSS(css);
 	}
+
 	function uninject() {
 		try {
 			webFrame.removeInsertedCSS(insertedCSS[identifier]);
@@ -51,7 +66,9 @@ export function toggleSettingCSS(css: string, identifier: string, value: 'toggle
 			strippedConsole.error("couldn't uninject css: ", error);
 		}
 	}
+
 	if (value === 'toggle') {
+		// normal toggle
 		if (!(identifier in insertedCSS)) inject();
 		else uninject();
 	} else if (!(identifier in insertedCSS) && value === true) {
@@ -60,82 +77,114 @@ export function toggleSettingCSS(css: string, identifier: string, value: 'toggle
 		uninject();
 	}
 }
+
+/** @param classesCount how many classes krunker currently has (custom-only included) */
 export function hiddenClassesImages(classesCount: number) {
 	const prepend = 'menuClassPicker0'.slice(0, -1);
-	const gaps = 4 * (classesCount - 1);
-	const theoreticalButtonSize = Math.round((810 - gaps) / classesCount);
-	const buttonSize = Math.min(theoreticalButtonSize, 50);
+
+	const gaps = (4 * (classesCount - 1)); // for each gap (classesCount - 1) we substract 4px
+	const theoreticalButtonSize = Math.round((810 - gaps) / classesCount); // 810 is krunker's hardcoded middle element width
+	const buttonSize = Math.min(theoreticalButtonSize, 50); // safety measure in case the buttons would be < 50px
+
 	let css = `#hiddenClasses [id^="menuClassPicker"] {
 		width: ${buttonSize}px; height: ${buttonSize}px;
 		background-size: ${buttonSize - 6}px ${buttonSize - 6}px;
 	}\n`;
+
 	for (let i = 0; i < classesCount; i++) css += `#${prepend}${i} { background-image: url("https://assets.krunker.io/textures/classes/icon_${i}.png"); } \n`;
+
 	return css;
 }
-export function secondsToTimestring(num: number) {
-	const minutes = Math.floor(num / 60);
-	const seconds = num % 60;
-	if (minutes < 1) return `${num}s`;
-	return `${minutes}m ${seconds}s`;
-}
+
 export function haveSameContents(array1: unknown[], array2: unknown[]) {
 	if (array1.length !== array2.length) return false;
+
 	const remaining = new Map<unknown, number>();
 	for (const value of array1) remaining.set(value, (remaining.get(value) ?? 0) + 1);
+
 	for (const value of array2) {
 		const count = remaining.get(value);
 		if (!count) return false;
 		if (count === 1) remaining.delete(value);
 		else remaining.set(value, count - 1);
 	}
+
 	return remaining.size === 0;
 }
-export function objectsAreEqual(
-	object1: {
-		[key: string]: any;
-	},
-	object2: {
-		[key: string]: any;
-	}
-) {
-	if (typeof object1 !== typeof object2) return false;
+
+/**
+ * Checks whether or not 2 objects are equal.
+ * @param object1 the first object
+ * @param object2 the second object
+ * @returns whether or not they are equal
+ */
+
+// biome-ignore lint/suspicious/noExplicitAny: hacky
+export  function objectsAreEqual(object1: {[key: string]: any}, object2: {[key: string]: any}) {
+	if (typeof object1 !== typeof object2) return false; // failsafe here just in case
 	if (Array.isArray(object1) && Array.isArray(object2) && !haveSameContents(object1, object2)) return false;
 	if (!haveSameContents(Object.keys(object1), Object.keys(object2))) return false;
+
+	// Now we can assume object1 and object2 have all the same keys.
 	for (const key of Object.keys(object1)) {
 		const object1Value = object1[key];
 		const object2Value = object2[key];
+
 		if (typeof object1Value !== typeof object2Value) return false;
+		// Now we can assume object1Value and object2Value have the same typeof
+
 		if (Array.isArray(object1Value)) {
-			if (!Array.isArray(object2Value)) return false;
+			if (!Array.isArray(object2Value)) return false; // We have to re-check here since arrays and objects have the same typeof
 			if (!haveSameContents(object1Value, object2Value)) return false;
 			continue;
 		}
-		if (typeof object1Value === 'object') {
+
+		if (typeof object1Value === "object") {
 			if (!objectsAreEqual(object1Value, object2Value)) return false;
 			continue;
 		}
+
 		if (object1Value !== object2Value) return false;
 	}
+
 	return true;
 }
+
+/**
+ * Check if a KeyboardEvent matches a keybind setting.
+ * @param setting The value of the 'keybind' setting
+ * @param event The KeyboardEvent that needs to be matched
+ * @returns Whether or not the passed KeyboardEvent matches the keybind setting
+ */
 export function keyboardEventMatchesCustomSetting(setting: KeybindUserPref, event: KeyboardEvent) {
 	return keyboardEventMatchesKeybind(setting, event, document.activeElement as HTMLElement | null);
 }
+
+/**
+ * Get the display string of a keybind setting
+ * @param setting The value of the 'keybind' setting
+ * @returns A parsed string containing the modifiers and key of the keybind setting.
+ */
 export function parseKeybindSettingDisplay(setting: KeybindUserPref) {
-	return (setting.shift ? 'Shift+' : '') + (setting.ctrl ? (os.platform() === 'darwin' ? 'CMD+' : 'CTRL+') : '') + (setting.alt ? 'Alt+' : '') + setting.key.toUpperCase();
+	return (setting.shift ? 'Shift+' : '') + (setting.ctrl ? ((os.platform() === "darwin") ? 'CMD+' : 'CTRL+') : '') + (setting.alt ? 'Alt+' : '') + setting.key.toUpperCase();
 }
+
+/**
+ * Parses a KeyboardEvent into a keybind setting
+ * @param event The captured KeyboardEvent
+ * @returns A 'keybind' setting value created from the KeyboardEvent.
+ */
 export function turnKeyboardEventIntoSettingValue(event: KeyboardEvent): KeybindUserPref {
-	if (event.key === 'Shift' || event.key === 'Control' || event.key === 'Alt')
-		return {
-			shift: false,
-			ctrl: false,
-			alt: false,
-			key: event.key
-		};
+	if (event.key === "Shift" || event.key === "Control" || event.key === "Alt") return {
+		shift: false,
+		ctrl: false,
+		alt: false,
+		key: event.key
+	}
 	return {
 		shift: event.shiftKey,
 		ctrl: event.ctrlKey,
 		alt: event.altKey,
 		key: event.key
-	};
+	}
 }

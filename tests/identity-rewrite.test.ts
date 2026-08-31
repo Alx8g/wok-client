@@ -1,20 +1,37 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createIdentityTextRewriter, type IdentityMutationRecord, type IdentityRewriteCallback, type IdentityRewriteNode, NO_REWRITE_ATTRIBUTE, startIdentityRewriteEngine } from '../src/identity-rewrite.ts';
+import {
+	createIdentityTextRewrite,
+	createIdentityTextRewriter,
+	type IdentityMutationRecord,
+	type IdentityRewriteCallback,
+	type IdentityRewriteNode,
+	NO_REWRITE_ATTRIBUTE,
+	startIdentityRewriteEngine
+} from '../src/identity-rewrite.ts';
+
+/*
+ * A DOM small enough to read. The engine only ever touches nodeType, childNodes, data, tagName,
+ * hasAttribute and isConnected, so these plain objects exercise the real code paths.
+ */
+
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 const COMMENT_NODE = 8;
+
 interface FakeNode extends IdentityRewriteNode {
 	childNodes: FakeNode[];
 	parent?: FakeNode;
 }
+
 function text(value: string): FakeNode {
 	return { childNodes: [], data: value, isConnected: true, nodeType: TEXT_NODE };
 }
+
 function element(tagName: string, children: FakeNode[] = [], attributes: Record<string, string> = {}): FakeNode {
 	const node: FakeNode = {
 		childNodes: children,
-		hasAttribute: (name) => Object.hasOwn(attributes, name),
+		hasAttribute: name => Object.hasOwn(attributes, name),
 		isConnected: true,
 		nodeType: ELEMENT_NODE,
 		tagName
@@ -22,13 +39,16 @@ function element(tagName: string, children: FakeNode[] = [], attributes: Record<
 	for (const child of children) child.parent = node;
 	return node;
 }
+
 function textNodesOf(node: FakeNode): FakeNode[] {
 	if (node.nodeType === TEXT_NODE) return [node];
 	return node.childNodes.flatMap(textNodesOf);
 }
+
 function allText(node: FakeNode): string[] {
-	return textNodesOf(node).map((child) => child.data ?? '');
+	return textNodesOf(node).map(child => child.data ?? '');
 }
+
 interface Harness {
 	characterDataChanged(node: FakeNode, value: string): void;
 	childAdded(parent: FakeNode, child: FakeNode): void;
@@ -37,54 +57,37 @@ interface Harness {
 	readonly observedOptions: unknown;
 	runFrames(count?: number): void;
 }
-function createHarness(
-	root: FakeNode,
-	rewrite: (value: string) => string | undefined,
-	engineOptions: {
-		maxNodesPerFlush?: number;
-		pruneThreshold?: number;
-	} = {}
-) {
+
+function createHarness(root: FakeNode, rewrite: (value: string) => string | undefined, engineOptions: { maxNodesPerFlush?: number; pruneThreshold?: number } = {}) {
 	let callback: IdentityRewriteCallback = () => {};
 	let disconnectCount = 0;
 	let frameCount = 0;
 	let cancelledFrames = 0;
 	let observedOptions: unknown;
 	const frames: (() => void)[] = [];
+
 	const engine = startIdentityRewriteEngine({
-		createObserver: (next) => {
+		createObserver: next => {
 			callback = next;
 			return {
-				disconnect: () => {
-					disconnectCount += 1;
-				},
-				observe: (_target, options) => {
-					observedOptions = options;
-				}
+				disconnect: () => { disconnectCount += 1; },
+				observe: (_target, options) => { observedOptions = options; }
 			};
 		},
 		maxNodesPerFlush: engineOptions.maxNodesPerFlush,
 		pruneThreshold: engineOptions.pruneThreshold,
 		rewrite,
 		root,
-		schedule: (frame) => {
+		schedule: frame => {
 			frames.push(frame);
 			return frames.length;
 		},
-		unschedule: () => {
-			cancelledFrames += 1;
-		}
+		unschedule: () => { cancelledFrames += 1; }
 	});
-	const emit = (records: IdentityMutationRecord[]) => {
-		callback(records);
-	};
-	const harness: Harness & {
-		engine: typeof engine;
-		readonly cancelledFrames: number;
-	} = {
-		get cancelledFrames() {
-			return cancelledFrames;
-		},
+
+	const emit = (records: IdentityMutationRecord[]) => { callback(records); };
+	const harness: Harness & { engine: typeof engine; readonly cancelledFrames: number } = {
+		get cancelledFrames() { return cancelledFrames; },
 		characterDataChanged(node, value) {
 			node.data = value;
 			emit([{ type: 'characterData', target: node }]);
@@ -94,16 +97,10 @@ function createHarness(
 			child.parent = parent;
 			emit([{ addedNodes: [child], type: 'childList' }]);
 		},
-		get disconnectCount() {
-			return disconnectCount;
-		},
+		get disconnectCount() { return disconnectCount; },
 		engine,
-		get frameCount() {
-			return frameCount;
-		},
-		get observedOptions() {
-			return observedOptions;
-		},
+		get frameCount() { return frameCount; },
+		get observedOptions() { return observedOptions; },
 		runFrames(count = 1) {
 			for (let index = 0; index < count; index += 1) {
 				const frame = frames.shift();
@@ -115,46 +112,107 @@ function createHarness(
 	};
 	return harness;
 }
+
 const swapRocketeer = createIdentityTextRewriter({
 	clans: ['OLD'],
 	displayClan: 'WOK',
 	displayName: 'Nightfall',
 	names: ['Rocketeer']
 });
+
 test('replaces whole-token names and leaves lookalikes alone', () => {
 	assert.ok(swapRocketeer);
 	assert.equal(swapRocketeer('Rocketeer: gg'), 'Nightfall: gg');
 	assert.equal(swapRocketeer('Rocketeer killed Bandit'), 'Nightfall killed Bandit');
 	assert.equal(swapRocketeer('Bandit killed Rocketeer'), 'Bandit killed Nightfall');
 	assert.equal(swapRocketeer('nice shot Rocketeer!'), 'nice shot Nightfall!');
+
+	// Another player whose name merely contains yours is a different player.
 	assert.equal(swapRocketeer('Rocketeer2'), undefined);
 	assert.equal(swapRocketeer('xRocketeer'), undefined);
 	assert.equal(swapRocketeer('Rocketeer_alt'), undefined);
 	assert.equal(swapRocketeer('Rocketeer-alt'), undefined);
+	// Case-sensitive: Krunker upper-cases with CSS, which does not change the text.
 	assert.equal(swapRocketeer('rocketeer'), undefined);
 	assert.equal(swapRocketeer('Bandit killed Sniper'), undefined);
 });
+
+test('reports one combined range for a bracketed clan and name', () => {
+	const rewrite = createIdentityTextRewrite({
+		clans: ['OLD'],
+		displayClan: 'WOK',
+		displayName: 'Nightfall',
+		names: ['Rocketeer']
+	});
+	assert.ok(rewrite);
+	assert.deepEqual(rewrite('[OLD] Rocketeer: gg'), {
+		fragments: [{ end: 15, start: 0 }],
+		text: '[WOK] Nightfall: gg'
+	});
+	assert.deepEqual(rewrite('say [OLD] Rocketeer!'), {
+		fragments: [{ end: 19, start: 4 }],
+		text: 'say [WOK] Nightfall!'
+	});
+	// The range is one whole identity fragment, not one range per character.
+	assert.equal(rewrite('[OLD] Rocketeer: gg')?.fragments.length, 1);
+});
+
+test('RGB decoration can preserve the real identity while reporting its whole fragment', () => {
+	const rewrite = createIdentityTextRewrite({
+		clans: ['GO'],
+		decorateUnchanged: true,
+		displayClan: 'GO',
+		displayName: 'Goat',
+		names: ['Goat']
+	});
+	assert.ok(rewrite);
+	assert.deepEqual(rewrite('[GO] Goat: gg'), {
+		fragments: [{ end: 9, start: 0 }],
+		text: '[GO] Goat: gg'
+	});
+});
+
+test('keeps separate identity occurrences separate while leaving surrounding text unmarked', () => {
+	const rewrite = createIdentityTextRewrite({
+		clans: [],
+		displayClan: '',
+		displayName: 'Nightfall',
+		names: ['Rocketeer']
+	});
+	assert.ok(rewrite);
+	assert.deepEqual(rewrite('Rocketeer says hi to Rocketeer'), {
+		fragments: [{ end: 9, start: 0 }, { end: 30, start: 21 }],
+		text: 'Nightfall says hi to Nightfall'
+	});
+});
+
 test('replaces the clan tag only where it is unambiguously a clan tag', () => {
 	assert.ok(swapRocketeer);
 	assert.equal(swapRocketeer('[OLD] Rocketeer'), '[WOK] Nightfall');
 	assert.equal(swapRocketeer('[OLD]Rocketeer: hello'), '[WOK]Nightfall: hello');
+	// A tag rendered in its own element, with the brackets coming from CSS.
 	assert.equal(swapRocketeer('OLD'), 'WOK');
 	assert.equal(swapRocketeer('  OLD  '), '  WOK  ');
+	// Unbracketed, but glued to the player's real name, so it is the tag and not a word.
 	assert.equal(swapRocketeer('OLD Rocketeer'), 'WOK Nightfall');
+	// The same three letters in a sentence are just three letters.
 	assert.equal(swapRocketeer('that OLD map again'), undefined);
 	assert.equal(swapRocketeer('[OLD] Bandit'), '[WOK] Bandit');
 });
+
 test('each half works on its own', () => {
 	const clanOnly = createIdentityTextRewriter({ clans: ['OLD'], displayClan: 'WOK', displayName: '', names: ['Rocketeer'] });
 	assert.ok(clanOnly);
 	assert.equal(clanOnly('[OLD] Rocketeer'), '[WOK] Rocketeer');
 	assert.equal(clanOnly('OLD Rocketeer'), 'WOK Rocketeer');
 	assert.equal(clanOnly('Rocketeer: gg'), undefined);
+
 	const nameOnly = createIdentityTextRewriter({ clans: ['OLD'], displayClan: '', displayName: 'Nightfall', names: ['Rocketeer'] });
 	assert.ok(nameOnly);
 	assert.equal(nameOnly('[OLD] Rocketeer'), '[OLD] Nightfall');
 	assert.equal(nameOnly('OLD'), undefined);
 });
+
 test('matches any of several candidate names, longest first', () => {
 	const rewriter = createIdentityTextRewriter({
 		clans: [],
@@ -166,38 +224,51 @@ test('matches any of several candidate names, longest first', () => {
 	assert.equal(rewriter('RocketeerPro wins'), 'Nightfall wins');
 	assert.equal(rewriter('Rocket wins'), 'Nightfall wins');
 });
+
 test('there is nothing to build when nothing would change', () => {
 	assert.equal(createIdentityTextRewriter({ clans: [], displayClan: '', displayName: '', names: [] }), undefined);
+	// Set, but with no idea what to look for.
 	assert.equal(createIdentityTextRewriter({ clans: [], displayClan: 'WOK', displayName: 'Nightfall', names: [] }), undefined);
+	// Set to exactly what the game already prints.
 	assert.equal(createIdentityTextRewriter({ clans: [], displayClan: '', displayName: 'Rocketeer', names: ['Rocketeer'] }), undefined);
+	// Blank candidates never become an empty alternative that would match everywhere.
 	assert.equal(createIdentityTextRewriter({ clans: [''], displayClan: 'WOK', displayName: '', names: [''] }), undefined);
 });
+
 test('names carrying regex syntax are matched literally', () => {
 	const rewriter = createIdentityTextRewriter({ clans: [], displayClan: '', displayName: 'Nightfall', names: ['a.b*c'] });
 	assert.ok(rewriter);
 	assert.equal(rewriter('a.b*c: gg'), 'Nightfall: gg');
 	assert.equal(rewriter('axbxc: gg'), undefined);
 });
+
 test('sweeps the existing tree on the first frame and reports what it holds', () => {
 	const chat = text('Rocketeer: gg');
 	const root = element('BODY', [element('DIV', [chat]), element('DIV', [text('Bandit: gg')])]);
 	const harness = createHarness(root, swapRocketeer);
+
 	assert.deepEqual(harness.observedOptions, { characterData: true, childList: true, subtree: true });
+	// Nothing happens until a frame: the engine batches instead of walking inside the callback.
 	assert.equal(chat.data, 'Rocketeer: gg');
+
 	harness.runFrames();
 	assert.deepEqual(allText(root), ['Nightfall: gg', 'Bandit: gg']);
 	assert.equal(harness.engine.rewrittenNodeCount, 1);
 });
+
 test('a burst of mutations costs one frame, and only the mutated subtrees are walked', () => {
 	const root = element('BODY');
 	const harness = createHarness(root, swapRocketeer);
 	harness.runFrames();
+
 	const killFeed = element('DIV', [text('Rocketeer killed Bandit')]);
 	const chat = element('DIV', [text('Rocketeer: nice')]);
 	harness.childAdded(root, killFeed);
 	harness.childAdded(root, chat);
 	const untouched = element('DIV', [text('Rocketeer elsewhere')]);
+	// Present in the tree but never announced: the engine walks what it was told about.
 	root.childNodes.push(untouched);
+
 	const before = harness.frameCount;
 	harness.runFrames(4);
 	assert.equal(harness.frameCount - before, 1, 'two mutations, one frame');
@@ -205,25 +276,32 @@ test('a burst of mutations costs one frame, and only the mutated subtrees are wa
 	assert.deepEqual(allText(chat), ['Nightfall: nice']);
 	assert.deepEqual(allText(untouched), ['Rocketeer elsewhere']);
 });
+
 test('the engine ignores the mutations its own writes produce', () => {
 	const chat = text('Rocketeer: gg');
 	const root = element('BODY', [chat]);
 	let rewriteCalls = 0;
-	const harness = createHarness(root, (value) => {
+	const harness = createHarness(root, value => {
 		rewriteCalls += 1;
 		return swapRocketeer?.(value);
 	});
+
 	harness.runFrames();
 	assert.equal(chat.data, 'Nightfall: gg');
 	const callsAfterFirstPass = rewriteCalls;
+
+	// Exactly what a real MutationObserver delivers after the engine writes.
 	harness.characterDataChanged(chat, 'Nightfall: gg');
 	harness.runFrames(4);
 	assert.equal(chat.data, 'Nightfall: gg');
 	assert.equal(rewriteCalls, callsAfterFirstPass, 'an echo of our own write is recognised, not re-rewritten');
+
+	// Krunker rewriting the same node is not an echo and is processed normally.
 	harness.characterDataChanged(chat, 'Rocketeer: wp');
 	harness.runFrames();
 	assert.equal(chat.data, 'Nightfall: wp');
 });
+
 test('never rewrites what the user types, code, or anything opted out', () => {
 	const chatInput = element('INPUT', [text('Rocketeer')]);
 	const nameField = element('TEXTAREA', [text('Rocketeer')]);
@@ -234,30 +312,61 @@ test('never rewrites what the user types, code, or anything opted out', () => {
 	const ownSurface = element('PRE', [text('Rocketeer')], { [NO_REWRITE_ATTRIBUTE]: '' });
 	const chat = element('DIV', [text('Rocketeer: gg')]);
 	const root = element('BODY', [chatInput, nameField, option, script, style, editable, ownSurface, chat]);
+
 	const harness = createHarness(root, swapRocketeer);
 	harness.runFrames(4);
+
 	for (const excluded of [chatInput, nameField, option, script, style, editable, ownSurface]) {
 		assert.deepEqual(allText(excluded), ['Rocketeer']);
 	}
 	assert.deepEqual(allText(chat), ['Nightfall: gg']);
 	assert.equal(harness.engine.rewrittenNodeCount, 1);
 });
+
+test('the engine applies a same-value detailed decoration instead of discarding it', () => {
+	const mine = text('Goat');
+	const root = element('BODY', [mine]);
+	const rewriteDetailed = createIdentityTextRewrite({
+		clans: [],
+		decorateUnchanged: true,
+		displayClan: '',
+		displayName: 'Goat',
+		names: ['Goat']
+	});
+	assert.ok(rewriteDetailed);
+	let applications = 0;
+	const engine = startIdentityRewriteEngine({
+		applyRewrite: (node, original, rewrite) => {
+			applications += 1;
+			return { applied: rewrite.text, node, original, restore: () => {} };
+		},
+		createObserver: () => ({ disconnect: () => {}, observe: () => {} }),
+		rewrite: value => rewriteDetailed(value)?.text,
+		rewriteDetailed,
+		root,
+		schedule: frame => { frame(); }
+	});
+
+	assert.equal(applications, 1);
+	assert.equal(engine.rewrittenNodeCount, 1);
+});
+
 test('an extra exclusion rule composes with the built-in ones', () => {
 	const skipped = element('DIV', [text('Rocketeer')]);
 	const kept = element('SPAN', [text('Rocketeer')]);
 	const root = element('BODY', [skipped, kept]);
 	startIdentityRewriteEngine({
 		createObserver: () => ({ disconnect: () => {}, observe: () => {} }),
-		isExcluded: (node) => node === skipped,
-		rewrite: (value) => swapRocketeer?.(value),
+		isExcluded: node => node === skipped,
+		rewrite: value => swapRocketeer?.(value),
 		root,
-		schedule: (frame) => {
-			frame();
-		}
+		schedule: frame => { frame(); }
 	});
+
 	assert.deepEqual(allText(skipped), ['Rocketeer']);
 	assert.deepEqual(allText(kept), ['Nightfall']);
 });
+
 test('non-element, non-text nodes are stepped over', () => {
 	const comment: FakeNode = { childNodes: [], isConnected: true, nodeType: COMMENT_NODE };
 	const root = element('BODY', [comment, element('DIV', [text('Rocketeer')])]);
@@ -265,29 +374,37 @@ test('non-element, non-text nodes are stepped over', () => {
 	harness.runFrames(4);
 	assert.deepEqual(allText(root), ['Nightfall']);
 });
+
 test('a walk that exceeds its budget finishes on later frames instead of blowing one', () => {
 	const rows = Array.from({ length: 12 }, (_value, index) => element('DIV', [text(`Rocketeer ${index}`)]));
 	const root = element('BODY', rows);
 	const harness = createHarness(root, swapRocketeer, { maxNodesPerFlush: 5 });
+
 	harness.runFrames();
-	const doneAfterOneFrame = allText(root).filter((value) => value.startsWith('Nightfall')).length;
+	const doneAfterOneFrame = allText(root).filter(value => value.startsWith('Nightfall')).length;
 	assert.ok(doneAfterOneFrame > 0 && doneAfterOneFrame < 12, `partial progress, got ${doneAfterOneFrame}`);
+
 	harness.runFrames(20);
-	assert.equal(allText(root).filter((value) => value.startsWith('Nightfall')).length, 12);
+	assert.equal(allText(root).filter(value => value.startsWith('Nightfall')).length, 12);
 });
+
 test('detached nodes are swept out so the tracking map cannot grow forever', () => {
 	const root = element('BODY');
 	const harness = createHarness(root, swapRocketeer, { pruneThreshold: 4 });
 	harness.runFrames();
+
 	const lines = Array.from({ length: 6 }, (_value, index) => text(`Rocketeer ${index}`));
 	for (const line of lines) harness.childAdded(root, line);
 	harness.runFrames(4);
 	assert.equal(harness.engine.rewrittenNodeCount, 6);
+
+	// Chat lines scroll off and Krunker drops them.
 	for (const line of lines.slice(0, 5)) line.isConnected = false;
 	harness.childAdded(root, text('Rocketeer again'));
 	harness.runFrames(4);
 	assert.equal(harness.engine.rewrittenNodeCount, 2);
 });
+
 test('restoreAll hands back exactly what the game wrote, and only that', () => {
 	const mine = text('Rocketeer: gg');
 	const theirs = text('Bandit: gg');
@@ -296,32 +413,45 @@ test('restoreAll hands back exactly what the game wrote, and only that', () => {
 	const harness = createHarness(root, swapRocketeer);
 	harness.runFrames();
 	assert.equal(mine.data, 'Nightfall: gg');
+
+	// Krunker replaced this node's text after the engine touched it; that value is already
+	// correct and must survive the restore untouched.
 	overwritten.data = 'Bandit: wp';
+
 	harness.engine.restoreAll();
 	assert.equal(mine.data, 'Rocketeer: gg');
 	assert.equal(theirs.data, 'Bandit: gg');
 	assert.equal(overwritten.data, 'Bandit: wp');
 	assert.equal(harness.engine.rewrittenNodeCount, 0);
+
+	// refresh() re-applies from scratch.
 	harness.engine.refresh();
 	harness.runFrames(4);
 	assert.equal(mine.data, 'Nightfall: gg');
 });
+
 test('stopping detaches the observer, drops queued work and cancels the pending frame', () => {
 	const root = element('BODY', [text('Rocketeer: gg')]);
 	const harness = createHarness(root, swapRocketeer);
+
 	harness.engine.stop();
 	assert.equal(harness.disconnectCount, 1);
 	assert.equal(harness.cancelledFrames, 1);
+
 	harness.runFrames(4);
 	assert.deepEqual(allText(root), ['Rocketeer: gg'], 'a frame that still fires after stop does nothing');
+
 	harness.childAdded(root, text('Rocketeer: again'));
 	harness.engine.refresh();
 	harness.engine.flush();
 	harness.runFrames(4);
 	assert.deepEqual(allText(root), ['Rocketeer: gg', 'Rocketeer: again']);
+
+	// Repeating teardown is harmless.
 	harness.engine.stop();
 	assert.equal(harness.disconnectCount, 1);
 });
+
 test('flush runs the queue without waiting for a frame', () => {
 	const root = element('BODY', [text('Rocketeer: gg')]);
 	const harness = createHarness(root, swapRocketeer);

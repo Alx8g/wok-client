@@ -57,10 +57,6 @@
 
 	--wok-scrollbar-track: rgba(60, 60, 67, .05);
 	--wok-scrollbar-thumb: rgba(60, 60, 67, .26);
-
-	--wok-overlay-bg: rgba(24, 24, 27, .62);
-	--wok-overlay-border: rgba(255, 255, 255, .16);
-	--wok-overlay-text: #FFFFFF;
 }
 
 /*

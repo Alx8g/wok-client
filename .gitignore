@@ -15,3 +15,4 @@ coverage/
 package-lock.json
 multiselect_dummy.html
 metafile.json
+.DS_Store

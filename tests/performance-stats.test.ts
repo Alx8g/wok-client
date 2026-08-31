@@ -1,12 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-	FRAME_TIME_BIN_WIDTH_MS,
-	PERFORMANCE_TIME_BUCKET_MS,
-	PERFORMANCE_WINDOW_MS,
-	RollingPerformanceStats
-} from '../src/performance-stats.ts';
-
+import { FRAME_TIME_BIN_WIDTH_MS, PERFORMANCE_TIME_BUCKET_MS, PERFORMANCE_WINDOW_MS, RollingPerformanceStats } from '../src/performance-stats.ts';
 function recordFrames(stats: RollingPerformanceStats, frameTimes: readonly number[], startTime = 0): number {
 	let timestamp = startTime;
 	for (const frameTime of frameTimes) {
@@ -15,12 +9,13 @@ function recordFrames(stats: RollingPerformanceStats, frameTimes: readonly numbe
 	}
 	return timestamp;
 }
-
 test('calculates stable frame-rate diagnostics', () => {
 	const stats = new RollingPerformanceStats();
-	const timestamp = recordFrames(stats, Array.from({ length: 100 }, () => 10));
+	const timestamp = recordFrames(
+		stats,
+		Array.from({ length: 100 }, () => 10)
+	);
 	const snapshot = stats.snapshot(timestamp);
-
 	assert.deepEqual(snapshot, {
 		averageFps: 100,
 		currentFps: 100,
@@ -31,25 +26,21 @@ test('calculates stable frame-rate diagnostics', () => {
 		windowSeconds: 1
 	});
 });
-
 test('surfaces a slow frame through 1% low and worst-frame metrics', () => {
 	const stats = new RollingPerformanceStats();
 	const samples = [...Array.from({ length: 99 }, () => 5), 50];
 	const timestamp = recordFrames(stats, samples);
 	const snapshot = stats.snapshot(timestamp);
-
 	assert.equal(snapshot.averageFps, 183.5);
 	assert.equal(snapshot.onePercentLowFps, 20);
 	assert.equal(snapshot.p95FrameTimeMs, 5);
 	assert.equal(snapshot.worstFrameTimeMs, 50);
 	assert.equal(snapshot.sampleCount, 100);
 });
-
 test('keeps percentile approximations within the documented histogram error', () => {
 	const stats = new RollingPerformanceStats();
-	const samples = Array.from({ length: 1_000 }, (_, index) => 5 + ((index * 37) % 3_500) / 100);
+	const samples = Array.from({ length: 1000 }, (_, index) => 5 + ((index * 37) % 3500) / 100);
 	for (let index = 0; index < samples.length; index++) stats.recordFrame(index + 1, samples[index]);
-
 	const sorted = [...samples].sort((left, right) => left - right);
 	const exactP95 = sorted[Math.ceil(sorted.length * 0.95) - 1];
 	const slowSampleCount = Math.ceil(sorted.length * 0.01);
@@ -57,48 +48,45 @@ test('keeps percentile approximations within the documented histogram error', ()
 	const snapshot = stats.snapshot(samples.length);
 	const estimatedSlowFrameTime = 1000 / snapshot.onePercentLowFps;
 	const roundingAllowanceMs = 0.1;
-
 	assert.ok(Math.abs(snapshot.p95FrameTimeMs - exactP95) <= FRAME_TIME_BIN_WIDTH_MS / 2 + 0.01);
 	assert.ok(Math.abs(estimatedSlowFrameTime - exactSlowFrameTime) <= FRAME_TIME_BIN_WIDTH_MS / 2 + roundingAllowanceMs);
 });
-
 test('expires the cutoff bucket within one bounded time bucket', () => {
 	const stats = new RollingPerformanceStats();
 	stats.recordFrame(1, 10);
-
 	assert.equal(stats.snapshot(PERFORMANCE_WINDOW_MS + 1).sampleCount, 1);
 	assert.equal(stats.snapshot(PERFORMANCE_WINDOW_MS + PERFORMANCE_TIME_BUCKET_MS).sampleCount, 0);
 });
-
 test('uses only the recent time buckets for current FPS', () => {
 	const stats = new RollingPerformanceStats();
-	let timestamp = recordFrames(stats, Array.from({ length: 100 }, () => 10));
-	timestamp = recordFrames(stats, Array.from({ length: 100 }, () => 20), timestamp);
-
+	let timestamp = recordFrames(
+		stats,
+		Array.from({ length: 100 }, () => 10)
+	);
+	timestamp = recordFrames(
+		stats,
+		Array.from({ length: 100 }, () => 20),
+		timestamp
+	);
 	const snapshot = stats.snapshot(timestamp);
 	assert.equal(snapshot.averageFps, 66.7);
 	assert.equal(snapshot.currentFps, 50);
 });
-
 test('reset leaves no residue that changes later identical recordings', () => {
 	const stats = new RollingPerformanceStats();
 	const reference = new RollingPerformanceStats();
 	const samples = [...Array.from({ length: 150 }, (_, index) => 4 + (index % 40)), 120, 350];
-
 	recordFrames(stats, [12, 3, 7, 950, 25, 3, 3]);
 	stats.reset();
 	const timestamp = recordFrames(stats, samples);
 	const referenceTimestamp = recordFrames(reference, samples);
-
 	assert.deepEqual(stats.snapshot(timestamp), reference.snapshot(referenceTimestamp));
 });
-
 test('reset and empty snapshots return zeroed diagnostics', () => {
 	const stats = new RollingPerformanceStats();
 	stats.recordFrame(10, 10);
 	stats.reset();
 	const snapshot = stats.snapshot(10);
-
 	assert.deepEqual(snapshot, {
 		averageFps: 0,
 		currentFps: 0,

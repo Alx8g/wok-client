@@ -1,19 +1,12 @@
 export const MATCHMAKER_MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-
 export class MatchmakerResponseTooLargeError extends Error {
 	public constructor(maxBytes: number) {
 		super(`Matchmaker response exceeds ${maxBytes} bytes`);
 		this.name = 'MatchmakerResponseTooLargeError';
 	}
 }
-
-/** Read and parse a response without allowing an unbounded body allocation. */
-export async function readBoundedMatchmakerJson(
-	response: Response,
-	maxBytes = MATCHMAKER_MAX_RESPONSE_BYTES
-): Promise<unknown> {
+export async function readBoundedMatchmakerJson(response: Response, maxBytes = MATCHMAKER_MAX_RESPONSE_BYTES): Promise<unknown> {
 	if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new RangeError('maxBytes must be a positive safe integer');
-
 	const declaredLength = response.headers.get('Content-Length');
 	if (declaredLength !== null) {
 		const parsedLength = Number(declaredLength);
@@ -22,10 +15,8 @@ export async function readBoundedMatchmakerJson(
 			throw new MatchmakerResponseTooLargeError(maxBytes);
 		}
 	}
-
 	const reader = response.body?.getReader();
 	if (!reader) throw new Error('Matchmaker response body is unavailable');
-
 	const chunks: Uint8Array[] = [];
 	let totalBytes = 0;
 	try {
@@ -43,7 +34,6 @@ export async function readBoundedMatchmakerJson(
 	} finally {
 		reader.releaseLock();
 	}
-
 	const bytes = new Uint8Array(totalBytes);
 	let offset = 0;
 	for (const chunk of chunks) {

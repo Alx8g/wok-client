@@ -1,56 +1,5 @@
-/**
- * Calibration measurement core (design §2): completion-honest frame intervals through a bounded
- * fence ring, optional GPU timer-query evidence with disjoint/plausibility rejection, CPU-submit
- * bracketing, event-loop lateness sampling, and trial-level contamination rejection with a
- * one-retry policy.
- *
- * `runBenchmarkTrial` is embedded into the calibration page by function serialization, so it must
- * stay self-contained apart from the exported constants below, which the page generator writes
- * into the same scope under their exported names.
- */
-
 export const BENCHMARK_GPU_QUERY_POOL_SIZE = 8;
-/**
- * TIME_ELAPSED evidence is sampled on one measured frame in eight rather than instrumented on
- * every frame, because the instrumentation is not backend-neutral.
- *
- * Measured on the reference machine (Iris Xe 0x46A6, workload v3, variants interleaved inside
- * every run so drift cannot be attributed to a variant —
- * `.working/simulator-v2-acceptance/instrumentation-ab.mjs`): removing the per-frame timer query
- * raised d3d11on12's average frame rate by 25.1% / 22.3% / 35.7% across three runs while moving
- * `default` by -0.7% / -5.9% / +13.6%. That asymmetry has a documented mechanism: on ANGLE/D3D11
- * a query poll is a driver call, but under D3D11on12 it enters the translation layer's batched
- * context, where `Query11::testQuery` polls with flush permitted and a poll can force the
- * expensive drain-and-ExecuteCommandLists path (findings.md §2.4, §2.7, which flagged exactly this
- * as "possible timer-query measurement inflation under the translation layer, unverified").
- *
- * A benchmark may not tax one candidate ~28% and another ~2% and then compare their frame rates.
- * Sampling keeps the evidence — a 2.8 s trial at 250 fps still yields ~85 GPU samples, far more
- * than the percentiles need — while cutting the tax by the sampling interval. The disjoint
- * demotion ratio below is therefore measured against GPU sampling attempts rather than against
- * frame count, so its meaning does not change with this interval.
- */
 export const BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL = 8;
-/**
- * Fence queue depth 6 (v4 pacing semantics); ring holds depth + 1 fences.
- *
- * Depth 2 approximated Chromium's own frame buffering (design §2.3) but made the gate the pacing
- * authority on backends whose fences signal on submission activity rather than GPU completion:
- * on D3D11on12 every sync poll is a DONOTFLUSH GetData that can never advance the translation
- * layer's replay/submit pipeline, so withholding submission on a stalled tick starved the very
- * mechanism that signals the gate fence (.working/fence-artifact-rootcause/findings.md §2). The
- * 42-run probe matrix on the reference machine (Iris Xe 0x46A6, results/summary.md) measured the
- * limit cycle at depth 2 — d3d11on12 stall 0.33, ~77 fps — and its disappearance at depth 6
- * (V3d6: stall 0.00 3/3 runs, ~212 fps, the tightest variance of any jam-free variant; ungated
- * V4 measured equally jam-free but noisier). The measured fence-observability latency under
- * continuous submission is ~6 ticks (V3d6/V4 p50/p95 5-6/6 ticks), so a depth-6 horizon absorbs
- * it: the gate still bounds in-flight work as a tripwire against runaway submission masking, but
- * it no longer sets frame cadence on any measured backend. Completion honesty is preserved by
- * the instrumentation that never paced in the first place: TIME_ELAPSED percentiles with
- * disjoint/plausibility rejection, cpuSubmit bracketing, and the two contamination flags below —
- * BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG stays armed so a backend that stalls even this
- * deep horizon is reported as unmeasurable rather than slow.
- */
 export const BENCHMARK_FENCE_QUEUE_DEPTH = 6;
 export const BENCHMARK_FENCE_RING_SIZE = BENCHMARK_FENCE_QUEUE_DEPTH + 1;
 export const BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO = 0.05;
@@ -58,20 +7,14 @@ export const BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO = 0.2;
 export const BENCHMARK_GPU_SAMPLE_MIN_MS = 0.05;
 export const BENCHMARK_GPU_SAMPLE_MAX_FRAME_RATIO = 4;
 export const BENCHMARK_GPU_QUEUE_FLAG_RATIO = 1.3;
-/** Above this stalled-tick share, fence pacing (not rendering) is setting the frame interval. */
 export const BENCHMARK_FENCE_STALL_ARTIFACT_RATIO = 0.5;
-/** GPU headroom bound: measured GPU time this far under the frame interval proves the GPU was not the bottleneck. */
 export const BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO = 0.5;
 export const BENCHMARK_EVENT_LOOP_SAMPLE_MS = 16;
 export const BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS = 100;
 export const BENCHMARK_LONG_FRAME_MS = 33.34;
-/** A rejected trial is retried once, immediately, in the same launch (design §2.4). */
 export const BENCHMARK_TRIAL_RETRY_LIMIT = 1;
-/** Global cap across a whole calibration run (design §2.4, §3.4). */
 export const BENCHMARK_RUN_RETRY_BUDGET = 2;
-
 export type BenchmarkGpuTimingStatus = 'measured' | 'unsupported' | 'unreliable';
-
 export const BENCHMARK_REJECTION_REASONS = [
 	'window-blurred',
 	'document-visibility-changed',
@@ -83,13 +26,9 @@ export const BENCHMARK_REJECTION_REASONS = [
 	'insufficient-samples'
 ] as const;
 export type BenchmarkRejectionReason = (typeof BENCHMARK_REJECTION_REASONS)[number];
-
-/** Share of the progress bar owned by warmup; the measured phase owns the remainder. */
 export const BENCHMARK_PROGRESS_WARMUP_SHARE = 0.15;
-
 export const BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG = 'gpu-queue-exceeds-frame-budget';
 export const BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG = 'fence-pacing-dominates-frame-interval';
-
 export interface BenchmarkEnvironmentInfo {
 	devicePixelRatio: number;
 	drawingBufferHeight: number;
@@ -97,7 +36,6 @@ export interface BenchmarkEnvironmentInfo {
 	onBattery?: boolean;
 	refreshRateHz?: number;
 }
-
 export interface BenchmarkTrialConfig {
 	benchmarkMs: number;
 	minSamples: number;
@@ -106,10 +44,7 @@ export interface BenchmarkTrialConfig {
 	warmupSettleFrames: number;
 	warmupSettleRatio: number;
 }
-
 type GlObject = unknown;
-
-/** WebGL2 subset the measurement loop touches; tests inject a scripted fake. */
 export interface BenchmarkGl {
 	QUERY_RESULT: number;
 	QUERY_RESULT_AVAILABLE: number;
@@ -126,12 +61,10 @@ export interface BenchmarkGl {
 	getQueryParameter(query: GlObject, parameter: number): unknown;
 	getSyncParameter(sync: GlObject, parameter: number): unknown;
 }
-
 export interface BenchmarkTimerQueryExt {
 	GPU_DISJOINT_EXT: number;
 	TIME_ELAPSED_EXT: number;
 }
-
 export interface BenchmarkTrialHooks {
 	environment: BenchmarkEnvironmentInfo;
 	getTimerQueryExt(): BenchmarkTimerQueryExt | null;
@@ -140,20 +73,11 @@ export interface BenchmarkTrialHooks {
 	onProgress?(progress: { phase: 'warmup' | 'measure'; ratio: number }): void;
 	renderFrame(frameIndex: number): void;
 	requestFrame(callback: (timestamp: number) => void): void;
-	/**
-	 * The frame's main-thread lane, run before submission the way a game runs its simulation
-	 * before submitting the frame it produced (since workload v3: entity update + residual spin,
-	 * carried unchanged into v4). It is
-	 * deliberately inside the measured frame and outside the cpuSubmit bracket, so it contends for
-	 * the thread with submission without being counted as submission cost.
-	 */
 	spin(): number;
-	/** Starts the event-loop lateness sampler; returns a stop function. */
 	startSampler(callback: () => void, intervalMs: number): () => void;
 	subscribeContamination(notify: (reason: BenchmarkRejectionReason) => void): () => void;
 	webglRenderer: string;
 }
-
 export interface BenchmarkTrialResult {
 	averageFps: number;
 	contaminationFlags: string[];
@@ -181,12 +105,10 @@ export interface BenchmarkTrialResult {
 	webglRenderer: string;
 	worstFrameTimeMs: number;
 }
-
 export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkTrialConfig): Promise<BenchmarkTrialResult> {
 	const percentile = (sorted: number[], ratio: number) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * ratio))] : 0);
 	const average = (values: number[]) => (values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : 0);
 	const round = (value: number) => Math.round(value * 100) / 100;
-
 	const gl = hooks.gl;
 	const extension = gl ? hooks.getTimerQueryExt() : null;
 	const rejectionReasons = new Set<BenchmarkRejectionReason>();
@@ -205,36 +127,21 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 	let gpuDisjointDiscardCount = 0;
 	let gpuImplausibleCount = 0;
 	let contextLost = false;
-
 	const finalize = (): BenchmarkTrialResult => {
 		const ext = extension;
-		// A missing GL context is a plain failure (round-1 semantics), not a retryable rejection.
 		if (gl && frameTimes.length < config.minSamples) rejectionReasons.add('insufficient-samples');
 		const sortedFrames = [...frameTimes].sort((left, right) => left - right);
 		const worstFrameTimeMs = sortedFrames.at(-1) || 0;
-		// Chromium can defer an interval callback while continuing to deliver animation callbacks.
-		// Keep that timer lateness as diagnostic evidence, but only classify it as contamination when
-		// independent callback cadence confirms a severe main-thread gap. Submitted-frame intervals
-		// cannot corroborate this because an unsignaled GPU fence intentionally stretches them.
-		if (
-			eventLoopWorstMs >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS
-			&& worstFrameCallbackIntervalMs >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS
-		) rejectionReasons.add('severe-event-loop-disturbance');
+		if (eventLoopWorstMs >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS && worstFrameCallbackIntervalMs >= BENCHMARK_SEVERE_EVENT_LOOP_DELAY_MS) rejectionReasons.add('severe-event-loop-disturbance');
 		let gpuTimingStatus: BenchmarkGpuTimingStatus = ext ? 'measured' : 'unsupported';
 		if (ext) {
-			// Relative to sampling attempts, not to frame count: GPU timing is sampled on one
-			// frame in BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL, so a frame-relative threshold would
-			// silently loosen by that factor.
 			const disjointAttemptCount = gpuSamplesMs.length + gpuImplausibleCount + gpuDisjointDiscardCount;
 			const disjointExcessive = gpuDisjointDiscardCount > disjointAttemptCount * BENCHMARK_GPU_DISJOINT_DEMOTION_RATIO;
 			const gpuAttemptCount = gpuSamplesMs.length + gpuImplausibleCount;
 			const implausibleExcessive = gpuAttemptCount > 0 && gpuImplausibleCount > gpuAttemptCount * BENCHMARK_GPU_IMPLAUSIBLE_DEMOTION_RATIO;
 			if (disjointExcessive || implausibleExcessive || gpuSamplesMs.length === 0) gpuTimingStatus = 'unreliable';
-			// Disjoint alone only demotes GPU timing; it rejects the trial only when the frame
-			// evidence was also disturbed by another contamination signal (design §2.4).
 			if (disjointExcessive && rejectionReasons.size > 0) rejectionReasons.add('gpu-disjoint-excessive');
 		}
-
 		const sortedDelays = [...eventLoopDelays].sort((left, right) => left - right);
 		const sortedSubmits = [...cpuSubmitTimes].sort((left, right) => left - right);
 		const sortedGpu = [...gpuSamplesMs].sort((left, right) => left - right);
@@ -244,32 +151,20 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		const meanSlowFrameTime = average(slowFrames);
 		const p95FrameTimeMs = round(percentile(sortedFrames, 0.95));
 		const gpuTimeP95Ms = gpuTimingStatus === 'measured' ? round(percentile(sortedGpu, 0.95)) : undefined;
-
 		const contaminationFlags: string[] = [];
-		// Submission-masking check (design §2.2): queued GPU work exceeding the frame budget is
-		// evidence that submission speed masks GPU cost; never a scored input.
 		if (gpuTimingStatus === 'measured' && gpuTimeP95Ms !== undefined && p95FrameTimeMs > 0 && gpuTimeP95Ms > p95FrameTimeMs * BENCHMARK_GPU_QUEUE_FLAG_RATIO) {
 			contaminationFlags.push(BENCHMARK_GPU_QUEUE_CONTAMINATION_FLAG);
 		}
-		// Fence-pacing artifact check: when most ticks stall on the fence gate while measured GPU
-		// time stays far below the frame interval, the fence ring itself — not the backend's
-		// rendering throughput — produced the frame times. Backends translate fence signaling
-		// differently (D3D11on12 in particular), so such a trial is not comparable evidence
-		// against a backend that did not stall. At depth 6 no measured backend trips this (probe
-		// V3d6: stall 0.00 on both d3d11on12 and default); it stays armed as the tripwire for
-		// backends whose fence observability defeats even the deep horizon (findings §4e).
-		// Diagnostic, never a scored input.
 		const stallRatioValue = totalTicks > 0 ? stalledTicks / totalTicks : 0;
 		if (
-			gpuTimingStatus === 'measured'
-			&& gpuTimeP95Ms !== undefined
-			&& p95FrameTimeMs > 0
-			&& stallRatioValue > BENCHMARK_FENCE_STALL_ARTIFACT_RATIO
-			&& gpuTimeP95Ms < p95FrameTimeMs * BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO
+			gpuTimingStatus === 'measured' &&
+			gpuTimeP95Ms !== undefined &&
+			p95FrameTimeMs > 0 &&
+			stallRatioValue > BENCHMARK_FENCE_STALL_ARTIFACT_RATIO &&
+			gpuTimeP95Ms < p95FrameTimeMs * BENCHMARK_FENCE_STALL_GPU_HEADROOM_RATIO
 		) {
 			contaminationFlags.push(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
 		}
-
 		return {
 			averageFps: round(meanFrameTime > 0 ? 1000 / meanFrameTime : 0),
 			contaminationFlags,
@@ -297,25 +192,27 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			worstFrameTimeMs: round(worstFrameTimeMs)
 		};
 	};
-
 	if (!gl) {
 		return Promise.resolve(finalize());
 	}
-
-	interface FenceSlot { frameIndex: number; sync: GlObject }
+	interface FenceSlot {
+		frameIndex: number;
+		sync: GlObject;
+	}
 	const fences: (FenceSlot | undefined)[] = new Array(BENCHMARK_FENCE_RING_SIZE).fill(undefined);
-	interface QuerySlot { frameIndex: number; query: GlObject }
+	interface QuerySlot {
+		frameIndex: number;
+		query: GlObject;
+	}
 	const freeQueries: GlObject[] = [];
 	const inFlightQueries: QuerySlot[] = [];
 	let createdQueries = 0;
-
 	const acquireQuery = (): GlObject | undefined => {
 		if (freeQueries.length > 0) return freeQueries.pop();
 		if (createdQueries >= BENCHMARK_GPU_QUERY_POOL_SIZE) return undefined;
 		createdQueries++;
 		return gl.createQuery();
 	};
-
 	const pollQueries = () => {
 		if (!extension || contextLost || inFlightQueries.length === 0) return;
 		if (gl.getParameter(extension.GPU_DISJOINT_EXT)) {
@@ -337,7 +234,6 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			freeQueries.push(head.query);
 		}
 	};
-
 	let reportedProgress = 0;
 	let start: number | undefined;
 	let warmupMinEnd = 0;
@@ -347,21 +243,18 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 	let lastSubmittedTs: number | undefined;
 	let submittedFrames = 0;
 	const warmupIntervals: number[] = [];
-
 	const warmupSettled = () => {
 		if (warmupIntervals.length < config.warmupSettleFrames) return false;
 		const sorted = [...warmupIntervals].sort((left, right) => left - right);
 		const median = sorted[Math.floor((sorted.length - 1) / 2)];
 		if (median <= 0) return false;
 		const recent = warmupIntervals.slice(-config.warmupSettleFrames);
-		return !recent.some(interval => interval > median * config.warmupSettleRatio);
+		return !recent.some((interval) => interval > median * config.warmupSettleRatio);
 	};
-
-	const detachContamination = hooks.subscribeContamination(reason => {
+	const detachContamination = hooks.subscribeContamination((reason) => {
 		rejectionReasons.add(reason);
 		if (reason === 'webgl-context-lost') contextLost = true;
 	});
-
 	let samplerExpected: number | undefined;
 	const stopSampler = hooks.startSampler(() => {
 		const now = hooks.now();
@@ -372,12 +265,10 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 		}
 		samplerExpected = now + BENCHMARK_EVENT_LOOP_SAMPLE_MS;
 	}, BENCHMARK_EVENT_LOOP_SAMPLE_MS);
-
-	return new Promise<BenchmarkTrialResult>(resolve => {
+	return new Promise<BenchmarkTrialResult>((resolve) => {
 		const finish = () => {
 			stopSampler();
 			detachContamination();
-			// On context loss every fence/query object is abandoned rather than deleted (design §2.3).
 			if (!contextLost) {
 				for (let index = 0; index < fences.length; index++) {
 					const slot = fences[index];
@@ -387,7 +278,6 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			}
 			resolve(finalize());
 		};
-
 		const tick = (timestamp: number) => {
 			if (start === undefined) {
 				start = timestamp;
@@ -395,19 +285,14 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 				warmupHardEnd = start + config.warmupMaxMs;
 			}
 			if (contextLost) {
-				// Keep ticking so the trial terminates on schedule; the rejection already stands.
 				if (measuring ? timestamp >= measureEnd : timestamp >= warmupHardEnd + config.benchmarkMs) finish();
 				else hooks.requestFrame(tick);
 				return;
 			}
-
 			pollQueries();
-
 			if (!measuring && timestamp >= warmupMinEnd && (warmupSettled() || timestamp >= warmupHardEnd)) {
 				measuring = true;
 				measureEnd = timestamp + config.benchmarkMs;
-				// Establish fresh timer and callback baselines inside the measured interval so
-				// lateness accumulated during warmup cannot reject an otherwise clean trial.
 				samplerExpected = undefined;
 				lastFrameCallbackTs = undefined;
 			}
@@ -415,20 +300,12 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 				if (lastFrameCallbackTs !== undefined) {
 					const callbackInterval = timestamp - lastFrameCallbackTs;
 					if (callbackInterval > 0) {
-						worstFrameCallbackIntervalMs = Math.max(
-							worstFrameCallbackIntervalMs,
-							callbackInterval
-						);
+						worstFrameCallbackIntervalMs = Math.max(worstFrameCallbackIntervalMs, callbackInterval);
 					}
 				}
 				lastFrameCallbackTs = timestamp;
 			}
 			if (hooks.onProgress) {
-				// Wall-clock and monotonic. Frame-derived progress freezes whenever frames are
-				// irregular (a stalled fence tick, a long warmup) and then jumps when they resume,
-				// which reads as a broken bar even though the trial is healthy. Warmup owns a
-				// fixed slice of the bar and the measured phase owns the rest, so the fill only
-				// ever advances at a rate the user can follow.
 				const warmupRatio = Math.min(1, (timestamp - start) / config.warmupMinMs);
 				const rawRatio = measuring
 					? BENCHMARK_PROGRESS_WARMUP_SHARE + (1 - BENCHMARK_PROGRESS_WARMUP_SHARE) * Math.min(1, 1 - (measureEnd - timestamp) / config.benchmarkMs)
@@ -436,13 +313,6 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 				reportedProgress = Math.max(reportedProgress, Math.min(1, rawRatio));
 				hooks.onProgress({ phase: measuring ? 'measure' : 'warmup', ratio: reportedProgress });
 			}
-
-			// Bounded in-flight work: frame N waits for frame N-6's fence with a non-blocking
-			// SYNC_STATUS poll. At depth 6 the horizon exceeds the worst measured fence
-			// observability latency (~6 ticks on D3D11on12 under continuous submission, probe
-			// V3d6/V4), so rAF and compositor back-pressure pace the loop and the gate fires only
-			// when in-flight work genuinely runs away — a tripwire, not the pacing authority.
-			// When it does fire, the stall evidence feeds the fence-pacing contamination flag.
 			if (measuring) totalTicks++;
 			const gateSlot = fences[(submittedFrames - BENCHMARK_FENCE_QUEUE_DEPTH + BENCHMARK_FENCE_RING_SIZE * 2) % BENCHMARK_FENCE_RING_SIZE];
 			if (submittedFrames >= BENCHMARK_FENCE_QUEUE_DEPTH && gateSlot && gateSlot.frameIndex === submittedFrames - BENCHMARK_FENCE_QUEUE_DEPTH) {
@@ -454,25 +324,20 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 				gl.deleteSync(gateSlot.sync);
 				fences[gateSlot.frameIndex % BENCHMARK_FENCE_RING_SIZE] = undefined;
 			}
-
 			if (lastSubmittedTs !== undefined) {
 				const frameTime = timestamp - lastSubmittedTs;
 				if (measuring) {
-					if (frameTime > 0 && frameTime < 1_000) {
+					if (frameTime > 0 && frameTime < 1000) {
 						frameTimes.push(frameTime);
 						frameTimeSum += frameTime;
 						if (frameTime > BENCHMARK_LONG_FRAME_MS) longFrameCount++;
 						frameIntervalByIndex.set(submittedFrames, frameTime);
 					}
-				} else if (frameTime > 0 && frameTime < 1_000) warmupIntervals.push(frameTime);
+				} else if (frameTime > 0 && frameTime < 1000) warmupIntervals.push(frameTime);
 			}
 			lastSubmittedTs = timestamp;
-
 			hooks.spin();
 			const submitStart = hooks.now();
-			// Sampled, not per-frame: see BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL. Instrumenting every
-			// frame costs D3D11on12 ~28% of its frame rate and native D3D11 ~2%, which would make
-			// the instrument decide the comparison it exists to report.
 			const sampleThisFrame = submittedFrames % BENCHMARK_GPU_SAMPLE_FRAME_INTERVAL === 0;
 			const query = measuring && extension && sampleThisFrame ? acquireQuery() : undefined;
 			if (query !== undefined) gl.beginQuery(extension.TIME_ELAPSED_EXT, query);
@@ -485,15 +350,12 @@ export function runBenchmarkTrial(hooks: BenchmarkTrialHooks, config: BenchmarkT
 			gl.flush();
 			if (measuring) cpuSubmitTimes.push(Math.max(0, hooks.now() - submitStart));
 			submittedFrames++;
-
 			if (measuring && timestamp >= measureEnd) finish();
 			else hooks.requestFrame(tick);
 		};
 		hooks.requestFrame(tick);
 	});
 }
-
-/** Applies a main-process-detected rejection (for example a powerMonitor AC/battery flip) to a finished trial. */
 export function markBenchmarkTrialRejected(result: BenchmarkTrialResult, reason: BenchmarkRejectionReason): BenchmarkTrialResult {
 	if (result.rejectionReasons.includes(reason)) return result;
 	return {
@@ -502,34 +364,24 @@ export function markBenchmarkTrialRejected(result: BenchmarkTrialResult, reason:
 		rejectionReasons: [...result.rejectionReasons, reason]
 	};
 }
-
-/** One immediate same-launch retry per rejected trial, bounded by the global per-run retry budget. */
 export function shouldRetryBenchmarkTrial(result: BenchmarkTrialResult, attemptsForTrial: number, runRetriesUsed: number): boolean {
-	return result.rejected
-		&& attemptsForTrial <= BENCHMARK_TRIAL_RETRY_LIMIT
-		&& runRetriesUsed < BENCHMARK_RUN_RETRY_BUDGET;
+	return result.rejected && attemptsForTrial <= BENCHMARK_TRIAL_RETRY_LIMIT && runRetriesUsed < BENCHMARK_RUN_RETRY_BUDGET;
 }
-
 export interface ResolvedBenchmarkAttempts {
-	/** True when every attempt was rejected and the best one is recorded as warn-and-continue evidence. */
 	downgradedToLowConfidence: boolean;
 	result: BenchmarkTrialResult;
 }
-
-/**
- * Picks the trial to record from one or two attempts: the first clean attempt wins outright; if
- * every attempt was rejected, the better attempt is kept as round-1-style low-confidence
- * warn-and-continue evidence so the flow always terminates (design §2.4).
- */
 export function resolveBenchmarkAttempts(attempts: BenchmarkTrialResult[]): ResolvedBenchmarkAttempts {
-	const clean = attempts.find(attempt => !attempt.rejected);
+	const clean = attempts.find((attempt) => !attempt.rejected);
 	if (clean) return { downgradedToLowConfidence: false, result: clean };
-
-	const better = attempts.reduce((best, attempt) => {
-		if (!best) return attempt;
-		if (attempt.success !== best.success) return attempt.success ? attempt : best;
-		if (attempt.sampleCount !== best.sampleCount) return attempt.sampleCount > best.sampleCount ? attempt : best;
-		return attempt.onePercentLowFps > best.onePercentLowFps ? attempt : best;
-	}, undefined as BenchmarkTrialResult | undefined);
+	const better = attempts.reduce(
+		(best, attempt) => {
+			if (!best) return attempt;
+			if (attempt.success !== best.success) return attempt.success ? attempt : best;
+			if (attempt.sampleCount !== best.sampleCount) return attempt.sampleCount > best.sampleCount ? attempt : best;
+			return attempt.onePercentLowFps > best.onePercentLowFps ? attempt : best;
+		},
+		undefined as BenchmarkTrialResult | undefined
+	);
 	return { downgradedToLowConfidence: true, result: better };
 }

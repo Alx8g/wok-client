@@ -1,5 +1,9 @@
 name: Build WOK Client release
 
+env:
+  WOK_QUALIFIED_ELECTRON_RELEASE: wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54-network-high.1
+  WOK_QUALIFIED_ELECTRON_ARCHIVE: electron-v44.0.0-nightly.20260522-wok-chromium152-network-high-win32-x64.zip
+
 on:
   push:
     tags:
@@ -95,6 +99,22 @@ jobs:
       - name: Install dependencies and verified patched Electron
         run: pnpm install --frozen-lockfile
 
+      - name: Download checksum-pinned WOK Electron runtime
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $runtimeDirectory = Join-Path $env:RUNNER_TEMP 'wok-qualified-electron'
+          New-Item -ItemType Directory -Force $runtimeDirectory | Out-Null
+          gh release download $env:WOK_QUALIFIED_ELECTRON_RELEASE `
+            --repo $env:GITHUB_REPOSITORY `
+            --pattern $env:WOK_QUALIFIED_ELECTRON_ARCHIVE `
+            --dir $runtimeDirectory
+          $archive = Join-Path $runtimeDirectory $env:WOK_QUALIFIED_ELECTRON_ARCHIVE
+          if (-not (Test-Path $archive)) { throw "WOK Electron archive was not downloaded: $archive" }
+          "WOK_QUALIFIED_ELECTRON_ZIP=$archive" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Build platform package
         run: pnpm run make -- --arch=${{ matrix.arch }}
 
@@ -142,12 +162,12 @@ jobs:
             printf '%s  %s\n' "$(sha256sum "release-assets/$name" | cut -d ' ' -f 1)" "$name" >> SHA256SUMS.txt
           done < <(find artifacts -type f -print0 | sort -z)
           cat > release-notes.txt <<EOF
-          WOK Client ${version} removes disabled validation and overlay code, reduces the shipped JavaScript, and removes the Stream Krunker self-promotion while preserving genuine Live Streams.
+          WOK Client ${version} includes the merged source cleanup and the accepted Electron 44 / Chromium 152 network-latency runtime.
 
-          The Windows x64 installer uses the patched Electron 44 nightly archive whose SHA-256 is b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e.
+          The Windows x64 installer uses the checksum-pinned WOK Electron archive whose SHA-256 is b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4. It keeps input and compositor priorities intact, raises only the Network Service process, and gives queued WebSocket and posted-message work one bounded control-priority service opportunity.
 
           Included platforms:
-          - Windows x64 installer with the default patched Electron 44 nightly runtime
+          - Windows x64 installer with the accepted WOK Electron 44 / Chromium 152 runtime
           - Linux x64 AppImage
           - macOS arm64 DMG
 

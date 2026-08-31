@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { FramePolicy } from '../src/calibration.ts';
-import { computeCommandLineSwitches, type CommandLineSwitch } from '../src/command-line-switches.ts';
+import { computeCommandLineSwitches, type CommandLineSwitch, WOK_WINDOWS_RUNTIME_FEATURES } from '../src/command-line-switches.ts';
 import type { AppliedGraphicsBackend } from '../src/graphics-profile.ts';
 const BACKENDS: readonly AppliedGraphicsBackend[] = ['default', 'd3d11', 'd3d11on12', 'vulkan'];
 const FRAME_POLICIES: readonly (FramePolicy | undefined)[] = [undefined, 'uncapped', 'capped'];
@@ -48,7 +48,9 @@ function expectedSwitchSet({ backend, framePolicy, platform, prefs }: MatrixCase
 		expected.set('disable-backgrounding-occluded-windows', undefined);
 	}
 	if (backend !== 'default') expected.set('use-angle', backend);
-	if (backend === 'vulkan') expected.set('enable-features', 'Vulkan');
+	const enabledFeatures: string[] = platform === 'win32' ? [...WOK_WINDOWS_RUNTIME_FEATURES] : [];
+	if (backend === 'vulkan') enabledFeatures.push('Vulkan');
+	if (enabledFeatures.length > 0) expected.set('enable-features', enabledFeatures.join(','));
 	if (prefs.safeFlags_highPerformanceGpu) expected.set('force-high-performance-gpu', undefined);
 	if (prefs.experimentalFlags_experimental && platform === 'linux') expected.set('enable-native-gpu-memory-buffers', undefined);
 	if (prefs.safeFlags_gpuRasterizing) expected.set('enable-gpu-rasterization', undefined);
@@ -98,6 +100,7 @@ test('shipped defaults on Windows produce the expected switch list in a stable o
 		{ name: 'disable-renderer-backgrounding' },
 		{ name: 'disable-backgrounding-occluded-windows' },
 		{ name: 'use-angle', value: 'd3d11on12' },
+		{ name: 'enable-features', value: WOK_WINDOWS_RUNTIME_FEATURES.join(',') },
 		{ name: 'force-high-performance-gpu' },
 		{ name: 'disable-frame-rate-limit' },
 		{ name: 'disable-gpu-vsync' }

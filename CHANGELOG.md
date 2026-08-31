@@ -1,3 +1,14 @@
+## WOK Client 1.1.0-rc.13 (2026-08-31)
+
+### Runtime
+- Added the accepted Windows Electron 44 / Chromium 152 runtime with Network Service `High` priority and bounded one-task escapes for WebSocket and posted-message dispatch.
+- Preserved input and compositor priorities, native resolution, visual effects, WebGL behavior, raw input and Chromium security boundaries.
+- Enabled the runtime features explicitly on Windows and pinned the release archive to SHA-256 `b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4`.
+- Completed a clean three-cycle comparison across nine runtime treatments before live gameplay acceptance. Reported FPS figures remain callback measurements, not displayed-frame claims.
+
+### Cleanup
+- Included the merged comment and unused-file cleanup from `main` without removing active runtime behavior, tests or release assets.
+
 ## WOK Client 1.1.0-rc.12 (2026-08-30)
 
 ### Cleanup

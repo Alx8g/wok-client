@@ -10,9 +10,7 @@ import {
 	type AdaptiveValidationSubmission
 } from '../src/adaptive-validation.ts';
 import { startAdaptiveValidationRuntime, type AdaptiveValidationRuntimeEnvironment } from '../src/adaptive-validation-runtime.ts';
-
 type TestListener = EventListener;
-
 function createEventTarget() {
 	const listeners = new Map<string, Set<TestListener>>();
 	return {
@@ -37,7 +35,6 @@ function createEventTarget() {
 		}
 	};
 }
-
 const profile: AdaptiveValidationProfileIdentity = {
 	activeBackend: 'default',
 	benchmarkSemanticVersion: 2,
@@ -47,29 +44,26 @@ const profile: AdaptiveValidationProfileIdentity = {
 	hardwareFingerprint: '8086:46a6',
 	profileSemanticVersion: ADAPTIVE_VALIDATION_PROFILE_SEMANTIC_VERSION
 };
-
 function stableSession(completedAt: number): AdaptiveValidationSession {
 	return {
 		completedAt,
-		durationMs: 30_000,
+		durationMs: 30000,
 		id: `runtime-session-${completedAt.toString().padStart(8, '0')}`,
 		lowConfidenceReasons: [],
 		metrics: {
 			averageFps: 240,
 			onePercentLowFps: 180,
 			p95FrameTimeMs: 6,
-			sampleCount: 7_000,
+			sampleCount: 7000,
 			worstFrameTimeMs: 18
 		}
 	};
 }
-
 function stateWithSessions(count: number): AdaptiveValidationState {
 	let state = createAdaptiveValidationState(profile, 1);
 	for (let index = 0; index < count; index++) state = recordAdaptiveValidationSession(state, stableSession(index + 1), index + 2);
 	return state;
 }
-
 function createRuntimeHarness(pointerLocked: boolean) {
 	const documentEvents = createEventTarget();
 	const windowEvents = createEventTarget();
@@ -86,8 +80,12 @@ function createRuntimeHarness(pointerLocked: boolean) {
 		removeEventListener: documentEvents.removeEventListener
 	};
 	const environment: AdaptiveValidationRuntimeEnvironment = {
-		cancelAnimationFrame(handle) { animationFrames.delete(handle); },
-		clearTimeout(handle) { timers.delete(handle); },
+		cancelAnimationFrame(handle) {
+			animationFrames.delete(handle);
+		},
+		clearTimeout(handle) {
+			timers.delete(handle);
+		},
 		createSessionId: () => `runtime-generated-${(nextSessionId++).toString().padStart(8, '0')}`,
 		document: runtimeDocument,
 		now: () => now,
@@ -101,13 +99,12 @@ function createRuntimeHarness(pointerLocked: boolean) {
 			timers.set(handle, callback);
 			return handle;
 		},
-		wallClockNow: () => 500_000,
+		wallClockNow: () => 500000,
 		window: {
 			addEventListener: windowEvents.addEventListener,
 			removeEventListener: windowEvents.removeEventListener
 		}
 	};
-
 	return {
 		animationFrames,
 		documentEvents,
@@ -127,44 +124,47 @@ function createRuntimeHarness(pointerLocked: boolean) {
 			timers.delete(next[0]);
 			next[1]();
 		},
-		setNow(value: number) { now = value; },
+		setNow(value: number) {
+			now = value;
+		},
 		timers,
 		windowEvents
 	};
 }
-
 function collectQualifyingFrameEvidence(harness: ReturnType<typeof createRuntimeHarness>, segmentStartTime: number) {
 	harness.runNextAnimationFrame(segmentStartTime);
 	for (let sample = 1; sample <= 101; sample++) {
 		harness.runNextAnimationFrame(segmentStartTime + sample * 10);
 	}
 }
-
 test('starts no listeners or animation frames after validation is already complete', () => {
 	const harness = createRuntimeHarness(true);
-	const stop = startAdaptiveValidationRuntime({
-		state: stateWithSessions(3),
-		submitSession: async () => assert.fail('completed validation must not submit')
-	}, harness.environment);
-
+	const stop = startAdaptiveValidationRuntime(
+		{
+			state: stateWithSessions(3),
+			submitSession: async () => assert.fail('completed validation must not submit')
+		},
+		harness.environment
+	);
 	assert.equal(harness.animationFrames.size, 0);
 	assert.equal(harness.timers.size, 0);
 	assert.equal(harness.documentEvents.listenerCount(), 0);
 	assert.equal(harness.windowEvents.listenerCount(), 0);
 	stop();
 });
-
 test('unload cancels active sampling without accepting or submitting a partial session', () => {
 	const harness = createRuntimeHarness(true);
 	let submissions = 0;
-	startAdaptiveValidationRuntime({
-		state: createAdaptiveValidationState(profile, 1),
-		submitSession: async () => {
-			submissions++;
-			return createAdaptiveValidationState(profile, 2);
-		}
-	}, harness.environment);
-
+	startAdaptiveValidationRuntime(
+		{
+			state: createAdaptiveValidationState(profile, 1),
+			submitSession: async () => {
+				submissions++;
+				return createAdaptiveValidationState(profile, 2);
+			}
+		},
+		harness.environment
+	);
 	assert.equal(harness.animationFrames.size, 1);
 	assert.equal(harness.timers.size, 1);
 	harness.windowEvents.dispatch('beforeunload');
@@ -174,38 +174,33 @@ test('unload cancels active sampling without accepting or submitting a partial s
 	assert.equal(harness.windowEvents.listenerCount(), 0);
 	assert.equal(submissions, 0);
 });
-
 test('continues sampling after a rejected attempt and stops after three qualifying sessions', async () => {
 	const harness = createRuntimeHarness(true);
 	let persistedState = stateWithSessions(2);
 	const submissions: AdaptiveValidationSubmission[] = [];
-	startAdaptiveValidationRuntime({
-		state: persistedState,
-		submitSession: async submission => {
-			submissions.push(submission);
-			persistedState = recordAdaptiveValidationSession(persistedState, submission.session, 600_000);
-			return persistedState;
-		}
-	}, harness.environment);
-
+	startAdaptiveValidationRuntime(
+		{
+			state: persistedState,
+			submitSession: async (submission) => {
+				submissions.push(submission);
+				persistedState = recordAdaptiveValidationSession(persistedState, submission.session, 600000);
+				return persistedState;
+			}
+		},
+		harness.environment
+	);
 	harness.windowEvents.dispatch('blur');
 	harness.windowEvents.dispatch('resize');
 	harness.documentEvents.dispatch('visibilitychange');
-	harness.runNextTimer(1_300);
-	collectQualifyingFrameEvidence(harness, 20_000);
-	harness.setNow(30_001);
+	harness.runNextTimer(1300);
+	collectQualifyingFrameEvidence(harness, 20000);
+	harness.setNow(30001);
 	harness.runtimeDocument.pointerLockElement = null;
 	harness.documentEvents.dispatch('pointerlockchange');
 	await Promise.resolve();
 	await Promise.resolve();
-
 	assert.equal(submissions.length, 1);
-	assert.deepEqual(new Set(submissions[0].session.lowConfidenceReasons), new Set([
-		'document-visibility-changed',
-		'severe-event-loop-disturbance',
-		'window-blurred',
-		'window-resized'
-	]));
+	assert.deepEqual(new Set(submissions[0].session.lowConfidenceReasons), new Set(['document-visibility-changed', 'severe-event-loop-disturbance', 'window-blurred', 'window-resized']));
 	assert.ok(submissions[0].session.metrics.sampleCount >= 100);
 	assert.equal(persistedState.sessions.length, 2);
 	assert.equal(persistedState.status, 'sampling');
@@ -213,18 +208,16 @@ test('continues sampling after a rejected attempt and stops after three qualifyi
 	assert.equal(harness.timers.size, 0);
 	assert.equal(harness.documentEvents.listenerCount(), 2);
 	assert.equal(harness.windowEvents.listenerCount(), 3);
-
 	harness.runtimeDocument.pointerLockElement = {};
 	harness.documentEvents.dispatch('pointerlockchange');
 	assert.equal(harness.animationFrames.size, 1);
 	assert.equal(harness.timers.size, 1);
-	collectQualifyingFrameEvidence(harness, 50_001);
-	harness.setNow(60_002);
+	collectQualifyingFrameEvidence(harness, 50001);
+	harness.setNow(60002);
 	harness.runtimeDocument.pointerLockElement = null;
 	harness.documentEvents.dispatch('pointerlockchange');
 	await Promise.resolve();
 	await Promise.resolve();
-
 	assert.equal(submissions.length, 2);
 	assert.deepEqual(submissions[1].session.lowConfidenceReasons, []);
 	assert.ok(submissions[1].session.metrics.sampleCount >= 100);
@@ -235,7 +228,6 @@ test('continues sampling after a rejected attempt and stops after three qualifyi
 	assert.equal(harness.timers.size, 0);
 	assert.equal(harness.documentEvents.listenerCount(), 0);
 	assert.equal(harness.windowEvents.listenerCount(), 0);
-
 	harness.runtimeDocument.pointerLockElement = {};
 	harness.documentEvents.dispatch('pointerlockchange');
 	assert.equal(submissions.length, 2);

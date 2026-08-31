@@ -1,13 +1,3 @@
-/**
- * Diagnostic-only Krunker menu structure probe.
- *
- * Client features that reorganise parts of the game menu have to be written against the markup
- * the game actually produces. Guessing selectors produces code that silently does nothing the
- * day the game changes, so this captures the real structure once and prints it.
- *
- * Inert unless WOK_DUMP_DOM is set, and it never modifies anything it inspects.
- */
-
 export interface MenuProbeNode {
 	attributes: Record<string, string>;
 	childCount: number;
@@ -15,28 +5,26 @@ export interface MenuProbeNode {
 	tag: string;
 	text: string;
 }
-
 export interface MenuProbeMatch {
 	nodes: MenuProbeNode[];
 	rootDescription: string;
 }
-
 interface ProbeElement {
-	attributes?: ArrayLike<{ name: string; value: string }>;
+	attributes?: ArrayLike<{
+		name: string;
+		value: string;
+	}>;
 	children?: ArrayLike<ProbeElement>;
 	className?: unknown;
 	id?: string;
 	tagName?: string;
 	textContent?: string | null;
 }
-
 function describe(element: ProbeElement): string {
 	const id = element.id ? `#${element.id}` : '';
 	const className = typeof element.className === 'string' && element.className ? `.${element.className.trim().split(/\s+/u).join('.')}` : '';
 	return `${(element.tagName ?? 'node').toLowerCase()}${id}${className}`;
 }
-
-/** Flattens an element tree to a bounded, readable outline: tags, ids, classes, and short text. */
 export function outlineElement(root: ProbeElement, maxDepth = 4, maxNodes = 120): MenuProbeNode[] {
 	const nodes: MenuProbeNode[] = [];
 	const visit = (element: ProbeElement, depth: number) => {
@@ -60,13 +48,12 @@ export function outlineElement(root: ProbeElement, maxDepth = 4, maxNodes = 120)
 	visit(root, 0);
 	return nodes;
 }
-
 export function formatMenuProbe(matches: MenuProbeMatch[]): string {
 	if (matches.length === 0) return '[wok-dom] no matching elements found';
 	return matches
-		.map(match => {
+		.map((match) => {
 			const body = match.nodes
-				.map(node => {
+				.map((node) => {
 					const attributes = Object.entries(node.attributes)
 						.map(([name, value]) => `${name}="${value}"`)
 						.join(' ');
@@ -78,26 +65,18 @@ export function formatMenuProbe(matches: MenuProbeMatch[]): string {
 		})
 		.join('\n\n');
 }
-
 export interface MenuProbeHooks {
-	/** Case-insensitive text fragments that identify the region of interest. */
 	keywords: string[];
 	queryAll(selector: string): ProbeElement[];
 	report(text: string): void;
 }
-
-/**
- * Finds the smallest containers whose text mentions the given keywords and outlines them. Working
- * from text rather than selectors means the probe keeps working when the game renames classes.
- */
 export function probeMenuStructure(hooks: MenuProbeHooks): void {
-	const keywords = hooks.keywords.map(keyword => keyword.toLowerCase());
+	const keywords = hooks.keywords.map((keyword) => keyword.toLowerCase());
 	const candidates = hooks.queryAll('div, section, aside');
 	const matches: MenuProbeMatch[] = [];
-
 	const matchesKeyword = (element: ProbeElement) => {
 		const text = (element.textContent ?? '').toLowerCase();
-		return keywords.some(keyword => text.includes(keyword));
+		return keywords.some((keyword) => text.includes(keyword));
 	};
 	const candidateSet = new Set(candidates);
 	const containsMatchingCandidate = (element: ProbeElement): boolean => {
@@ -107,16 +86,11 @@ export function probeMenuStructure(hooks: MenuProbeHooks): void {
 		}
 		return false;
 	};
-
 	for (const element of candidates) {
 		if (!matchesKeyword(element)) continue;
-		// Report the tightest container. An element is skipped only when a *candidate* descendant
-		// also matches; deferring to any matching child at all would drill down to leaf text nodes
-		// and report nothing useful.
 		if (containsMatchingCandidate(element)) continue;
 		matches.push({ nodes: outlineElement(element), rootDescription: describe(element) });
 		if (matches.length >= 4) break;
 	}
-
 	hooks.report(formatMenuProbe(matches));
 }

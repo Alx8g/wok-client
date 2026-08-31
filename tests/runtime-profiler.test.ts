@@ -9,7 +9,6 @@ import {
 	type RuntimeProfileEnvironment,
 	type RuntimeProfileRequest
 } from '../src/runtime-profiler.ts';
-
 function request(overrides: Partial<RuntimeProfileRequest> = {}): RuntimeProfileRequest {
 	return {
 		durationMs: RUNTIME_PROFILE_DURATION_MS,
@@ -24,12 +23,7 @@ function request(overrides: Partial<RuntimeProfileRequest> = {}): RuntimeProfile
 		...overrides
 	};
 }
-
-function environment(options: {
-	alreadyAttached?: boolean;
-	failCommand?: string;
-	wait?: (durationMs: number) => Promise<void>;
-} = {}) {
+function environment(options: { alreadyAttached?: boolean; failCommand?: string; wait?: (durationMs: number) => Promise<void> } = {}) {
 	const calls: string[] = [];
 	const writes = new Map<string, unknown>();
 	let attached = Boolean(options.alreadyAttached);
@@ -64,9 +58,11 @@ function environment(options: {
 			calls.push(`trace-stop:${path}`);
 			return path;
 		},
-		wait: options.wait ?? (async durationMs => {
-			calls.push(`wait:${durationMs}`);
-		}),
+		wait:
+			options.wait ??
+			(async (durationMs) => {
+				calls.push(`wait:${durationMs}`);
+			}),
 		async writeJson(path, contents) {
 			calls.push(`write:${path}`);
 			writes.set(path, contents);
@@ -74,19 +70,15 @@ function environment(options: {
 	};
 	return { calls, environment: value, writes };
 }
-
 test('recognizes only the explicit local runtime-profile trigger argument', () => {
 	assert.equal(runtimeProfileRequested(['wok-client.exe', RUNTIME_PROFILE_TRIGGER_ARGUMENT]), true);
 	assert.equal(runtimeProfileRequested(['wok-client.exe', `${RUNTIME_PROFILE_TRIGGER_ARGUMENT}=1`]), false);
 	assert.equal(runtimeProfileRequested(['wok-client.exe']), false);
 });
-
 test('captures matching renderer CPU and Chromium trace artifacts, then detaches cleanly', async () => {
 	const fixture = environment();
 	const profiler = new RuntimeProfiler(fixture.environment);
-
 	const result = await profiler.capture(request());
-
 	assert.deepEqual(fixture.calls, [
 		'attach:1.3',
 		'Profiler.enable',
@@ -111,16 +103,15 @@ test('captures matching renderer CPU and Chromium trace artifacts, then detaches
 	});
 	assert.equal(profiler.isRunning(), false);
 });
-
 test('captures a low-overhead CPU profile without starting broad Chromium tracing', async () => {
 	const fixture = environment();
 	const profiler = new RuntimeProfiler(fixture.environment);
-
-	const result = await profiler.capture(request({
-		paths: { cpuProfile: 'profile.cpuprofile', manifest: 'manifest.json' },
-		traceCategories: undefined
-	}));
-
+	const result = await profiler.capture(
+		request({
+			paths: { cpuProfile: 'profile.cpuprofile', manifest: 'manifest.json' },
+			traceCategories: undefined
+		})
+	);
 	assert.deepEqual(fixture.calls, [
 		'attach:1.3',
 		'Profiler.enable',
@@ -143,36 +134,31 @@ test('captures a low-overhead CPU profile without starting broad Chromium tracin
 		startedAt: '2026-08-28T00:00:00.000Z'
 	});
 });
-
 test('rejects overlap while a capture is waiting and becomes reusable afterward', async () => {
 	let releaseWait: (() => void) | undefined;
-	const waiting = new Promise<void>(resolve => { releaseWait = resolve; });
+	const waiting = new Promise<void>((resolve) => {
+		releaseWait = resolve;
+	});
 	const fixture = environment({ wait: () => waiting });
 	const profiler = new RuntimeProfiler(fixture.environment);
 	const first = profiler.capture(request());
-
 	await Promise.resolve();
 	await Promise.resolve();
 	assert.equal(profiler.isRunning(), true);
 	await assert.rejects(profiler.capture(request()), /already running/);
-
 	releaseWait?.();
 	await first;
 	assert.equal(profiler.isRunning(), false);
 });
-
 test('does not disturb a renderer already attached to Developer Tools', async () => {
 	const fixture = environment({ alreadyAttached: true });
 	const profiler = new RuntimeProfiler(fixture.environment);
-
 	await assert.rejects(profiler.capture(request()), /Close Developer Tools/);
 	assert.deepEqual(fixture.calls, []);
 });
-
 test('stops tracing, disables profiling and detaches after a profiling failure', async () => {
 	const fixture = environment({ failCommand: 'Profiler.start' });
 	const profiler = new RuntimeProfiler(fixture.environment);
-
 	await assert.rejects(profiler.capture(request()), /failed Profiler\.start/);
 	assert.deepEqual(fixture.calls, [
 		'attach:1.3',
@@ -186,11 +172,9 @@ test('stops tracing, disables profiling and detaches after a profiling failure',
 	]);
 	assert.equal(profiler.isRunning(), false);
 });
-
 test('validates duration, sampling interval, paths and categories before attaching', async () => {
 	const fixture = environment();
 	const profiler = new RuntimeProfiler(fixture.environment);
-
 	await assert.rejects(profiler.capture(request({ durationMs: 999 })), /duration/);
 	await assert.rejects(profiler.capture(request({ sampleIntervalUs: 99 })), /sampling interval/);
 	await assert.rejects(profiler.capture(request({ paths: { cpuProfile: '', manifest: 'm', trace: 't' } })), /paths/);

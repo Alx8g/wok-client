@@ -11,6 +11,4 @@ export interface VerifiedPackagedApplication {
 	entryCount: number;
 }
 
-export function verifyPackagedApplication(
-	options: VerifyPackagedApplicationOptions
-): VerifiedPackagedApplication;
+export function verifyPackagedApplication(options: VerifyPackagedApplicationOptions): VerifiedPackagedApplication;

@@ -3,12 +3,10 @@ import test from 'node:test';
 import { CALIBRATION_NO_COMPARISON_REASON, createCalibrationSignature, prepareCalibrationState } from '../src/calibration.ts';
 import { buildDiagnosticsReport, type DiagnosticsReportInput } from '../src/diagnostics-report.ts';
 import { createGraphicsProfileState, recordManualGraphicsGpuFailure, updateGraphicsDetection } from '../src/graphics-profile.ts';
-
 const intelDevice = { active: true, deviceId: 0x46a6, vendorId: 0x8086 };
 const softwareDevice = { active: false, deviceId: 0x008c, vendorId: 0x1414 };
-
 function baseInput(): DiagnosticsReportInput {
-	const graphicsProfile = updateGraphicsDetection(createGraphicsProfileState('win32', 1_000), 'win32', [intelDevice, softwareDevice], 1_000);
+	const graphicsProfile = updateGraphicsDetection(createGraphicsProfileState('win32', 1000), 'win32', [intelDevice, softwareDevice], 1000);
 	return {
 		appVersion: '1.0.0',
 		electronVersion: '44.0.0-nightly.20260522',
@@ -21,10 +19,8 @@ function baseInput(): DiagnosticsReportInput {
 		preferences: { competitiveMode: true, fpsUncap: true, fullscreen: 'windowed', graphicsBackend: 'auto', safeFlags_highPerformanceGpu: true }
 	};
 }
-
 test('reports hardware, selection, and graceful placeholders without calibration evidence', () => {
 	const report = buildDiagnosticsReport(baseInput());
-
 	assert.ok(report.startsWith('WOK CLIENT DIAGNOSTICS — 2026-08-03T12:00:00.000Z'));
 	assert.ok(report.includes('GPU: 8086:46a6 (active), 1414:8c'));
 	assert.ok(report.includes('recommendation: d3d11on12'));
@@ -34,40 +30,23 @@ test('reports hardware, selection, and graceful placeholders without calibration
 	assert.ok(report.includes('safeFlags_highPerformanceGpu=true'));
 	assert.ok(report.includes('safeFlags_gpuRasterizing=unset'));
 });
-
 test('surfaces non-quarantining manual backend failures in the failure history', () => {
 	const input = baseInput();
-	input.graphicsProfile = recordManualGraphicsGpuFailure(
-		{ ...input.graphicsProfile, launchPending: true },
-		'd3d11',
-		'GPU process crashed with exit code 5.',
-		2_000
-	);
+	input.graphicsProfile = recordManualGraphicsGpuFailure({ ...input.graphicsProfile, launchPending: true }, 'd3d11', 'GPU process crashed with exit code 5.', 2000);
 	input.graphicsSelection = { backend: 'd3d11', preference: 'd3d11', reason: 'Using the manually selected d3d11 graphics backend.', source: 'manual' };
-
 	const report = buildDiagnosticsReport(input);
-	// Recorded and visible, yet never quarantined (audit C5).
 	assert.ok(report.includes('quarantined backends: none'));
 	assert.ok(report.includes('backend failures: d3d11 x1 — GPU process crashed with exit code 5.'));
 	assert.ok(report.includes('last launch: gpu-failure — GPU process crashed with exit code 5.'));
 });
-
 test('explains a calibration that completed without a benchmark cycle', () => {
 	const input = baseInput();
 	input.platform = 'linux';
-	input.calibration = prepareCalibrationState(
-		undefined,
-		createCalibrationSignature('1.0.0', '44.0.0', '8086:46a6', 'driver-a'),
-		[{ backend: 'default', framePolicy: 'uncapped', id: 'default:uncapped' }],
-		false,
-		'linux'
-	);
-
+	input.calibration = prepareCalibrationState(undefined, createCalibrationSignature('1.0.0', '44.0.0', '8086:46a6', 'driver-a'), [{ backend: 'default', framePolicy: 'uncapped', id: 'default:uncapped' }], false, 'linux');
 	const report = buildDiagnosticsReport(input);
 	assert.ok(report.includes('CALIBRATION: complete'));
 	assert.ok(report.includes(`  ${CALIBRATION_NO_COMPARISON_REASON}`));
 });
-
 test('surfaces artifact flags, verdicts, and validation sessions in the calibration sections', () => {
 	const input = baseInput();
 	const artifactMetrics = {
@@ -99,13 +78,15 @@ test('surfaces artifact flags, verdicts, and validation sessions in the calibrat
 			score: 46.34
 		},
 		rejectedAttempts: [],
-		results: [{
-			backendVerification: { candidateBackend: 'd3d11on12', detectedBackend: 'd3d11on12', status: 'verified' },
-			candidate: { backend: 'd3d11on12', framePolicy: 'uncapped', id: 'd3d11on12:uncapped' },
-			metrics: artifactMetrics,
-			score: 46.34,
-			slotIndex: 0
-		}],
+		results: [
+			{
+				backendVerification: { candidateBackend: 'd3d11on12', detectedBackend: 'd3d11on12', status: 'verified' },
+				candidate: { backend: 'd3d11on12', framePolicy: 'uncapped', id: 'd3d11on12:uncapped' },
+				metrics: artifactMetrics,
+				score: 46.34,
+				slotIndex: 0
+			}
+		],
 		runRetriesUsed: 0,
 		signature: { appVersion: '1.0.0', benchmarkVersion: 3, driverFingerprint: 'driver-a', electronVersion: '44.0.0', hardwareFingerprint: '8086:46a6', workloadVersion: 1 },
 		status: 'awaiting-confirmation',
@@ -120,19 +101,29 @@ test('surfaces artifact flags, verdicts, and validation sessions in the calibrat
 		classification: 'inconclusive',
 		profile: { activeBackend: 'd3d11on12', benchmarkSemanticVersion: 1, driverFingerprint: 'driver-a', electronVersion: '44.0.0', framePolicy: 'uncapped', hardwareFingerprint: '8086:46a6', profileSemanticVersion: 1 },
 		profileChangeConfirmationRequired: true,
-		sessions: [{
-			completedAt: 100,
-			durationMs: 60_000,
-			id: 'adaptive-session-00000001',
-			lowConfidenceReasons: [],
-			metrics: { averageFps: 398.2, onePercentLowFps: 150.1, p95FrameTimeMs: 3.1, sampleCount: 20_000, worstFrameTimeMs: 12 }
-		}],
+		sessions: [
+			{
+				completedAt: 100,
+				durationMs: 60000,
+				id: 'adaptive-session-00000001',
+				lowConfidenceReasons: [],
+				metrics: { averageFps: 398.2, onePercentLowFps: 150.1, p95FrameTimeMs: 3.1, sampleCount: 20000, worstFrameTimeMs: 12 }
+			}
+		],
 		status: 'sampling',
-		summary: { acceptedSessionCount: 1, cleanSessionCount: 1, maximumP95FrameTimeMs: 3.1, maximumWorstFrameTimeMs: 12, minimumAverageFps: 398.2, minimumOnePercentLowFps: 150.1, severeInstabilitySessionCount: 0, totalFrameSamples: 20_000 },
+		summary: {
+			acceptedSessionCount: 1,
+			cleanSessionCount: 1,
+			maximumP95FrameTimeMs: 3.1,
+			maximumWorstFrameTimeMs: 12,
+			minimumAverageFps: 398.2,
+			minimumOnePercentLowFps: 150.1,
+			severeInstabilitySessionCount: 0,
+			totalFrameSamples: 20000
+		},
 		updatedAt: 101,
 		version: 1
 	};
-
 	const report = buildDiagnosticsReport(input);
 	assert.ok(report.includes('CALIBRATION: awaiting-confirmation'));
 	assert.ok(report.includes('[fence-pacing-dominates-frame-interval]'));

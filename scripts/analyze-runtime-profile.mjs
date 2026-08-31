@@ -1,14 +1,11 @@
 import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-
 function finiteNumber(value) {
 	return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
-
 function nonNegativeInteger(value) {
 	return Number.isInteger(value) && value >= 0 ? value : undefined;
 }
-
 function callFrameFor(node) {
 	const frame = node?.callFrame;
 	if (!frame || typeof frame !== 'object' || Array.isArray(frame)) return undefined;
@@ -19,7 +16,6 @@ function callFrameFor(node) {
 		url: typeof frame.url === 'string' ? frame.url : ''
 	};
 }
-
 function frameCategory(frame) {
 	if (frame.functionName === '(idle)') return 'idle';
 	if (frame.functionName === '(garbage collector)') return 'garbage-collector';
@@ -28,12 +24,10 @@ function frameCategory(frame) {
 	if (frame.url.startsWith('node:') || frame.url.startsWith('electron:')) return 'runtime';
 	return 'page';
 }
-
 export function analyzeCpuProfile(profile, limit = 40) {
 	if (!profile || typeof profile !== 'object' || Array.isArray(profile)) throw new Error('CPU profile must be an object.');
 	if (!Array.isArray(profile.nodes) || !Array.isArray(profile.samples)) throw new Error('CPU profile must contain nodes and samples arrays.');
 	if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('Result limit must be an integer from 1 through 500.');
-
 	const nodes = new Map();
 	const parents = new Map();
 	for (const node of profile.nodes) {
@@ -49,22 +43,16 @@ export function analyzeCpuProfile(profile, limit = 40) {
 		}
 	}
 	if (nodes.size === 0) throw new Error('CPU profile contains no valid nodes.');
-
 	const startTime = finiteNumber(profile.startTime);
 	const endTime = finiteNumber(profile.endTime);
-	const measuredDurationUs = startTime !== undefined && endTime !== undefined && endTime > startTime
-		? endTime - startTime
-		: undefined;
+	const measuredDurationUs = startTime !== undefined && endTime !== undefined && endTime > startTime ? endTime - startTime : undefined;
 	const deltas = Array.isArray(profile.timeDeltas) ? profile.timeDeltas : [];
-	const validDeltas = deltas.length === profile.samples.length && deltas.every(delta => finiteNumber(delta) !== undefined && delta >= 0);
-	const fallbackSampleUs = measuredDurationUs !== undefined && profile.samples.length > 0
-		? measuredDurationUs / profile.samples.length
-		: 1_000;
+	const validDeltas = deltas.length === profile.samples.length && deltas.every((delta) => finiteNumber(delta) !== undefined && delta >= 0);
+	const fallbackSampleUs = measuredDurationUs !== undefined && profile.samples.length > 0 ? measuredDurationUs / profile.samples.length : 1000;
 	const byNode = new Map();
 	const inclusiveByNode = new Map();
 	let attributedUs = 0;
 	let unattributedSamples = 0;
-
 	for (let index = 0; index < profile.samples.length; index++) {
 		const id = nonNegativeInteger(profile.samples[index]);
 		const node = id === undefined ? undefined : nodes.get(id);
@@ -88,31 +76,30 @@ export function analyzeCpuProfile(profile, limit = 40) {
 		}
 		attributedUs += sampleUs;
 	}
-
 	const totalUs = measuredDurationUs ?? attributedUs;
-	const entries = [...nodes.values()].map(node => {
+	const entries = [...nodes.values()].map((node) => {
 		const self = byNode.get(node.id) ?? { samples: 0, selfUs: 0 };
 		const inclusiveUs = inclusiveByNode.get(node.id) ?? 0;
 		return {
 			category: frameCategory(node.frame),
 			column: node.frame.columnNumber + 1,
 			functionName: node.frame.functionName,
-			inclusiveMs: inclusiveUs / 1_000,
-			inclusivePercent: totalUs > 0 ? 100 * inclusiveUs / totalUs : 0,
+			inclusiveMs: inclusiveUs / 1000,
+			inclusivePercent: totalUs > 0 ? (100 * inclusiveUs) / totalUs : 0,
 			line: node.frame.lineNumber + 1,
 			nodeId: node.id,
 			samples: self.samples,
-			selfMs: self.selfUs / 1_000,
-			selfPercent: totalUs > 0 ? 100 * self.selfUs / totalUs : 0,
+			selfMs: self.selfUs / 1000,
+			selfPercent: totalUs > 0 ? (100 * self.selfUs) / totalUs : 0,
 			url: node.frame.url
 		};
 	});
 	const topInclusive = entries
-		.filter(entry => entry.functionName !== '(root)' && entry.inclusiveMs > 0)
+		.filter((entry) => entry.functionName !== '(root)' && entry.inclusiveMs > 0)
 		.sort((left, right) => right.inclusiveMs - left.inclusiveMs || right.selfMs - left.selfMs)
 		.slice(0, limit);
 	const topSelf = entries
-		.filter(entry => entry.selfMs > 0)
+		.filter((entry) => entry.selfMs > 0)
 		.sort((left, right) => right.selfMs - left.selfMs || right.samples - left.samples)
 		.slice(0, limit);
 	const categories = new Map();
@@ -120,17 +107,16 @@ export function analyzeCpuProfile(profile, limit = 40) {
 		const category = frameCategory(entry.node.frame);
 		categories.set(category, (categories.get(category) ?? 0) + entry.selfUs);
 	}
-
 	return {
-		attributedMs: attributedUs / 1_000,
+		attributedMs: attributedUs / 1000,
 		categories: [...categories.entries()]
 			.map(([category, selfUs]) => ({
 				category,
-				selfMs: selfUs / 1_000,
-				selfPercent: totalUs > 0 ? 100 * selfUs / totalUs : 0
+				selfMs: selfUs / 1000,
+				selfPercent: totalUs > 0 ? (100 * selfUs) / totalUs : 0
 			}))
 			.sort((left, right) => right.selfMs - left.selfMs),
-		durationMs: totalUs / 1_000,
+		durationMs: totalUs / 1000,
 		sampleCount: profile.samples.length,
 		top: topSelf,
 		topInclusive,
@@ -138,37 +124,25 @@ export function analyzeCpuProfile(profile, limit = 40) {
 		usedRecordedTimeDeltas: validDeltas
 	};
 }
-
 function printableLocation(entry) {
 	const source = entry.url || '<anonymous-script>';
 	return `${source}:${entry.line}:${entry.column}`;
 }
-
 export function formatCpuProfileAnalysis(analysis) {
-	const lines = [
-		`Duration: ${analysis.durationMs.toFixed(1)} ms`,
-		`Samples: ${analysis.sampleCount} (${analysis.unattributedSamples} unattributed)`,
-		'',
-		'Categories:'
-	];
+	const lines = [`Duration: ${analysis.durationMs.toFixed(1)} ms`, `Samples: ${analysis.sampleCount} (${analysis.unattributedSamples} unattributed)`, '', 'Categories:'];
 	for (const category of analysis.categories) {
 		lines.push(`  ${category.category.padEnd(18)} ${category.selfMs.toFixed(1).padStart(9)} ms  ${category.selfPercent.toFixed(2).padStart(6)}%`);
 	}
 	lines.push('', 'Top inclusive time:');
 	for (const entry of analysis.topInclusive) {
-		lines.push(
-			`${entry.inclusivePercent.toFixed(2).padStart(6)}%  ${entry.inclusiveMs.toFixed(1).padStart(9)} ms  ${entry.functionName}  ${printableLocation(entry)}`
-		);
+		lines.push(`${entry.inclusivePercent.toFixed(2).padStart(6)}%  ${entry.inclusiveMs.toFixed(1).padStart(9)} ms  ${entry.functionName}  ${printableLocation(entry)}`);
 	}
 	lines.push('', 'Top self-time:');
 	for (const entry of analysis.top) {
-		lines.push(
-			`${entry.selfPercent.toFixed(2).padStart(6)}%  ${entry.selfMs.toFixed(1).padStart(9)} ms  ${entry.functionName}  ${printableLocation(entry)}`
-		);
+		lines.push(`${entry.selfPercent.toFixed(2).padStart(6)}%  ${entry.selfMs.toFixed(1).padStart(9)} ms  ${entry.functionName}  ${printableLocation(entry)}`);
 	}
 	return `${lines.join('\n')}\n`;
 }
-
 function parseLimit(argumentsList) {
 	const index = argumentsList.indexOf('--limit');
 	if (index === -1) return 40;
@@ -176,7 +150,6 @@ function parseLimit(argumentsList) {
 	if (!Number.isInteger(value) || value < 1 || value > 500) throw new Error('--limit must be an integer from 1 through 500.');
 	return value;
 }
-
 function parseProfilePath(argumentsList) {
 	for (let index = 0; index < argumentsList.length; index++) {
 		const argument = argumentsList[index];
@@ -189,7 +162,6 @@ function parseProfilePath(argumentsList) {
 	}
 	return undefined;
 }
-
 async function main() {
 	const argumentsList = process.argv.slice(2);
 	const profilePath = parseProfilePath(argumentsList);
@@ -198,10 +170,9 @@ async function main() {
 	const analysis = analyzeCpuProfile(profile, parseLimit(argumentsList));
 	process.stdout.write(argumentsList.includes('--json') ? `${JSON.stringify(analysis, null, 2)}\n` : formatCpuProfileAnalysis(analysis));
 }
-
 const isEntryPoint = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isEntryPoint) {
-	main().catch(error => {
+	main().catch((error) => {
 		console.error(error instanceof Error ? error.message : error);
 		process.exitCode = 1;
 	});

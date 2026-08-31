@@ -20,10 +20,8 @@ import {
 	type CalibrationState
 } from '../src/calibration.ts';
 import { WORKLOAD_VERSION } from '../src/calibration-workload.ts';
-
 const d3d11on12Renderer = 'ANGLE (Intel, Intel(R) Iris(R) Xe Graphics, D3D11on12 vs_5_0 ps_5_0, D3D11)';
 const currentSignature = createCalibrationSignature('2.1.0', '44.0.0', '8086:46a6', 'driver-a');
-
 function createWindowsCandidates(): CalibrationCandidate[] {
 	return createCalibrationCandidates({
 		currentBackend: 'd3d11on12',
@@ -32,7 +30,6 @@ function createWindowsCandidates(): CalibrationCandidate[] {
 		recommendedBackend: 'd3d11on12'
 	});
 }
-
 function versionOneMetrics(averageFps: number, webglRenderer: string): Record<string, unknown> {
 	return {
 		averageFps,
@@ -46,7 +43,6 @@ function versionOneMetrics(averageFps: number, webglRenderer: string): Record<st
 		worstFrameTimeMs: 8
 	};
 }
-
 function versionOneDocument(): Record<string, unknown> {
 	const winner = {
 		candidate: { backend: 'd3d11on12', framePolicy: 'uncapped', id: 'd3d11on12:uncapped' },
@@ -74,25 +70,25 @@ function versionOneDocument(): Record<string, unknown> {
 			hardwareFingerprint: '8086:46a6'
 		},
 		status: 'complete',
-		updatedAt: 1_000,
+		updatedAt: 1000,
 		version: 1
 	};
 }
-
 test('a version-1 document upgrades to a single-trial plan with the workload sentinel', () => {
 	const parsed = parseCalibrationState(versionOneDocument());
-
 	assert.ok(parsed);
 	assert.equal(parsed.version, 2);
 	assert.equal(parsed.status, 'complete');
-	// benchmarkVersion 2 predates the workload concept: stamped with sentinel 0, never 1.
 	assert.equal(parsed.signature.workloadVersion, 0);
 	assert.equal(parsed.confirmation, 'unwatched');
 	assert.deepEqual(parsed.plan, [
 		{ candidateId: 'd3d11on12:uncapped', launchGroup: 1, stage: 'screen' },
 		{ candidateId: 'default:uncapped', launchGroup: 2, stage: 'screen' }
 	]);
-	assert.deepEqual(parsed.results.map(result => result.slotIndex), [0, 1]);
+	assert.deepEqual(
+		parsed.results.map((result) => result.slotIndex),
+		[0, 1]
+	);
 	assert.equal(parsed.launchCount, 2);
 	assert.equal(parsed.runRetriesUsed, 0);
 	assert.equal(parsed.activeSelection?.candidate.id, 'd3d11on12:uncapped');
@@ -101,7 +97,6 @@ test('a version-1 document upgrades to a single-trial plan with the workload sen
 	assert.deepEqual(parsed.rejectedAttempts, []);
 	assert.equal(calibrationResumeRequired(parsed), false, 'a completed upgrade must never block startup');
 });
-
 test('a benchmark-1 era document also parses with the sentinel workload version', () => {
 	const document = versionOneDocument();
 	(document.signature as Record<string, unknown>).benchmarkVersion = 1;
@@ -109,12 +104,10 @@ test('a benchmark-1 era document also parses with the sentinel workload version'
 	assert.ok(parsed);
 	assert.equal(parsed.signature.workloadVersion, 0);
 });
-
 test('a benchmark-only version bump retains the completed state as stale without a rerun', () => {
 	const parsed = parseCalibrationState(versionOneDocument());
 	assert.ok(parsed);
 	const candidates = createWindowsCandidates();
-
 	const prepared = prepareCalibrationState(parsed, currentSignature, candidates, true);
 	assert.equal(prepared.signatureStale, true);
 	assert.equal(prepared.status, 'complete');
@@ -123,13 +116,11 @@ test('a benchmark-only version bump retains the completed state as stale without
 	assert.equal(calibrationResumeRequired(prepared), false);
 	assert.equal(prepareCalibrationState(prepared, currentSignature, candidates, true), prepared, 'stale marking is idempotent');
 });
-
 test('an explicit rerun of a stale calibration resets and starts a fresh consented plan', () => {
 	const parsed = parseCalibrationState(versionOneDocument());
 	assert.ok(parsed);
 	const candidates = createWindowsCandidates();
 	const stale = prepareCalibrationState(parsed, currentSignature, candidates, true);
-
 	const rerun = prepareCalibrationState(requestCalibrationRerun(stale), currentSignature, candidates, true);
 	assert.equal(rerun.status, 'running');
 	assert.equal(rerun.signature.benchmarkVersion, currentSignature.benchmarkVersion);
@@ -138,20 +129,17 @@ test('an explicit rerun of a stale calibration resets and starts a fresh consent
 	assert.equal(rerun.plan.length, 2);
 	assert.equal(calibrationResumeRequired(rerun), true);
 });
-
 test('a hardware change resets to uncalibrated without blocking startup', () => {
 	const parsed = parseCalibrationState(versionOneDocument());
 	assert.ok(parsed);
 	const candidates = createWindowsCandidates();
 	const hardwareChanged = createCalibrationSignature('2.1.0', '44.0.0', '10de:2684', 'driver-a');
-
 	const resetState = prepareCalibrationState(parsed, hardwareChanged, candidates, true);
 	assert.equal(resetState.status, 'uncalibrated');
 	assert.equal(resetState.activeSelection, undefined);
 	assert.equal(getPendingCalibrationCandidate(resetState), undefined);
 	assert.equal(calibrationResumeRequired(resetState), false);
 });
-
 test('cross-workload-version scores are never compared numerically', () => {
 	const candidates = createWindowsCandidates();
 	const cleanMetrics = (workloadVersion: number): CalibrationMetrics => ({
@@ -174,7 +162,6 @@ test('cross-workload-version scores are never compared numerically', () => {
 		metrics: cleanMetrics(0),
 		score: 100
 	};
-
 	let state = startCalibrationRun(prepareCalibrationState(undefined, currentSignature, candidates, true), 0);
 	state = { ...state, activeSelection: staleActive };
 	state = recordCalibrationResult(state, candidates[1], {
@@ -183,13 +170,8 @@ test('cross-workload-version scores are never compared numerically', () => {
 		onePercentLowFps: 320,
 		webglRenderer: 'Unknown renderer'
 	});
-
-	// The challenger hugely outscores the stale selection, but a stale score is not numeric
-	// evidence: the known-good incumbent competes only through the tie preferences and is kept.
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, candidates[0].id);
-
-	// With comparable workload versions the identical challenger wins meaningfully.
 	let comparableState = startCalibrationRun(prepareCalibrationState(undefined, currentSignature, candidates, true), 0);
 	comparableState = { ...comparableState, activeSelection: { ...staleActive, metrics: cleanMetrics(WORKLOAD_VERSION) } };
 	comparableState = recordCalibrationResult(comparableState, candidates[1], {
@@ -201,20 +183,11 @@ test('cross-workload-version scores are never compared numerically', () => {
 	const comparableFinalized = finalizeCalibration(comparableState);
 	assert.equal(comparableFinalized.recommendedSelection?.candidate.id, candidates[1].id);
 });
-
 test('workload v2 invalidates workload v1 verdicts through the signature machinery', () => {
-	// The version-discipline proof for the WORKLOAD_VERSION 1 -> 2 bump (design §1.3, §5.2):
-	// workloadVersion is a first-class signature field, so v1 verdicts go stale on sight and
-	// their scores are never numeric evidence against v2 trials.
 	const workloadOneSignature = { ...currentSignature, workloadVersion: 1 };
 	assert.equal(calibrationSignaturesEqual(workloadOneSignature, currentSignature), false, 'a workloadVersion change alone must invalidate');
 	assert.equal(calibrationSignaturesEqual(workloadOneSignature, { ...workloadOneSignature }), true);
-	assert.equal(
-		calibrationSignatureOnlyVersionsDiffer(workloadOneSignature, currentSignature),
-		true,
-		'machine identity is unchanged, so the invalidation takes the opportunistic-rerun path'
-	);
-
+	assert.equal(calibrationSignatureOnlyVersionsDiffer(workloadOneSignature, currentSignature), true, 'machine identity is unchanged, so the invalidation takes the opportunistic-rerun path');
 	const candidates = createWindowsCandidates();
 	const cleanMetrics = (workloadVersion: number): CalibrationMetrics => ({
 		averageFps: 250,
@@ -230,23 +203,15 @@ test('workload v2 invalidates workload v1 verdicts through the signature machine
 		workloadVersion,
 		worstFrameTimeMs: 4
 	});
-
-	// A calibration completed under workload v1 keeps its user-confirmed selection applied but
-	// is marked stale the moment the v2 signature appears — it never blocks startup and never
-	// silently passes for v2 evidence.
 	let completed = startCalibrationRun(prepareCalibrationState(undefined, workloadOneSignature, candidates, true), 0);
 	completed = recordCalibrationResult(completed, candidates[0], cleanMetrics(1));
 	completed = completeCalibration(finalizeCalibration(completed), true);
 	assert.equal(completed.results[0].metrics.workloadVersion, 1, 'v1-era trials carry their workload stamp');
-
 	const prepared = prepareCalibrationState(completed, currentSignature, candidates, true);
 	assert.equal(prepared.signatureStale, true);
 	assert.equal(prepared.status, 'complete');
 	assert.equal(prepared.activeSelection?.candidate.id, candidates[0].id);
 	assert.equal(calibrationResumeRequired(prepared), false);
-
-	// Numeric blocking: a v2 challenger that hugely outscores the stale v1 incumbent still
-	// cannot beat it on numbers — the incumbent competes only through the tie preferences.
 	let state = startCalibrationRun(prepareCalibrationState(undefined, currentSignature, candidates, true), 0);
 	state = { ...state, activeSelection: completed.activeSelection };
 	state = recordCalibrationResult(state, candidates[1], {
@@ -258,7 +223,6 @@ test('workload v2 invalidates workload v1 verdicts through the signature machine
 	const finalized = finalizeCalibration(state);
 	assert.equal(finalized.recommendedSelection?.candidate.id, candidates[0].id, 'cross-workload scores never decide');
 });
-
 test('a mid-run version-1 document parses but resumes nothing after the signature reset', () => {
 	const document = versionOneDocument();
 	document.status = 'running';
@@ -266,16 +230,13 @@ test('a mid-run version-1 document parses but resumes nothing after the signatur
 	document.activeSelection = undefined;
 	document.recommendedSelection = undefined;
 	document.results = (document.results as unknown[]).slice(0, 1);
-
 	const parsed = parseCalibrationState(document);
 	assert.ok(parsed);
 	assert.equal(parsed.status, 'running');
-
 	const resetState = prepareCalibrationState(parsed, currentSignature, createWindowsCandidates(), true);
 	assert.equal(resetState.status, 'uncalibrated');
 	assert.equal(calibrationResumeRequired(resetState), false);
 });
-
 test('version-2 states survive a JSON persistence round trip byte-for-byte', () => {
 	const candidates = createWindowsCandidates();
 	let state: CalibrationState = startCalibrationRun(prepareCalibrationState(undefined, currentSignature, candidates, true), 42);
@@ -292,7 +253,6 @@ test('version-2 states survive a JSON persistence round trip byte-for-byte', () 
 		webglRenderer: d3d11on12Renderer,
 		worstFrameTimeMs: 8
 	});
-
 	const reloaded = parseCalibrationState(JSON.parse(JSON.stringify(state)));
 	assert.deepEqual(reloaded, state);
 });

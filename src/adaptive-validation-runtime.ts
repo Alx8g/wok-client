@@ -8,12 +8,9 @@ import {
 	type AdaptiveValidationSubmission
 } from './adaptive-validation.ts';
 import { MAX_VALID_FRAME_MS, PERFORMANCE_WINDOW_MS, RollingPerformanceStats } from './performance-stats.ts';
-
 export { parseAdaptiveValidationState } from './adaptive-validation.ts';
-
-export const ADAPTIVE_VALIDATION_EVENT_LOOP_INTERVAL_MS = 1_000;
+export const ADAPTIVE_VALIDATION_EVENT_LOOP_INTERVAL_MS = 1000;
 export const ADAPTIVE_VALIDATION_SEVERE_EVENT_LOOP_DELAY_MS = 250;
-
 interface AdaptiveValidationRuntimeDocument {
 	pointerLockElement: unknown;
 	visibilityState: DocumentVisibilityState;
@@ -21,12 +18,10 @@ interface AdaptiveValidationRuntimeDocument {
 	hasFocus?: () => boolean;
 	removeEventListener: (type: string, listener: EventListener, options?: EventListenerOptions | boolean) => void;
 }
-
 interface AdaptiveValidationRuntimeWindow {
 	addEventListener: (type: string, listener: EventListener, options?: AddEventListenerOptions | boolean) => void;
 	removeEventListener: (type: string, listener: EventListener, options?: EventListenerOptions | boolean) => void;
 }
-
 export interface AdaptiveValidationRuntimeEnvironment {
 	cancelAnimationFrame: (handle: number) => void;
 	clearTimeout: (handle: number) => void;
@@ -38,13 +33,11 @@ export interface AdaptiveValidationRuntimeEnvironment {
 	wallClockNow: () => number;
 	window: AdaptiveValidationRuntimeWindow;
 }
-
 export interface AdaptiveValidationRuntimeOptions {
 	onError?: (error: unknown) => void;
 	state: AdaptiveValidationState;
 	submitSession: (submission: AdaptiveValidationSubmission) => Promise<unknown>;
 }
-
 interface SessionAccumulator {
 	maximumP95FrameTimeMs: number;
 	maximumWorstFrameTimeMs: number;
@@ -52,7 +45,6 @@ interface SessionAccumulator {
 	sampleCount: number;
 	totalFrameTimeMs: number;
 }
-
 interface ActiveSession {
 	accumulator: SessionAccumulator;
 	id: string;
@@ -62,39 +54,33 @@ interface ActiveSession {
 	startedAt: number;
 	stats: RollingPerformanceStats;
 }
-
 function rounded(value: number, decimalPlaces = 2): number {
 	const scale = 10 ** decimalPlaces;
 	return Math.round(value * scale) / scale;
 }
-
 function defaultEnvironment(): AdaptiveValidationRuntimeEnvironment {
 	return {
-		cancelAnimationFrame: handle => cancelAnimationFrame(handle),
-		clearTimeout: handle => window.clearTimeout(handle),
+		cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
+		clearTimeout: (handle) => window.clearTimeout(handle),
 		createSessionId: () => globalThis.crypto.randomUUID(),
 		document,
 		now: () => performance.now(),
-		requestAnimationFrame: callback => requestAnimationFrame(callback),
+		requestAnimationFrame: (callback) => requestAnimationFrame(callback),
 		setTimeout: (callback, delayMs) => window.setTimeout(callback, delayMs),
 		wallClockNow: () => Date.now(),
 		window
 	};
 }
-
 function addSnapshotToAccumulator(accumulator: SessionAccumulator, snapshot: PerformanceSnapshot): void {
 	if (snapshot.sampleCount <= 0 || snapshot.averageFps <= 0) return;
 	accumulator.sampleCount += snapshot.sampleCount;
-	accumulator.totalFrameTimeMs += snapshot.sampleCount * (1_000 / snapshot.averageFps);
+	accumulator.totalFrameTimeMs += snapshot.sampleCount * (1000 / snapshot.averageFps);
 	accumulator.maximumP95FrameTimeMs = Math.max(accumulator.maximumP95FrameTimeMs, snapshot.p95FrameTimeMs);
 	accumulator.maximumWorstFrameTimeMs = Math.max(accumulator.maximumWorstFrameTimeMs, snapshot.worstFrameTimeMs);
 	if (snapshot.onePercentLowFps > 0) {
-		accumulator.minimumOnePercentLowFps = accumulator.minimumOnePercentLowFps > 0
-			? Math.min(accumulator.minimumOnePercentLowFps, snapshot.onePercentLowFps)
-			: snapshot.onePercentLowFps;
+		accumulator.minimumOnePercentLowFps = accumulator.minimumOnePercentLowFps > 0 ? Math.min(accumulator.minimumOnePercentLowFps, snapshot.onePercentLowFps) : snapshot.onePercentLowFps;
 	}
 }
-
 function createSession(id: string, startedAt: number, stats: RollingPerformanceStats): ActiveSession {
 	stats.reset();
 	return {
@@ -113,7 +99,6 @@ function createSession(id: string, startedAt: number, stats: RollingPerformanceS
 		stats
 	};
 }
-
 function buildSessionEvidence(session: ActiveSession, durationMs: number, completedAt: number): AdaptiveValidationSession {
 	const { accumulator } = session;
 	return {
@@ -122,9 +107,7 @@ function buildSessionEvidence(session: ActiveSession, durationMs: number, comple
 		id: session.id,
 		lowConfidenceReasons: [...session.lowConfidenceReasons],
 		metrics: {
-			averageFps: accumulator.sampleCount > 0 && accumulator.totalFrameTimeMs > 0
-				? rounded(1_000 / (accumulator.totalFrameTimeMs / accumulator.sampleCount), 1)
-				: 0,
+			averageFps: accumulator.sampleCount > 0 && accumulator.totalFrameTimeMs > 0 ? rounded(1000 / (accumulator.totalFrameTimeMs / accumulator.sampleCount), 1) : 0,
 			onePercentLowFps: rounded(accumulator.minimumOnePercentLowFps, 1),
 			p95FrameTimeMs: rounded(accumulator.maximumP95FrameTimeMs),
 			sampleCount: accumulator.sampleCount,
@@ -132,11 +115,7 @@ function buildSessionEvidence(session: ActiveSession, durationMs: number, comple
 		}
 	};
 }
-
-export function startAdaptiveValidationRuntime(
-	options: AdaptiveValidationRuntimeOptions,
-	environment: AdaptiveValidationRuntimeEnvironment = defaultEnvironment()
-): () => void {
+export function startAdaptiveValidationRuntime(options: AdaptiveValidationRuntimeOptions, environment: AdaptiveValidationRuntimeEnvironment = defaultEnvironment()): () => void {
 	let state = options.state;
 	let activeSession: ActiveSession | undefined;
 	let animationFrame: number | undefined;
@@ -145,23 +124,19 @@ export function startAdaptiveValidationRuntime(
 	let submissionPending = false;
 	let stopped = false;
 	let listenersAttached = false;
-
 	const finishSegment = (session: ActiveSession, now: number) => {
 		addSnapshotToAccumulator(session.accumulator, session.stats.snapshot(now));
 		session.stats.reset();
 		session.segmentStartedAt = now;
 	};
-
 	const stopAnimationFrame = () => {
 		if (animationFrame !== undefined) environment.cancelAnimationFrame(animationFrame);
 		animationFrame = undefined;
 	};
-
 	const stopEventLoopWatch = () => {
 		if (eventLoopTimer !== undefined) environment.clearTimeout(eventLoopTimer);
 		eventLoopTimer = undefined;
 	};
-
 	const startEventLoopWatch = () => {
 		let expectedTime = environment.now() + ADAPTIVE_VALIDATION_EVENT_LOOP_INTERVAL_MS;
 		const checkEventLoop = () => {
@@ -177,7 +152,6 @@ export function startAdaptiveValidationRuntime(
 		};
 		eventLoopTimer = environment.setTimeout(checkEventLoop, ADAPTIVE_VALIDATION_EVENT_LOOP_INTERVAL_MS);
 	};
-
 	const detachListeners = () => {
 		if (!listenersAttached) return;
 		environment.document.removeEventListener('pointerlockchange', handlePointerLockChange);
@@ -187,7 +161,6 @@ export function startAdaptiveValidationRuntime(
 		environment.window.removeEventListener('beforeunload', handleBeforeUnload);
 		listenersAttached = false;
 	};
-
 	const stop = () => {
 		if (stopped) return;
 		stopped = true;
@@ -197,7 +170,6 @@ export function startAdaptiveValidationRuntime(
 		stopEventLoopWatch();
 		detachListeners();
 	};
-
 	const startSessionIfEligible = () => {
 		if (stopped || submissionPending || activeSession || state.status === 'complete' || environment.document.pointerLockElement == null) return;
 		performanceStats ??= new RollingPerformanceStats();
@@ -207,7 +179,6 @@ export function startAdaptiveValidationRuntime(
 		startEventLoopWatch();
 		animationFrame = environment.requestAnimationFrame(recordFrame);
 	};
-
 	const handleSubmissionResult = (value: unknown) => {
 		if (stopped) return;
 		const nextState = parseAdaptiveValidationState(value);
@@ -220,18 +191,17 @@ export function startAdaptiveValidationRuntime(
 		if (state.status === 'complete') stop();
 		else startSessionIfEligible();
 	};
-
 	const submitSession = (session: AdaptiveValidationSession) => {
 		submissionPending = true;
-		void options.submitSession({ profile: state.profile, session })
+		void options
+			.submitSession({ profile: state.profile, session })
 			.then(handleSubmissionResult)
-			.catch(error => {
+			.catch((error) => {
 				submissionPending = false;
 				options.onError?.(error);
 				startSessionIfEligible();
 			});
 	};
-
 	const finishActiveSession = () => {
 		const session = activeSession;
 		if (!session) return;
@@ -246,43 +216,34 @@ export function startAdaptiveValidationRuntime(
 		finishSegment(session, now);
 		submitSession(buildSessionEvidence(session, durationMs, environment.wallClockNow()));
 	};
-
 	function recordFrame(now: number) {
 		animationFrame = undefined;
 		const session = activeSession;
 		if (stopped || !session || environment.document.pointerLockElement == null) return;
-
 		if (session.lastFrameTime > 0) {
 			const frameTime = now - session.lastFrameTime;
 			if (frameTime > 0 && frameTime <= MAX_VALID_FRAME_MS) session.stats.recordFrame(now, frameTime);
 		}
 		session.lastFrameTime = now;
-
 		if (now - session.segmentStartedAt >= PERFORMANCE_WINDOW_MS) finishSegment(session, now);
 		animationFrame = environment.requestAnimationFrame(recordFrame);
 	}
-
 	function handlePointerLockChange() {
 		if (environment.document.pointerLockElement == null) finishActiveSession();
 		else startSessionIfEligible();
 	}
-
 	function handleVisibilityChange() {
 		if (activeSession) activeSession.lowConfidenceReasons.add('document-visibility-changed');
 	}
-
 	function handleBlur() {
 		if (activeSession) activeSession.lowConfidenceReasons.add('window-blurred');
 	}
-
 	function handleResize() {
 		if (activeSession) activeSession.lowConfidenceReasons.add('window-resized');
 	}
-
 	function handleBeforeUnload() {
 		stop();
 	}
-
 	if (state.status === 'complete') return stop;
 	listenersAttached = true;
 	environment.document.addEventListener('pointerlockchange', handlePointerLockChange, { passive: true });

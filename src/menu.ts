@@ -1,9 +1,6 @@
 import { shell, type MenuItemConstructorOptions, type MenuItem, app, BrowserWindow } from 'electron';
 import type { OpenDevToolsOptions } from 'electron/main';
 import { APP_NAME, UPSTREAM_REPO_URL, WEBSITE_URL } from './branding.ts';
-
-// Menu
-/** submenu to replace the About screen */
 export const aboutSubmenu: MenuItemConstructorOptions[] = [
 	{ label: APP_NAME, enabled: false },
 	{ label: 'Website', registerAccelerator: false, click: () => shell.openExternal(WEBSITE_URL) },
@@ -11,75 +8,63 @@ export const aboutSubmenu: MenuItemConstructorOptions[] = [
 	{ label: 'Based on the open-source Crankshaft client', enabled: false },
 	{ label: 'Crankshaft upstream source', registerAccelerator: false, click: () => shell.openExternal(UPSTREAM_REPO_URL) }
 ];
-
-/** the menu with the app name on mac (array, to be spread) */
-export const macAppMenuArr: (MenuItemConstructorOptions | MenuItem)[] = process.platform === 'darwin'
-	? [ {
-		label: app.name,
-		submenu: [
-			...aboutSubmenu,
-			{ type: 'separator' },
-			{ role: 'hide' },
-			{ role: 'hideOthers' },
-			{ role: 'unhide' },
-			{ type: 'separator' },
-			{ role: 'services' },
-			{ role: 'quit', registerAccelerator: false }
-		]
-	} ]
-	: [];
-
-/** make 2 menuItems that determine wether to use fallback or not, and then act accordingly */
+export const macAppMenuArr: (MenuItemConstructorOptions | MenuItem)[] =
+	process.platform === 'darwin'
+		? [
+				{
+					label: app.name,
+					submenu: [...aboutSubmenu, { type: 'separator' }, { role: 'hide' }, { role: 'hideOthers' }, { role: 'unhide' }, { type: 'separator' }, { role: 'services' }, { role: 'quit', registerAccelerator: false }]
+				}
+			]
+		: [];
 export function constructDevtoolsSubmenu(providedWindow: BrowserWindow, skipFallback: null | boolean = null, options?: OpenDevToolsOptions) {
-	const maxLag = 500; // default timeout by asger-finding / Commander
-
-	/** Fallback if openDevTools fails */
+	const maxLag = 500;
 	function fallbackDevtools() {
 		providedWindow.webContents.closeDevTools();
-
 		const devtoolsWindow = new BrowserWindow();
 		devtoolsWindow.setMenuBarVisibility(false);
-
 		providedWindow.webContents.setDevToolsWebContents(devtoolsWindow.webContents);
 		providedWindow.webContents.openDevTools({ mode: 'detach' });
 		providedWindow.once('closed', () => devtoolsWindow.destroy());
 	}
-
-	/** test first time if should open fallback or not. then decide */
 	function openDevToolsWithFallback() {
 		if (skipFallback === true) {
 			providedWindow.webContents.openDevTools(options);
 		} else if (skipFallback === false) {
 			fallbackDevtools();
 		} else if (skipFallback === null) {
-			providedWindow.webContents.openDevTools(options); // start opening devtools
-			const popupDevtoolTimeout = setTimeout(() => { skipFallback = false; fallbackDevtools(); }, maxLag); // wait maxLag. if times out, always run fallback
-			providedWindow.webContents.once('devtools-opened', () => { skipFallback = true; clearTimeout(popupDevtoolTimeout); }); // if opens devtools first, never run fallback
+			providedWindow.webContents.openDevTools(options);
+			const popupDevtoolTimeout = setTimeout(() => {
+				skipFallback = false;
+				fallbackDevtools();
+			}, maxLag);
+			providedWindow.webContents.once('devtools-opened', () => {
+				skipFallback = true;
+				clearTimeout(popupDevtoolTimeout);
+			});
 		}
 	}
-
-	// return 2 menuItems that can be spread and injected where needed
 	return [
-		{ label: 'Toggle Developer Tools', accelerator: 'CommandOrControl+Shift+I', click: () => { openDevToolsWithFallback(); } },
-		{ label: 'Toggle Developer Tools (F12)', accelerator: 'F12', click: () => { openDevToolsWithFallback(); } }
+		{
+			label: 'Toggle Developer Tools',
+			accelerator: 'CommandOrControl+Shift+I',
+			click: () => {
+				openDevToolsWithFallback();
+			}
+		},
+		{
+			label: 'Toggle Developer Tools (F12)',
+			accelerator: 'F12',
+			click: () => {
+				openDevToolsWithFallback();
+			}
+		}
 	];
 }
-
-/** other submenus that all windows share. since mac relies on menu for system stuff like copying, i have to add it here */
 export const csMenuTemplate: (MenuItemConstructorOptions | MenuItem)[] = [
 	{
 		label: 'Edit',
-		submenu: [
-			{ role: 'undo' },
-			{ role: 'redo' },
-			{ type: 'separator' },
-			{ role: 'cut' },
-			{ role: 'copy' },
-			{ role: 'paste' },
-			{ role: 'delete' },
-			{ type: 'separator' },
-			{ role: 'selectAll' }
-		]
+		submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'delete' }, { type: 'separator' }, { role: 'selectAll' }]
 	},
 	{
 		label: 'Page',

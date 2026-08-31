@@ -2,22 +2,20 @@ import { Buffer } from 'node:buffer';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, readdir, stat } from 'node:fs/promises';
 import { join as pathJoin } from 'node:path';
-
 import type { WebRequestFilter } from 'electron';
 import { runBeforeDeadline } from './absolute-deadline.ts';
-
 const TARGET_GAME_DOMAIN = 'krunker.io';
 const RESOURCE_SWAPPER_PROTOCOL = 'krunker-resource-swapper:';
 const RESOURCE_SWAPPER_HOST = 'resource';
 const DIRECTORY_READ_CONCURRENCY = 8;
-const MAX_SWAPPER_FILES = 10_000;
-const MAX_SWAPPER_DIRECTORIES = 2_000;
+const MAX_SWAPPER_FILES = 10000;
+const MAX_SWAPPER_DIRECTORIES = 2000;
 const MAX_SWAPPER_DEPTH = 16;
-const MAX_REQUEST_HANDLER_START_MS = 5_000;
+const MAX_REQUEST_HANDLER_START_MS = 5000;
 const MAX_CUSTOM_FILTER_BYTES = 1024 * 1024;
-const MAX_CUSTOM_FILTER_LINES = 20_000;
-const MAX_CUSTOM_FILTER_RULES = 4_096;
-const MAX_CUSTOM_FILTER_LINE_LENGTH = 4_096;
+const MAX_CUSTOM_FILTER_LINES = 20000;
+const MAX_CUSTOM_FILTER_RULES = 4096;
+const MAX_CUSTOM_FILTER_LINE_LENGTH = 4096;
 const STANDARD_NATIVE_URL_SCHEMES = new Set(['chrome', 'chrome-extension', 'file', 'filesystem', 'ftp', 'http', 'https', 'ws', 'wss']);
 const NATIVE_URL_SCHEME_DEFAULT_PORTS: Readonly<Record<string, string>> = {
 	ftp: '21',
@@ -26,11 +24,7 @@ const NATIVE_URL_SCHEME_DEFAULT_PORTS: Readonly<Record<string, string>> = {
 	ws: '80',
 	wss: '443'
 };
-
-// Electron 44 registered 1,024 synthetic exact patterns in 7.9-13.4 ms on the
-// reference machine; 2,048 took 11.2-13.9 ms and 4,000 took 21.4-26.4 ms.
-// Beyond this crossover, a small fixed set of scoped prefixes avoids linear matcher retention.
-const MAX_EXACT_SWAP_PATTERNS = 1_024;
+const MAX_EXACT_SWAP_PATTERNS = 1024;
 const DIRECT_RESOURCE_DIRECTORIES = ['models', 'textures', 'sound', 'scares', 'videos'] as const;
 const DIRECT_RESOURCE_DIRECTORY_SET = new Set<string>(DIRECT_RESOURCE_DIRECTORIES);
 const LARGE_SWAPPER_FILTERS: readonly string[] = [
@@ -38,49 +32,38 @@ const LARGE_SWAPPER_FILTERS: readonly string[] = [
 	`*://comp.${TARGET_GAME_DOMAIN}/*`,
 	`*://${TARGET_GAME_DOMAIN}/*`,
 	`*://*.${TARGET_GAME_DOMAIN}/assets/*`,
-	...DIRECT_RESOURCE_DIRECTORIES.map(directory => `*://*.${TARGET_GAME_DOMAIN}/${directory}/*`)
+	...DIRECT_RESOURCE_DIRECTORIES.map((directory) => `*://*.${TARGET_GAME_DOMAIN}/${directory}/*`)
 ];
 const BROWSER_FPS_CORS_FILTER: WebRequestFilter = {
-	urls: [
-		'*://browserfps.com/*',
-		'*://*.browserfps.com/*'
-	]
+	urls: ['*://browserfps.com/*', '*://*.browserfps.com/*']
 };
-
 type UrlMatcher = (url: URL) => boolean;
-
 type NativeUrlPattern = {
 	host: string;
 	path: string;
 	port: string;
 	scheme: string;
 };
-
 type NativeHostPattern = {
 	host: string;
 	port: string;
 };
-
 type BlockingPatterns = {
 	matchers: UrlMatcher[];
 	urls: string[];
 };
-
 type IndexedSwapResources = {
 	requestResources: Map<string, string>;
 	protocolFiles: Map<string, string>;
 	resourcePaths: string[];
 };
-
 function escapeRegularExpression(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
 }
-
 function normalizeNativeHostPattern(scheme: string, hostAndPortPattern: string): NativeHostPattern | undefined {
 	if (hostAndPortPattern.length === 0) {
 		return scheme === 'file' ? { host: '', port: '*' } : undefined;
 	}
-
 	let hostPattern = hostAndPortPattern;
 	let portPattern: string | undefined;
 	if (hostAndPortPattern.startsWith('[')) {
@@ -97,23 +80,20 @@ function normalizeNativeHostPattern(scheme: string, hostAndPortPattern: string):
 			portPattern = hostAndPortPattern.slice(portSeparator + 1);
 		}
 	}
-
 	let port = '*';
 	if (portPattern !== undefined) {
 		if (portPattern.length === 0) return undefined;
 		if (portPattern !== '*') {
 			if (!/^\d+$/u.test(portPattern)) return undefined;
 			const portNumber = Number(portPattern);
-			if (!Number.isSafeInteger(portNumber) || portNumber > 65_535) return undefined;
+			if (!Number.isSafeInteger(portNumber) || portNumber > 65535) return undefined;
 			port = String(portNumber);
 		}
 	}
-
 	if (hostPattern === '*') return { host: hostPattern, port };
 	const matchesSubdomains = hostPattern.startsWith('*.');
 	const candidateHost = matchesSubdomains ? hostPattern.slice(2) : hostPattern;
 	if (candidateHost.length === 0 || candidateHost.includes('*')) return undefined;
-
 	try {
 		const url = new URL(`http://${candidateHost}/`);
 		if (url.username || url.password || url.port || !url.hostname || url.pathname !== '/' || url.search || url.hash) return undefined;
@@ -123,17 +103,14 @@ function normalizeNativeHostPattern(scheme: string, hostAndPortPattern: string):
 		return undefined;
 	}
 }
-
 function parseNativeUrlPattern(pattern: string): NativeUrlPattern | undefined {
 	if (pattern === '<all_urls>') return { host: '*', path: '/*', port: '*', scheme: '*' };
 	for (const character of pattern) {
 		const characterCode = character.charCodeAt(0);
 		if (characterCode <= 0x20 || characterCode === 0x7f) return undefined;
 	}
-
 	const match = /^([a-z][a-z\d+.-]*|\*):\/\/([^/]*)(\/.*)$/iu.exec(pattern);
 	if (!match) return undefined;
-
 	const [, rawScheme, hostAndPortPattern, path] = match;
 	const scheme = rawScheme.toLowerCase();
 	if (scheme !== '*' && !STANDARD_NATIVE_URL_SCHEMES.has(scheme)) return undefined;
@@ -141,17 +118,11 @@ function parseNativeUrlPattern(pattern: string): NativeUrlPattern | undefined {
 	if (!hostPattern) return undefined;
 	return { ...hostPattern, path, scheme };
 }
-
 function compileBlockingPattern(pattern: string): UrlMatcher | undefined {
 	if (pattern === '<all_urls>') return () => true;
-
 	const parsedPattern = parseNativeUrlPattern(pattern);
 	if (!parsedPattern) return undefined;
-
-	const pathExpression = parsedPattern.path
-		.split('*')
-		.map(escapeRegularExpression)
-		.join('.*');
+	const pathExpression = parsedPattern.path.split('*').map(escapeRegularExpression).join('.*');
 	let pathMatcher: RegExp;
 	try {
 		pathMatcher = new RegExp(`^${pathExpression}$`, 'u');
@@ -159,34 +130,28 @@ function compileBlockingPattern(pattern: string): UrlMatcher | undefined {
 		return undefined;
 	}
 	const hasExplicitSearch = parsedPattern.path.includes('?');
-
-	return url => {
+	return (url) => {
 		if (parsedPattern.scheme === '*') {
 			if (url.protocol !== 'http:' && url.protocol !== 'https:') return false;
 		} else if (url.protocol !== `${parsedPattern.scheme}:`) {
 			return false;
 		}
-
 		if (parsedPattern.host === '*') {
-			// Any host is accepted.
 		} else if (parsedPattern.host.startsWith('*.')) {
 			const suffix = parsedPattern.host.slice(2);
 			if (url.hostname !== suffix && !url.hostname.endsWith(`.${suffix}`)) return false;
 		} else if (url.hostname !== parsedPattern.host) {
 			return false;
 		}
-
 		if (parsedPattern.port !== '*') {
 			const requestScheme = url.protocol.slice(0, -1);
 			const effectivePort = url.port || NATIVE_URL_SCHEME_DEFAULT_PORTS[requestScheme];
 			if (effectivePort !== parsedPattern.port) return false;
 		}
-
 		if (pathMatcher.test(`${url.pathname}${url.search}`)) return true;
 		return !hasExplicitSearch && pathMatcher.test(url.pathname);
 	};
 }
-
 function validNativeUrlPatterns(patterns: readonly string[]): string[] {
 	const urls: string[] = [];
 	const seen = new Set<string>();
@@ -197,7 +162,6 @@ function validNativeUrlPatterns(patterns: readonly string[]): string[] {
 	}
 	return urls;
 }
-
 function compileBlockingPatterns(patterns: readonly string[]): BlockingPatterns {
 	const matchers: UrlMatcher[] = [];
 	const urls: string[] = [];
@@ -205,7 +169,6 @@ function compileBlockingPatterns(patterns: readonly string[]): BlockingPatterns 
 	for (const pattern of patterns) {
 		if (seen.has(pattern)) continue;
 		seen.add(pattern);
-
 		const matcher = compileBlockingPattern(pattern);
 		if (!matcher) continue;
 		urls.push(pattern);
@@ -213,11 +176,9 @@ function compileBlockingPatterns(patterns: readonly string[]): BlockingPatterns 
 	}
 	return { matchers, urls };
 }
-
 function parseCustomFilterContents(contents: string): string[] | undefined {
 	const lines = contents.split(/\r?\n/u);
 	if (lines.length > MAX_CUSTOM_FILTER_LINES) return undefined;
-
 	const patterns: string[] = [];
 	for (const line of lines) {
 		if (line.length > MAX_CUSTOM_FILTER_LINE_LENGTH) return undefined;
@@ -228,99 +189,59 @@ function parseCustomFilterContents(contents: string): string[] | undefined {
 	}
 	return patterns;
 }
-
 function encodeResourcePath(resourcePath: string): string {
 	return resourcePath
 		.split('/')
-		.map(segment => encodeURIComponent(segment))
+		.map((segment) => encodeURIComponent(segment))
 		.join('/');
 }
-
 function resourceSwapperToken(resourcePath: string): string {
 	return Buffer.from(resourcePath, 'utf-8').toString('base64url');
 }
-
 function resourceSwapperUrl(resourcePath: string): string {
 	return `${RESOURCE_SWAPPER_PROTOCOL}//${RESOURCE_SWAPPER_HOST}/${resourceSwapperToken(resourcePath)}`;
 }
-
 function exactSwapPatterns(resourcePath: string): string[] {
 	const encodedPath = encodeResourcePath(resourcePath);
-	const patterns = [
-		`*://*.${TARGET_GAME_DOMAIN}${encodedPath}`,
-		`*://*.${TARGET_GAME_DOMAIN}${encodedPath}?*`,
-		`*://*.${TARGET_GAME_DOMAIN}/assets${encodedPath}`,
-		`*://*.${TARGET_GAME_DOMAIN}/assets${encodedPath}?*`
-	];
+	const patterns = [`*://*.${TARGET_GAME_DOMAIN}${encodedPath}`, `*://*.${TARGET_GAME_DOMAIN}${encodedPath}?*`, `*://*.${TARGET_GAME_DOMAIN}/assets${encodedPath}`, `*://*.${TARGET_GAME_DOMAIN}/assets${encodedPath}?*`];
 	const topLevelDirectory = resourcePath.split('/', 3)[1];
-
 	if (DIRECT_RESOURCE_DIRECTORY_SET.has(topLevelDirectory)) return patterns;
-	return [
-		...patterns,
-		`*://comp.${TARGET_GAME_DOMAIN}${encodedPath}?*`,
-		`*://comp.${TARGET_GAME_DOMAIN}/assets${encodedPath}?*`
-	];
+	return [...patterns, `*://comp.${TARGET_GAME_DOMAIN}${encodedPath}?*`, `*://comp.${TARGET_GAME_DOMAIN}/assets${encodedPath}?*`];
 }
-
 export default class RequestHandler {
-
 	private browserWindow: Electron.BrowserWindow;
-
 	private swapperEnabled: boolean;
-
 	private swapperActive = false;
-
 	private customFiltersEnabled: boolean;
-
 	private swapRequestResources = new Map<string, string>();
-
 	private swapProtocolFiles = new Map<string, string>();
-
 	private blockingMatchers: UrlMatcher[] = [];
-
 	private started = false;
-
 	private swapDir: string;
-
 	private defaultFilters: string[];
-
 	private customFiltersPath: string;
-
-	/**
-	 * Set the target window.
-	 * @param browserWindow - The target window.
-	 */
-	// FIXME: better way to enable/disable?
 	public constructor(browserWindow: Electron.BrowserWindow, swapDir: string, swapperEnabled: boolean, blockerEnabled: boolean, customFiltersEnabled: boolean, defaultFiltersStr: string, customFiltersPath: string) {
 		this.browserWindow = browserWindow;
 		this.swapDir = swapDir;
 		this.swapperEnabled = swapperEnabled;
 		this.customFiltersEnabled = customFiltersEnabled;
 		this.customFiltersPath = customFiltersPath;
-
 		this.defaultFilters = blockerEnabled
-			? defaultFiltersStr.split(/\r?\n/u).map(filter => filter.trim()).filter(Boolean)
+			? defaultFiltersStr
+					.split(/\r?\n/u)
+					.map((filter) => filter.trim())
+					.filter(Boolean)
 			: [];
 	}
-
-	/**
-	 * Initialize the request handler for the target window.
-	 * @returns Whether initialization is complete. Registration failures remain retryable.
-	 */
 	public async start(): Promise<boolean> {
 		if (this.started) return true;
 		const deadlineAt = Date.now() + MAX_REQUEST_HANDLER_START_MS;
-
 		const swapUrls: string[] = [];
 		this.swapperActive = false;
 		if (this.swapperEnabled) {
 			try {
 				if (!existsSync(this.swapDir)) {
-					await runBeforeDeadline(
-						() => mkdir(this.swapDir, { recursive: true }),
-						deadlineAt,
-						'Resource swapper directory creation'
-					);
+					await runBeforeDeadline(() => mkdir(this.swapDir, { recursive: true }), deadlineAt, 'Resource swapper directory creation');
 				}
 				const indexedResources = await this.indexSwapDirectory(deadlineAt);
 				this.swapRequestResources = indexedResources.requestResources;
@@ -333,31 +254,20 @@ export default class RequestHandler {
 				console.error(`Resource swapping is unavailable for this launch (${this.swapDir})`, error);
 			}
 		}
-
 		const blockingPatterns = [...this.defaultFilters];
 		if (this.customFiltersEnabled) {
 			try {
-				const fileInfo = await runBeforeDeadline(
-					() => stat(this.customFiltersPath),
-					deadlineAt,
-					'Custom request filter metadata'
-				);
+				const fileInfo = await runBeforeDeadline(() => stat(this.customFiltersPath), deadlineAt, 'Custom request filter metadata');
 				if (fileInfo.size > MAX_CUSTOM_FILTER_BYTES) {
 					throw new Error(`filter file exceeds ${MAX_CUSTOM_FILTER_BYTES} bytes`);
 				}
-				const contents = await runBeforeDeadline(
-					() => readFile(this.customFiltersPath, { encoding: 'utf-8' }),
-					deadlineAt,
-					'Custom request filter read'
-				);
+				const contents = await runBeforeDeadline(() => readFile(this.customFiltersPath, { encoding: 'utf-8' }), deadlineAt, 'Custom request filter read');
 				if (Buffer.byteLength(contents, 'utf-8') > MAX_CUSTOM_FILTER_BYTES) {
 					throw new Error(`filter file exceeds ${MAX_CUSTOM_FILTER_BYTES} bytes`);
 				}
 				const customPatterns = parseCustomFilterContents(contents);
 				if (!customPatterns) {
-					throw new Error(
-						`filter file exceeds a limit (${MAX_CUSTOM_FILTER_LINES} lines, ${MAX_CUSTOM_FILTER_RULES} rules, or ${MAX_CUSTOM_FILTER_LINE_LENGTH} characters per line)`
-					);
+					throw new Error(`filter file exceeds a limit (${MAX_CUSTOM_FILTER_LINES} lines, ${MAX_CUSTOM_FILTER_RULES} rules, or ${MAX_CUSTOM_FILTER_LINE_LENGTH} characters per line)`);
 				}
 				blockingPatterns.push(...customPatterns);
 			} catch (error) {
@@ -366,15 +276,12 @@ export default class RequestHandler {
 		}
 		const compiledBlockingPatterns = compileBlockingPatterns(blockingPatterns);
 		this.blockingMatchers = compiledBlockingPatterns.matchers;
-
 		const filter: WebRequestFilter = {
 			urls: [...new Set([...validNativeUrlPatterns(swapUrls), ...compiledBlockingPatterns.urls])]
 		};
 		if (filter.urls.length > 0) {
 			try {
 				if (!this.swapperActive) {
-					// Electron already selected this callback using the validated blocker patterns,
-					// so blocker-only mode needs no second URL parse and linear matcher scan.
 					this.browserWindow.webContents.session.webRequest.onBeforeRequest(filter, (_details, callback) => {
 						callback({ cancel: true });
 					});
@@ -386,49 +293,33 @@ export default class RequestHandler {
 						} catch (_error) {
 							return callback({});
 						}
-
 						if (this.isGameHost(url.hostname)) {
 							const resourcePath = this.findSwapResourcePath(url.pathname);
 							if (resourcePath) return callback({ redirectURL: resourceSwapperUrl(resourcePath) });
 						}
-
-						if (this.blockingMatchers.some(matcher => matcher(url))) return callback({ cancel: true });
+						if (this.blockingMatchers.some((matcher) => matcher(url))) return callback({ cancel: true });
 						return callback({});
 					});
 				}
-
-			// Fix the CORS problem only for browserfps.com instead of processing every response.
-			// Registering any webRequest listener makes Electron interpose every request in the
-			// session, so the mirror-domain CORS fixer only registers when a request feature has
-			// already forced that interposition. With every request feature disabled the session
-			// keeps Chromium's direct loading path.
-			this.browserWindow.webContents.session.webRequest.onHeadersReceived(BROWSER_FPS_CORS_FILTER, ({ responseHeaders }, callback) => {
-				if (!responseHeaders) return callback({});
-
-				let allowOriginKey: string | undefined;
-				for (const [key, values] of Object.entries(responseHeaders)) {
-					const lowercase = key.toLowerCase();
-
-					// If the credentials mode is 'include', changing the origin to '*' would make the request fail CORS.
-					if (lowercase === 'access-control-allow-credentials' && values?.[0] === 'true') {
+				this.browserWindow.webContents.session.webRequest.onHeadersReceived(BROWSER_FPS_CORS_FILTER, ({ responseHeaders }, callback) => {
+					if (!responseHeaders) return callback({});
+					let allowOriginKey: string | undefined;
+					for (const [key, values] of Object.entries(responseHeaders)) {
+						const lowercase = key.toLowerCase();
+						if (lowercase === 'access-control-allow-credentials' && values?.[0] === 'true') {
+							return callback({ responseHeaders });
+						}
+						if (lowercase === 'access-control-allow-origin') allowOriginKey = key;
+					}
+					if (allowOriginKey && responseHeaders[allowOriginKey]?.[0] === '*') {
 						return callback({ responseHeaders });
 					}
-
-					if (lowercase === 'access-control-allow-origin') allowOriginKey = key;
-				}
-
-				if (allowOriginKey && responseHeaders[allowOriginKey]?.[0] === '*') {
-					return callback({ responseHeaders });
-				}
-
-				const updatedHeaders = { ...responseHeaders };
-				if (allowOriginKey) delete updatedHeaders[allowOriginKey];
-				updatedHeaders['access-control-allow-origin'] = ['*'];
-				return callback({ responseHeaders: updatedHeaders });
-			});
+					const updatedHeaders = { ...responseHeaders };
+					if (allowOriginKey) delete updatedHeaders[allowOriginKey];
+					updatedHeaders['access-control-allow-origin'] = ['*'];
+					return callback({ responseHeaders: updatedHeaders });
+				});
 			} catch (error) {
-				// Registration is atomic from the handler's point of view. If the dependent headers
-				// listener fails, remove the already-installed request listener so a retry starts cleanly.
 				try {
 					this.browserWindow.webContents.session.webRequest.onBeforeRequest(null);
 				} catch (rollbackError) {
@@ -438,12 +329,9 @@ export default class RequestHandler {
 				return false;
 			}
 		}
-
 		this.started = true;
 		return true;
 	}
-
-	/** Resolve only opaque tokens created for files indexed inside the swapper directory. */
 	public resolveSwapProtocolRequest(rawUrl: string): string | undefined {
 		try {
 			const url = new URL(rawUrl);
@@ -455,7 +343,6 @@ export default class RequestHandler {
 			return undefined;
 		}
 	}
-
 	private createSwapFilters(resourcePaths: string[]): string[] {
 		let exactPatternCount = 0;
 		for (const resourcePath of resourcePaths) {
@@ -463,44 +350,39 @@ export default class RequestHandler {
 			exactPatternCount += DIRECT_RESOURCE_DIRECTORY_SET.has(topLevelDirectory) ? 4 : 6;
 			if (exactPatternCount > MAX_EXACT_SWAP_PATTERNS) return [...LARGE_SWAPPER_FILTERS];
 		}
-
 		return resourcePaths.flatMap(exactSwapPatterns);
 	}
-
 	private findSwapResourcePath(rawPath: string): string | undefined {
 		const exactMatch = this.swapRequestResources.get(rawPath);
 		if (exactMatch || !rawPath.includes('%')) return exactMatch;
-
 		try {
 			return this.swapRequestResources.get(decodeURIComponent(rawPath));
 		} catch (_error) {
 			return undefined;
 		}
 	}
-
 	private isGameHost(hostname: string): boolean {
 		return hostname === TARGET_GAME_DOMAIN || hostname.endsWith(`.${TARGET_GAME_DOMAIN}`);
 	}
-
-	/** Index swap resources with fixed concurrency, size, depth, and one absolute startup deadline. */
 	private async indexSwapDirectory(deadlineAt: number): Promise<IndexedSwapResources> {
 		const resourcePaths: string[] = [];
 		const requestResources = new Map<string, string>();
 		const protocolFiles = new Map<string, string>();
 		const pendingDirectories = [''];
 		let directoryCount = 1;
-
 		while (pendingDirectories.length > 0) {
 			const batch = pendingDirectories.splice(0, DIRECTORY_READ_CONCURRENCY);
 			const results = await runBeforeDeadline(
-				() => Promise.all(batch.map(async prefix => ({
-					entries: await readdir(pathJoin(this.swapDir, prefix), { withFileTypes: true }),
-					prefix
-				}))),
+				() =>
+					Promise.all(
+						batch.map(async (prefix) => ({
+							entries: await readdir(pathJoin(this.swapDir, prefix), { withFileTypes: true }),
+							prefix
+						}))
+					),
 				deadlineAt,
 				'Resource swapper index'
 			);
-
 			for (const { entries, prefix } of results) {
 				entries.sort((left, right) => left.name.localeCompare(right.name));
 				for (const dirent of entries) {
@@ -516,7 +398,6 @@ export default class RequestHandler {
 						continue;
 					}
 					if (!dirent.isFile()) continue;
-
 					if (resourcePaths.length >= MAX_SWAPPER_FILES) {
 						throw new Error(`resource file count exceeds ${MAX_SWAPPER_FILES}`);
 					}
@@ -529,8 +410,6 @@ export default class RequestHandler {
 				}
 			}
 		}
-
 		return { protocolFiles, requestResources, resourcePaths };
 	}
-
 }

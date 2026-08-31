@@ -1,14 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {
-	getNetworkDiagnosticsSnapshot,
-	getPerformanceSnapshot,
-	startPerformanceMonitor,
-	stopPerformanceMonitor
-} from '../src/performance-monitor.ts';
-
+import { getNetworkDiagnosticsSnapshot, getPerformanceSnapshot, startPerformanceMonitor, stopPerformanceMonitor } from '../src/performance-monitor.ts';
 type TestListener = (event: Event) => void;
-
 function createEventTarget() {
 	const listeners = new Map<string, Set<TestListener>>();
 	return {
@@ -33,7 +26,6 @@ function createEventTarget() {
 		}
 	};
 }
-
 test('sampling follows overlay and document visibility lifecycle', () => {
 	const originalDescriptors = new Map<PropertyKey, PropertyDescriptor | undefined>();
 	const installGlobal = (key: PropertyKey, value: unknown) => {
@@ -46,7 +38,6 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 			else Reflect.deleteProperty(globalThis, key);
 		}
 	};
-
 	const documentEvents = createEventTarget();
 	const windowEvents = createEventTarget();
 	const animationFrames = new Map<number, FrameRequestCallback>();
@@ -58,7 +49,9 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 		style: {},
 		textContent: '',
 		setAttribute() {},
-		remove() { overlayRemoved = true; }
+		remove() {
+			overlayRemoved = true;
+		}
 	} as unknown as HTMLPreElement;
 	const fakeDocument = {
 		visibilityState: 'visible',
@@ -71,7 +64,6 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 		addEventListener: windowEvents.addEventListener,
 		removeEventListener: windowEvents.removeEventListener
 	} as unknown as Window;
-
 	installGlobal('document', fakeDocument);
 	installGlobal('window', fakeWindow);
 	installGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
@@ -82,14 +74,12 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 	installGlobal('cancelAnimationFrame', (handle: number) => {
 		animationFrames.delete(handle);
 	});
-
 	const runAnimationFrame = (now: number) => {
 		const next = animationFrames.entries().next().value as [number, FrameRequestCallback] | undefined;
 		assert.ok(next);
 		animationFrames.delete(next[0]);
 		next[1](now);
 	};
-
 	try {
 		const runtimeInfo: GraphicsRuntimeInfo = {
 			activeBackend: 'default',
@@ -102,27 +92,21 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 		const startTime = performance.now();
 		startPerformanceMonitor(runtimeInfo);
 		assert.equal(animationFrames.size, 1);
-
 		runAnimationFrame(startTime + 5);
 		runAnimationFrame(startTime + 10);
 		assert.equal(getPerformanceSnapshot(startTime + 10).sampleCount, 1);
-
 		fakeWindow.wokPerformance?.setVisible(false);
 		assert.equal(animationFrames.size, 0);
 		assert.equal(overlay.hidden, true);
-
 		fakeWindow.wokPerformance?.setVisible(true);
 		assert.equal(animationFrames.size, 1);
 		assert.equal(overlay.hidden, false);
-
 		Object.defineProperty(fakeDocument, 'visibilityState', { configurable: true, value: 'hidden', writable: true });
 		documentEvents.dispatch('visibilitychange');
 		assert.equal(animationFrames.size, 0);
-
 		Object.defineProperty(fakeDocument, 'visibilityState', { configurable: true, value: 'visible', writable: true });
 		documentEvents.dispatch('visibilitychange');
 		assert.equal(animationFrames.size, 1);
-
 		stopPerformanceMonitor();
 		assert.equal(animationFrames.size, 0);
 		assert.equal(documentEvents.listenerCount(), 0);
@@ -135,7 +119,6 @@ test('sampling follows overlay and document visibility lifecycle', () => {
 		restoreGlobals();
 	}
 });
-
 test('network telemetry follows the overlay lifecycle and retains Krunker semantics', () => {
 	const originalDescriptors = new Map<PropertyKey, PropertyDescriptor | undefined>();
 	const installGlobal = (key: PropertyKey, value: unknown) => {
@@ -148,7 +131,6 @@ test('network telemetry follows the overlay lifecycle and retains Krunker semant
 			else Reflect.deleteProperty(globalThis, key);
 		}
 	};
-
 	const documentEvents = createEventTarget();
 	const windowEvents = createEventTarget();
 	const animationFrames = new Map<number, FrameRequestCallback>();
@@ -189,14 +171,11 @@ test('network telemetry follows the overlay lifecycle and retains Krunker semant
 		public constructor(callback: MutationCallback) {
 			mutationCallback = () => callback([], this as unknown as MutationObserver);
 		}
-
 		public disconnect() {
 			observerDisconnects += 1;
 		}
-
 		public observe() {}
 	}
-
 	installGlobal('document', fakeDocument);
 	installGlobal('window', fakeWindow);
 	installGlobal('MutationObserver', FakeMutationObserver);
@@ -213,7 +192,6 @@ test('network telemetry follows the overlay lifecycle and retains Krunker semant
 	installGlobal('cancelAnimationFrame', (handle: number) => {
 		animationFrames.delete(handle);
 	});
-
 	try {
 		startPerformanceMonitor({
 			activeBackend: 'default',
@@ -232,7 +210,6 @@ test('network telemetry follows the overlay lifecycle and retains Krunker semant
 		assert.equal(initial.networkLagWarning, false);
 		assert.match(overlay.textContent ?? '', /KRUNKER-REPORTED NETWORK \(not RTT\)/u);
 		assert.match(overlay.textContent ?? '', /server\s+SYD · TPS 30/u);
-
 		pingElement.textContent = '80';
 		mutationCallback?.();
 		lagElement.style.display = 'block';
@@ -242,19 +219,16 @@ test('network telemetry follows the overlay lifecycle and retains Krunker semant
 		assert.equal(updated.p95ReportedPingMs, 80);
 		assert.equal(updated.reportedPingVariationMs, 56);
 		assert.equal(updated.networkLagWarning, true);
-
 		fakeWindow.wokPerformance?.setVisible(false);
 		assert.equal(animationFrames.size, 0);
 		assert.ok(observerDisconnects >= 1);
 		pingElement.textContent = '120';
 		mutationCallback?.();
 		assert.equal(getNetworkDiagnosticsSnapshot(performance.now()).reportedPingSampleCount, 2);
-
 		fakeWindow.wokPerformance?.setVisible(true);
 		const resumed = getNetworkDiagnosticsSnapshot(performance.now());
 		assert.equal(resumed.currentReportedPingMs, 120);
 		assert.equal(resumed.reportedPingSampleCount, 3);
-
 		stopPerformanceMonitor();
 		assert.equal(fakeWindow.wokPerformance, undefined);
 		assert.equal(fakeWindow.crankshaftPerformance, undefined);

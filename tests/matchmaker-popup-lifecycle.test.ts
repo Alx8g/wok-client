@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MatchmakerPopupLifecycle } from '../src/matchmaker-popup-lifecycle.ts';
-
 const noDismissal = {
 	abortSearch: false,
 	dismissed: false,
@@ -9,11 +8,9 @@ const noDismissal = {
 	openServerWindow: false,
 	playSelect: false
 };
-
 test('retrying replaces an error popup without opening the server browser when enabled', () => {
 	const lifecycle = new MatchmakerPopupLifecycle();
 	lifecycle.show('error');
-
 	assert.deepEqual(lifecycle.replace(), {
 		abortSearch: false,
 		dismissed: true,
@@ -23,19 +20,15 @@ test('retrying replaces an error popup without opening the server browser when e
 	});
 	assert.deepEqual(lifecycle.decide(false, true), noDismissal);
 });
-
 test('replacement never reuses the no-games cancellation side effect', () => {
 	const lifecycle = new MatchmakerPopupLifecycle();
 	lifecycle.show('no-games');
-
 	assert.equal(lifecycle.replace().openServerWindow, false);
 });
-
 test('genuine no-games and error cancellation still opens the enabled server browser', () => {
 	for (const state of ['no-games', 'error'] as const) {
 		const lifecycle = new MatchmakerPopupLifecycle();
 		lifecycle.show(state);
-
 		assert.deepEqual(lifecycle.decide(false, true), {
 			abortSearch: false,
 			dismissed: true,
@@ -45,7 +38,6 @@ test('genuine no-games and error cancellation still opens the enabled server bro
 		});
 	}
 });
-
 test('game decisions retain join and cancellation behavior', () => {
 	const accepted = new MatchmakerPopupLifecycle();
 	accepted.show('game');
@@ -56,7 +48,6 @@ test('game decisions retain join and cancellation behavior', () => {
 		openServerWindow: false,
 		playSelect: true
 	});
-
 	const cancelled = new MatchmakerPopupLifecycle();
 	cancelled.show('game');
 	assert.deepEqual(cancelled.decide(false, true), {
@@ -67,11 +58,9 @@ test('game decisions retain join and cancellation behavior', () => {
 		playSelect: true
 	});
 });
-
 test('searching can only be cancelled and never opens the server browser', () => {
 	const lifecycle = new MatchmakerPopupLifecycle();
 	lifecycle.show('searching');
-
 	assert.deepEqual(lifecycle.decide(true, true), noDismissal);
 	assert.deepEqual(lifecycle.decide(false, true), {
 		abortSearch: true,
@@ -81,12 +70,10 @@ test('searching can only be cancelled and never opens the server browser', () =>
 		playSelect: true
 	});
 });
-
 test('the cancellation confirmation dismisses on any key and never joins or opens the server browser', () => {
 	for (const accept of [true, false]) {
 		const lifecycle = new MatchmakerPopupLifecycle();
 		lifecycle.show('cancelled');
-
 		assert.deepEqual(lifecycle.decide(accept, true), {
 			abortSearch: false,
 			dismissed: true,
@@ -96,11 +83,9 @@ test('the cancellation confirmation dismisses on any key and never joins or open
 		});
 	}
 });
-
 test('the cancellation confirmation clears itself without a second cancellation sound', () => {
 	const lifecycle = new MatchmakerPopupLifecycle();
 	lifecycle.show('cancelled');
-
 	assert.deepEqual(lifecycle.replace(), {
 		abortSearch: false,
 		dismissed: true,
@@ -110,11 +95,9 @@ test('the cancellation confirmation clears itself without a second cancellation 
 	});
 	assert.deepEqual(lifecycle.replace(), noDismissal);
 });
-
 test('replacing a search does not report a user cancellation', () => {
 	const lifecycle = new MatchmakerPopupLifecycle();
 	lifecycle.show('searching');
-
 	assert.deepEqual(lifecycle.replace(), {
 		abortSearch: false,
 		dismissed: true,

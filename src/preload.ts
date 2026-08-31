@@ -29,34 +29,22 @@ import { installGameplayBranding } from './gameplay-branding.ts';
 import { renameClientSettingsTabs } from './settings-tab-label.ts';
 import type { MotionBlurController } from './motion-blur.ts';
 
-// Capture Node-backed diagnostic configuration during preload evaluation. Krunker can remove the
-// page's `process` global before delayed callbacks run because context isolation is disabled.
 const identityDiagnostic = captureIdentityDiagnostic(process.env);
 
-// Keep Krunker's fixed FPS/ping telemetry subtree out of unrelated per-frame layout and paint.
-// This changes no dimensions or content and measured a repeatable frame-time reduction.
 try {
 	webFrame.insertCSS(HUD_CONTAINMENT_CSS, { cssOrigin: 'user' });
 } catch (error) {
 	console.error('Failed to install WOK HUD containment.', error);
 }
 
-// Install before Krunker's scripts can capture requestPointerLock. contextIsolation is disabled for
-// the game window, so this prototype is the one used by the page's canvas as well as the preload.
 const wokBootPayload = parseWokBootPayload();
 const rawPointerLockController = installRawPointerLock(
 	Element.prototype,
 	wokBootPayload?.userPrefs.rawMouseInput !== false
 );
 
-// Static HUD branding mounts once when Krunker's top-left shell is parsed, then disconnects its
-// short-lived observer. No timer, animation frame, or gameplay mutation work remains afterward.
 installGameplayBranding();
 
-// Diagnostic-only WebGL call census. Inert unless WOK_DRAW_STATS is set in the environment.
-// Measures what a real Krunker frame issues so the calibration workload can be anchored to the
-// game instead of an assumption; never installed in a normal session (the wrappers themselves
-// would perturb the frame budget being measured).
 if (process.env.WOK_DRAW_STATS) {
 	const glPrototype = typeof WebGL2RenderingContext === 'function'
 		? WebGL2RenderingContext.prototype as unknown as Record<string, unknown>
@@ -71,9 +59,6 @@ if (process.env.WOK_DRAW_STATS) {
 	}
 }
 
-// Diagnostic-only Krunker menu probe. Inert unless WOK_DUMP_DOM is set in the environment.
-// Prints the real markup of a menu region so client features can be written against it instead
-// of against guessed selectors.
 if (process.env.WOK_DUMP_DOM) {
 	const keywords = (process.env.WOK_DUMP_DOM_KEYWORDS ?? 'live stream,featured,streaming').split(',');
 	const runProbe = () => {
@@ -87,9 +72,6 @@ if (process.env.WOK_DUMP_DOM) {
 	window.setTimeout(runProbe, 30_000);
 }
 
-// Diagnostic-only hunt for where Krunker keeps the local player's name. Inert unless
-// WOK_FIND_IDENTITY is set. Automatic detection failed on a real account, so rather than guess
-// another source this searches for a name the user has already supplied and reports every hit.
 if (identityDiagnostic.enabled) {
 	const runIdentityProbe = () => {
 		const hits = probeIdentitySources({
@@ -128,8 +110,7 @@ if (identityDiagnostic.enabled) {
 		});
 		ipcRenderer.send('wok_identity_probe', formatIdentityProbe(hits));
 		{
-			// Always report what the sources hold: knowing the shape of the account object matters
-			// even when a hit is found, because that shape is what detection has to read.
+
 			const activity = typeof window.getGameActivity === 'function' ? window.getGameActivity() : undefined;
 			const storageKeys: string[] = [];
 			try {
@@ -151,12 +132,10 @@ if (identityDiagnostic.enabled) {
 			}));
 		}
 	};
-	// Sample early and often: earlier runs closed the client before a late sample could fire, and
-	// the account object may only populate once the menu is live.
+
 	for (const delay of [3_000, 8_000, 15_000, 25_000, 45_000]) window.setTimeout(runIdentityProbe, delay);
 }
 
-// Diagnostic-only gameplay frame log. Inert unless WOK_FPS_LOG is set in the environment.
 if (process.env.WOK_FPS_LOG) {
 	const stats = new RollingPerformanceStats();
 	startGameplayFpsLog({
@@ -169,10 +148,8 @@ if (process.env.WOK_FPS_LOG) {
 	});
 }
 
-// The custom identity starts itself: see beginCustomIdentityWatch.
 window.setTimeout(() => { traceStartup('top-level identity kick'); beginCustomIdentityWatch(); }, 1_000);
 
-// Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
 function sendPerfMark(name: string) {
 	if (!perfMarksEnabled) return;
@@ -181,11 +158,9 @@ function sendPerfMark(name: string) {
 }
 sendPerfMark('preload-start');
 
-// get rid of client unsupported message
 window.OffCliV = true;
 window.closeClient = () => ipcRenderer.send('closeClient');
 
-// save some console methods from krunker
 export const strippedConsole = {
 	error: console.error.bind(console),
 	log: console.log.bind(console),
@@ -204,7 +179,6 @@ function stopMotionBlurRuntime(): void {
 	motionBlurController = undefined;
 }
 
-/** Apply the persisted blur controls without loading the effect module while it is switched off. */
 export function applyClientMotionBlurSettings(preferences: UserPrefs): void {
 	const generation = ++motionBlurLoadGeneration;
 	if (preferences.motionBlur !== true) {
@@ -243,8 +217,6 @@ window.addEventListener('beforeunload', stopMotionBlurRuntime, { once: true });
 
 let settingsRenderPromise: Promise<void> | undefined;
 
-// Set by the settings UI module when it loads; lets the hotkey handler skip the keybind-capture
-// state without a document scan on every keydown.
 let keybindCaptureActive: () => boolean = () => false;
 
 function renderSettings() {
@@ -285,7 +257,6 @@ interface CompHostParams {
 	spectators?: string;
     webhook?: string;
 }
-
 
 const waitForElement = (selector: string, timeoutMs = 15_000): Promise<HTMLElement> => {
 	return new Promise((resolve, reject) => {
@@ -467,7 +438,6 @@ function loadStyleSettingCSS(name: 'hideAds' | 'menuTimer' | 'quickClassPicker')
 	return css;
 }
 
-/** CSS for style-based settings, loaded and cached only when a setting uses it. */
 export const styleSettingsCSS = {
 	get hideAds() { return loadStyleSettingCSS('hideAds'); },
 	get menuTimer() { return loadStyleSettingCSS('menuTimer'); },
@@ -481,8 +451,6 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, _graphics
 	applyPublicServerPingSortSettings(_userPrefs);
 	competitionAutomationEnabled = Boolean(_userPrefs.competitionAutomation);
 
-	// Competitive Mode was a visual-reduction preset. It is no longer exposed or enabled, but an
-	// existing backup must be restored once so users are not left on the reduced visual settings.
 	if (competitiveRuntimeInfo.hasGameSettingsBackup) {
 		void import('./competitive-mode.ts')
 			.then(competitiveMode => competitiveMode.synchronizeCompetitiveMode(false, true))
@@ -490,8 +458,6 @@ ipcRenderer.on('main_did-finish-load', (_event, _userPrefs: UserPrefs, _graphics
 	}
 	patchSettings(_userPrefs);
 
-	// fix fps dropping on scroll
-	// https://github.com/bigjakk/Krunker-Civilian-Client/blob/573de775d4b299db87d45d67d568264eb7d7e0f0/src/preload/index.ts#L29
 	const scrollableOverflowPattern = /^(?:auto|scroll)$/u;
 	window.addEventListener('wheel', (event: WheelEvent) => {
 		if (document.pointerLockElement) {
@@ -517,13 +483,7 @@ let discordRPCHooksInstalled = false;
 
 function updateDiscordRPC(): void {
 	strippedConsole.log('> updated RPC');
-	/*
-	 * Discord presence leaves this machine, so the text is read with the local display
-	 * identity undone. In practice these elements hold a class, a skin and a map name, but
-	 * "anything this client republishes is read through withRealIdentity" is the rule that
-	 * keeps the feature cosmetic instead of misleading. Free unless something is currently
-	 * rewritten, and the strings are captured inside the callback, not the elements.
-	 */
+
 	const presence = withRealIdentity(() => {
 		const skinElem = document.querySelector('#menuClassSubtext > span');
 		return {
@@ -561,7 +521,7 @@ ipcRenderer.on('initDiscordRPC', () => {
 			document.getElementById('customizeButton')?.addEventListener('click', updateDiscordRPC);
 		}, 4000);
 	}
-	// Enabling RPC after the load event still publishes current activity immediately.
+
 	updateDiscordRPC();
 });
 
@@ -576,7 +536,6 @@ interface WokBootPayload {
 	version: string;
 }
 
-/** Parse the boot payload main passes through webPreferences.additionalArguments. */
 function parseWokBootPayload(): WokBootPayload | undefined {
 	try {
 		const bootArgument = process.argv.find(argument => argument.startsWith('--wok-boot='));
@@ -596,16 +555,6 @@ function applyRawMouseInputPreference(_userPrefs: UserPrefs): void {
 	rawPointerLockController.setEnabled(_userPrefs.rawMouseInput !== false);
 }
 
-/** Run a callback immediately when the DOM is already parsed, otherwise at DOMContentLoaded. */
-/**
- * Run once the document can be written to.
- *
- * DOMContentLoaded alone is not enough: on Krunker it was observed never firing for the document
- * the preload sees, which silently killed every startup step queued behind it - the theme and the
- * custom identity both never started, with no error anywhere because nothing threw. What the
- * callers actually need is a body to append to, so this waits for that directly, by whichever
- * signal arrives first, and gives up only if the document never produces one.
- */
 function whenDOMReady(callback: () => void) {
 	let ran = false;
 	const run = () => {
@@ -623,17 +572,15 @@ function whenDOMReady(callback: () => void) {
 	}
 
 	document.addEventListener('DOMContentLoaded', run, { once: true });
-	// A parser that never emits the event still builds the body, so watch for the element itself.
+
 	const observer = typeof MutationObserver === 'function'
 		? new MutationObserver(() => { if (document.body) run(); })
 		: undefined;
 	observer?.observe(document.documentElement, { childList: true, subtree: true });
-	// Last resort for a document that produces neither: the steps are all body-dependent, so a
-	// cheap poll is preferable to features that silently never start.
+
 	const poll = window.setInterval(() => { if (document.body) run(); }, 250);
 }
 
-/** Resolve an element by id as soon as the parser creates it, giving up at DOMContentLoaded. */
 function waitForElementById(id: string): Promise<HTMLElement | null> {
 	return new Promise(resolve => {
 		const existing = document.getElementById(id);
@@ -661,7 +608,6 @@ interface ClientHotkeyConfig {
 
 let clientHotkeyConfig: ClientHotkeyConfig | undefined;
 
-/** Register the Escape/matchmaker keydown handler once; later calls only refresh its config. */
 function applyClientHotkeys(_userPrefs: UserPrefs) {
 	const alreadyRegistered = clientHotkeyConfig !== undefined;
 	clientHotkeyConfig = {
@@ -671,15 +617,13 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 	};
 	if (alreadyRegistered) return;
 
-	// Capture before Krunker's gameplay handlers so number keys and other in-game binds still reach
-	// the client. A matched matchmaker key is consumed before the game can treat it as an action.
 	window.addEventListener('keydown', event => {
 		if (event.code === 'Escape') document.exitPointerLock();
 		if (event.repeat || keybindCaptureActive()) return;
 		const config = clientHotkeyConfig;
 		if (!config || !keyboardEventMatchesCustomSetting(config.matchmakerKey, event)) return;
 		if (config.matchmakerEnabled) {
-			// The popup is interactive, so release gameplay mouse capture before showing it.
+
 			document.exitPointerLock();
 			event.preventDefault();
 			event.stopImmediatePropagation();
@@ -690,7 +634,6 @@ function applyClientHotkeys(_userPrefs: UserPrefs) {
 	}, { capture: true });
 }
 
-/** Apply Public-screen ping annotation and sorting through the trusted main-process probe. */
 export function applyPublicServerPingSortSettings(_userPrefs: UserPrefs): void {
 	applyPublicServerPingSortRuntime(
 		_userPrefs,
@@ -698,7 +641,6 @@ export function applyPublicServerPingSortSettings(_userPrefs: UserPrefs): void {
 	);
 }
 
-/** Apply matchmaker enablement and its search key immediately from the settings renderer. */
 export function applyClientMatchmakerSettings(_userPrefs: UserPrefs) {
 	applyClientHotkeys(_userPrefs);
 	if (_userPrefs.matchmaker) {
@@ -721,7 +663,6 @@ const gameUsableSignal = new GameUsabilitySignal({
 	}
 });
 
-/** Report gameplay readiness once, independently of whether the optional client splash is enabled. */
 function reportGameUsable(): void {
 	gameUsableSignal.report();
 }
@@ -730,12 +671,6 @@ function onGameUsable(listener: () => void): () => void {
 	return gameUsableSignal.subscribe(listener);
 }
 
-/**
- * Krunker's loading overlay clearing together with a non-spinner #instructions prompt marks the
- * initial menu as usable. Pointer lock is an independent definitive signal. Observe both on every
- * launch so disabled or failed presentation code cannot prevent the adaptive intro profile from
- * learning, including when the relevant elements are created after the window load event.
- */
 function observeGameUsable(): void {
 	if (gameUsableObservationStarted) return;
 	gameUsableObservationStarted = true;
@@ -753,17 +688,8 @@ function observeGameUsable(): void {
 let readinessErrors = 0;
 let lastReadinessError: string | undefined;
 
-/**
- * Stuck-load diagnostics.
- *
- * A load that never completes is close to impossible to reproduce on demand, so the one line that
- * matters - the overrun, with the state of everything the readiness predicate reads - is always
- * emitted and forwarded to the main process, where WOK's other diagnostics are read. The rest of
- * the trace follows the established env gate and stays off by default.
- */
 const splashLogEnabled = Boolean(process.env.WOK_SPLASH_LOG);
 
-/** Origin and path only: enough to tell the game apart from an error, login or challenge page. */
 function describeLocation(): string {
 	try {
 		const url = new URL(location.href);
@@ -783,7 +709,6 @@ function sendLoadingDiagnostic(line: string, always = false): void {
 	}
 }
 
-/** Remove an element without ever throwing; hiding it is the fallback when removal fails. */
 function forceElementGone(element: Element): void {
 	try {
 		element.remove();
@@ -801,11 +726,6 @@ function forceElementGone(element: Element): void {
 	}
 }
 
-/**
- * Non-blocking notice shown when a load overruns the deadline. The splash is already gone by the
- * time this appears, so the notice must never take the page back: only its own card accepts
- * pointer events, and it retires itself as soon as the game does become usable.
- */
 function showLoadingOverrunNotice(elapsedMs: number): () => void {
 	try {
 		if (!document.body) return () => {};
@@ -829,8 +749,7 @@ function showLoadingOverrunNotice(elapsedMs: number): () => void {
 		document.body.appendChild(notice);
 		return remove;
 	} catch (error) {
-		// The page is already revealed by this point; failing to explain it is not worth an
-		// exception on the way out.
+
 		strippedConsole.error('Failed to show the WOK loading notice', error);
 		return () => {};
 	}
@@ -855,7 +774,6 @@ async function mountClientSplash(
 	]);
 	webFrame.insertCSS(splashCSS);
 
-	// Mount as soon as the parser creates #uiBase so the splash covers the page-load window.
 	const uiBaseElement = await waitForElementById('uiBase');
 	if (uiBaseElement === null) {
 		strippedConsole.error(
@@ -863,8 +781,7 @@ async function mountClientSplash(
 		);
 		return;
 	}
-	// Reading the assets and waiting for #uiBase can outlast a fast launch. Mounting a splash the
-	// signal would immediately clear only costs a flash and a pointless canvas.
+
 	if (gameUsableSignal.hasReported || !document.body) return;
 
 	const splashBackground = createElement(
@@ -877,11 +794,6 @@ async function mountClientSplash(
 	);
 	splashBackground.setAttribute('role', 'status');
 
-	/*
-	 * Carry the intro's exact final frame into the loading phase, then run the optimized WOK weapon
-	 * particle animation beneath the lockup. Its pre-baked point data avoids loading source images
-	 * while Krunker is initialising.
-	 */
 	const stage = createElement('div', {
 		class: 'wok-splash-stage'
 	});
@@ -895,11 +807,6 @@ async function mountClientSplash(
 	stage.appendChild(weaponLoaderHost);
 	splashBackground.appendChild(stage);
 
-	/*
-	 * Mounted on <body>, NOT inside #uiBase. Krunker applies its UI scale to #uiBase as a CSS
-	 * transform, which would rescale and move the handoff. Waiting for #uiBase still gives us an
-	 * early, stable parser milestone without inheriting that transform.
-	 */
 	document.body.appendChild(splashBackground);
 
 	let weaponParticles: WeaponParticleLoader | undefined;
@@ -916,12 +823,6 @@ async function mountClientSplash(
 		forceElementGone(splashBackground);
 	};
 
-	/*
-	 * The deadline is armed before anything that can fail, and before the weapon loader is even
-	 * built. Nothing after this point - a throwing loader, a readiness signal that never arrives,
-	 * markup that changed under the predicate, an error, login or ban screen behind the splash -
-	 * can leave this element covering the page: the wait is bounded and every outcome removes it.
-	 */
 	let retireOverrunNotice: () => void = () => {};
 	const deadline = startLoadingDeadline({
 		deadlineMs: SPLASH_REVEAL_DEADLINE_MS,
@@ -940,15 +841,14 @@ async function mountClientSplash(
 		onResolve: resolution => {
 			clearSplash();
 			if (resolution.outcome !== 'overrun') return;
-			// Recorded before the notice is built: the record of why a launch got stuck is the part
-			// that must survive, even if drawing the explanation fails.
+
 			sendLoadingDiagnostic(
 				`splash overrun elapsed=${Math.round(resolution.elapsedMs)}ms `
 				+ `readinessErrors=${readinessErrors} lastError=${lastReadinessError ?? 'none'} `
 				+ `url=${describeLocation()} ${formatGameUsabilitySnapshot(describeGameUsability(document))}`,
 				true
 			);
-			// Then say what happened, in the page, where the user is looking.
+
 			retireOverrunNotice = showLoadingOverrunNotice(resolution.elapsedMs);
 		},
 		subscribe: onGameUsable
@@ -957,12 +857,10 @@ async function mountClientSplash(
 
 	try {
 		weaponParticles = await mountWeaponParticleLoader(weaponLoaderHost);
-		// Readiness can arrive while the loader is being built; destroy it rather than leaving an
-		// animation running against a detached element.
+
 		if (splashCleared) weaponParticles.destroy();
 	} catch (error) {
-		// The static final frame is a perfectly good loading screen on its own, so a failed
-		// animation is not a reason to drop the presentation - or to keep it past the deadline.
+
 		strippedConsole.error('Failed to start the WOK loading animation', error);
 	}
 }
@@ -986,33 +884,16 @@ async function readThemeAsset(name: string): Promise<string> {
 	return css;
 }
 
-/**
- * Mount the two theme style elements, shared layers first so a palette can override them. They go
- * up even for 'None': without them already in the document, switching to a theme later would have
- * nothing to write into, and live switching is the point.
- *
- * They are appended to <body> on purpose. Krunker's own stylesheets are in <head>, so at equal
- * specificity these win on document order, which is what lets the game layer restyle the game
- * without reaching for !important on every rule.
- */
 function ensureThemeElements(): boolean {
 	if (themeBaseElement && themeElement) return true;
 	if (!document.body) return false;
 	themeBaseElement = createElement('style', { id: 'wokThemeBase' });
-	// Keeps the historical id: user CSS has always landed in this element.
+
 	themeElement = createElement('style', { id: 'wokCustomCSS' });
 	document.body.append(themeBaseElement, themeElement);
 	return true;
 }
 
-/**
- * Apply a theme selection to the live document. Exported so the settings UI, which runs in this
- * same renderer, switches themes through exactly the path the boot and reload flows use.
- *
- * A bundled theme is the shared layers plus its palette; a user file is injected verbatim, with no
- * layers, because those files were written against the stock look and are not ours to reinterpret.
- * Anything unrecognised resolves to no theme rather than failing.
- */
 export async function applyTheme(selection: string, cssPath: string): Promise<void> {
 	if (!ensureThemeElements()) return;
 	if (appliedThemeSelection === selection) return;
@@ -1024,8 +905,7 @@ export async function applyTheme(selection: string, cssPath: string): Promise<vo
 	let themeCSS = '';
 	try {
 		if (source.kind === 'bundled') {
-			// resolveTheme orders the assets so the palette is last; everything before it is a
-			// shared layer and goes into the element the palette can override.
+
 			const files = await Promise.all(source.assets.map(asset => readThemeAsset(asset)));
 			themeCSS = files.pop() ?? '';
 			baseCSS = files.join('\n');
@@ -1034,13 +914,10 @@ export async function applyTheme(selection: string, cssPath: string): Promise<vo
 		}
 	} catch (error) {
 		strippedConsole.error(`Failed to load the theme ${selection}`, error);
-		// Fall through with empty CSS: a half-applied theme is worse than none, and leaving the
-		// previous one mounted would misreport which theme is active. Only forget the selection
-		// if no newer one has claimed it, so a failure here cannot undo a later success.
+
 		if (generation === themeLoadGeneration) appliedThemeSelection = undefined;
 	}
 
-	// A newer selection already won the race; its result must not be overwritten by this one.
 	if (generation !== themeLoadGeneration) return;
 	themeBaseElement.textContent = baseCSS;
 	themeElement.textContent = themeCSS;
@@ -1048,20 +925,6 @@ export async function applyTheme(selection: string, cssPath: string): Promise<vo
 
 let customIdentityTeardownRegistered = false;
 
-/**
- * Start (or refresh) the local display identity. Idempotent per document: the settings UI
- * live-applies through the same module, an unset identity starts nothing at all, and the unload
- * hook disconnects the observer and hands the game's own text back.
- */
-/**
- * Read a client stylesheet without letting it hold up everything behind it.
- *
- * The startup trace showed execution stopping at the first stylesheet read and never resuming -
- * not rejecting, hanging. Because the steps that mount the theme and the custom identity are
- * queued after these awaits, one unresolved read silently disabled them with nothing logged. CSS
- * is cosmetic; the features behind it are not, so a read that does not finish promptly is
- * abandoned and startup continues.
- */
 async function readClientStylesheet(file: string, timeoutMs = 5_000): Promise<string | undefined> {
 	try {
 		return await Promise.race([
@@ -1086,7 +949,6 @@ async function ensureMatchmakerStylesheet(): Promise<void> {
 let latestUserPrefs: UserPrefs | undefined;
 let identityStarterHandle: number | undefined;
 
-/** Reconcile preferences that can change without replacing the game document. */
 function applyRuntimePreferences(preferences: UserPrefs): void {
 	latestUserPrefs = preferences;
 	applyRawMouseInputPreference(preferences);
@@ -1102,23 +964,11 @@ let authoritativeUserPrefsReceived = false;
 let userPrefsRecoveryStarted = false;
 let userPrefsFetchInFlight = false;
 
-/**
- * Start the local display identity independently of the visuals pipeline.
- *
- * That pipeline reads stylesheets and waits on DOM events inside a document Krunker replaces
- * during start-up, so work queued behind it can be abandoned without ever throwing - which is
- * exactly how this feature came to be silently dead. Identity needs only preferences and a body,
- * so it watches for both itself, on the same top-level scheduling the diagnostics use, and stops
- * the moment it has started.
- */
 function beginCustomIdentityWatch() {
 	traceStartup(`watch called; started=${identityStarterHandle !== undefined} prefs=${latestUserPrefs ? 'yes' : 'no'} body=${document.body ? 'yes' : 'no'}`);
 	if (identityStarterHandle !== undefined) return;
 	const tryStart = () => {
-		// Only preferences are required. Discovery reads Krunker's activity object and needs no
-		// DOM at all; it is the rewrite that needs a root, and that reconciles itself once one
-		// exists. Waiting for an element here stalled the whole feature in a document that was
-		// replaced before it ever grew a body.
+
 		if (!latestUserPrefs) return;
 		window.clearInterval(identityStarterHandle);
 		identityStarterHandle = undefined;
@@ -1132,11 +982,7 @@ function beginCustomIdentityWatch() {
 	};
 	identityStarterHandle = window.setInterval(tryStart, 500);
 	tryStart();
-	// This preload instance may never be handed preferences: the boot payload and the
-	// injectClientCSS push can both land on a document Krunker discards. Ask main for the
-	// authoritative settings in every surviving document, even when a boot snapshot exists. The
-	// snapshot can be stale after a live settings change, and merely storing a successful pull does
-	// not initialize per-document features such as the matchmaker hotkey.
+
 	if (userPrefsRecoveryStarted) return;
 	userPrefsRecoveryStarted = true;
 	const fetchPrefs = () => {
@@ -1163,9 +1009,7 @@ function beginCustomIdentityWatch() {
 			.finally(() => { userPrefsFetchInFlight = false; });
 	};
 	fetchPrefs();
-	// Bounded: a document main never trusts would otherwise invoke IPC every 2 s for the whole
-	// session. Fifteen attempts cover the whole pre-trust window of a real launch several times
-	// over; after that, a push ('injectClientCSS') is the remaining delivery path.
+
 	const PREFS_POLL_MAX_ATTEMPTS = 15;
 	let prefsPollAttempts = 0;
 	const prefsPoll = window.setInterval(() => {
@@ -1192,15 +1036,9 @@ function startCustomIdentity(_userPrefs: UserPrefs) {
 	window.addEventListener('beforeunload', () => { stopCustomIdentityDisplay(); }, { once: true });
 }
 
-/*
- * Animate transforms instead of position properties
- * https://web.dev/articles/stick-to-compositor-only-properties-and-manage-layer-count
- */
 function injectKeyframeFix() {
 	if (document.getElementById('wokKeyframeFix')) return;
-	// document.body can still be null here: whenDOMReady runs immediately whenever readyState is
-	// past 'loading', which on a fast boot is before the body element exists. An unguarded
-	// appendChild threw and killed every step queued after it in the same callback.
+
 	const parent = document.body ?? document.head ?? document.documentElement;
 	if (!parent) return;
 	const keyframeStyle = createElement('style', { id: 'wokKeyframeFix' });
@@ -1208,11 +1046,6 @@ function injectKeyframeFix() {
 	parent.appendChild(keyframeStyle);
 }
 
-/**
- * Apply hotkeys, client CSS, and the splash screen. Runs at document start when the boot
- * payload is available and again on the injectClientCSS IPC message; every step is
- * idempotent per document and later calls reconcile preference changes (reload flow).
- */
 async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPath: string): Promise<void> {
 	latestUserPrefs = _userPrefs;
 	applyRawMouseInputPreference(_userPrefs);
@@ -1259,9 +1092,7 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 
 	traceStartup('reached whenDOMReady registration');
 	whenDOMReady(() => {
-		// Each step is isolated: these are independent features, and one throwing must not silently
-		// cancel the ones queued behind it. That is exactly how the custom identity stopped
-		// starting - a null document.body in injectKeyframeFix took the rest of the callback with it.
+
 		traceStartup('whenDOMReady callback running');
 		const step = (name: string, run: () => void) => {
 			try {
@@ -1281,7 +1112,6 @@ async function applyClientVisuals(_userPrefs: UserPrefs, _version: string, cssPa
 	});
 }
 
-// Kept for reloads and as the fallback when the boot payload is unavailable.
 ipcRenderer.on('injectClientCSS', (_event, _userPrefs: UserPrefs, version: string, cssPath: string) => {
 	void applyClientVisuals(_userPrefs, version, cssPath)
 		.catch(error => { traceStartup(`applyClientVisuals REJECTED: ${String(error)}`); strippedConsole.error('Failed to apply client visuals', error); });
@@ -1292,7 +1122,6 @@ if (wokBootPayload) {
 		.catch(error => { traceStartup(`early applyClientVisuals REJECTED: ${String(error)}`); strippedConsole.error('Failed to apply early client visuals', error); });
 }
 
-// warning: timezone calculation may be slighty innacurate: no special logic for DST and approx. offsets for BRZ, BHN and AFR
 export const regionMappings = [
 	{ name: 'Frankfurt', id: 'de-fra', code: 'FRA', timezone: 'Europe/Berlin' },
 	{ name: 'Silicon Valley', id: 'us-ca-sv', code: 'SV', timezone: 'America/Los_Angeles' },
@@ -1304,24 +1133,20 @@ export const regionMappings = [
 	{ name: 'Mumbai', id: 'as-mb', code: 'MBI', timezone: 'Asia/Kolkata' },
 	{ name: 'Dallas', id: 'us-tx', code: 'DAL', timezone: 'America/Chicago' },
 	{ name: 'Iowa', id: 'iow', code: 'IOW', timezone: 'America/Chicago' },
-	{ name: 'Brazil', id: 'brz', code: 'BRZ', timezone: 'America/Sao_Paulo' }, // BRT
-	{ name: 'Middle East', id: 'me-bhn', code: 'BHN', timezone: 'Asia/Riyadh' }, // Saudi Arabia
-	{ name: 'South Africa', id: 'af-ct', code: 'AFR', timezone: 'Africa/Johannesburg' }, // SAST
+	{ name: 'Brazil', id: 'brz', code: 'BRZ', timezone: 'America/Sao_Paulo' },
+	{ name: 'Middle East', id: 'me-bhn', code: 'BHN', timezone: 'Asia/Riyadh' },
+	{ name: 'South Africa', id: 'af-ct', code: 'AFR', timezone: 'Africa/Johannesburg' },
 
-	// found in matchmaker, but not region picker
-	{ name: 'China (hidden)', id: '', code: 'CHI', timezone: 'Asia/Shanghai' }, // Beijing
+	{ name: 'China (hidden)', id: '', code: 'CHI', timezone: 'Asia/Shanghai' },
 	{ name: 'London (hidden)', id: '', code: 'LON', timezone: 'Europe/London' },
 	{ name: 'Seattle (hidden)', id: '', code: 'STL', timezone: 'America/Los_Angeles' },
 	{ name: 'Mexico (hidden)', id: '', code: 'MX', timezone: 'America/Mexico_City' },
 
-	// FRVR 'Super Secret' testing server
 	{ name: 'EU Super Secret Servers', id: 'sss', code: 'FRA', timezone: 'Europe/Berlin' }
 ];
 
-// find option elements of the region setting, + select closing tag
 const regionOptionsRegex = /s*<option value=.*(de-fra).*(us-ca-sv).*<\/option>/gu;
 
-/** get a timezone in format '[HH:mm]' for a region by it's 3-letter code (e.g. FRA) or id (e.g. de-fra) */
 export function getTimezoneByRegionKey(key: 'code' | 'id', value: string) {
 	if (key === 'id' && value === '') throw new Error('getTimezoneByRegionKey: forbidden to get regions by id with empty id, would match multiple hidden regions');
 	const possibleRegions = regionMappings.filter(reg => reg[key] === value);
@@ -1332,7 +1157,7 @@ export function getTimezoneByRegionKey(key: 'code' | 'id', value: string) {
 }
 
 function patchSettings(_userPrefs: UserPrefs) {
-	// hooking & binding credit: https://github.com/asger-finding/anotherkrunkerclient/blob/main/src/preload/game-settings.ts
+
 	let interval: number | undefined;
 	let timeout: number | undefined;
 	const stopWaiting = () => {
@@ -1365,13 +1190,6 @@ function patchSettings(_userPrefs: UserPrefs) {
 		const searchHook = settingsWindow.searchList.bind(settingsWindow);
 		let searchRenderTimer: number | undefined;
 
-		/*
-		 * These four functions belong to Krunker and are called from Krunker's own code, including
-		 * during startup. An exception thrown from our additions therefore lands in the middle of
-		 * the game's call stack and can stop it reaching a playable state - which used to mean the
-		 * client's loading screen never came down. Every override calls through first, then runs
-		 * WOK's work inside this guard, so the worst case is that one client extra is missing.
-		 */
 		const runHookExtras = (label: string, extras: () => void) => {
 			try {
 				extras();
@@ -1393,13 +1211,12 @@ function patchSettings(_userPrefs: UserPrefs) {
 						advSliderElem.nextElementSibling?.setAttribute('title', 'WOK Client auto-enables advanced settings mode');
 					}
 
-					// We check the search query here because krunker reloads the search each time the settings page is closed/reopened, causing any client settings to be erased
 					const searchQuery = (document.getElementById('settSearch') as (HTMLInputElement | undefined))?.value ?? "";
 					if (isClientTab() || searchQuery.length > 0) renderSettings();
 				}
 
 				if (args[0] === 4) {
-					// This makes the model viewer link open in a new window. Krunker doesn't currently have it set to target _blank for some reason.
+
 					const modelViewerElement = Array.from(document.getElementsByClassName('menuLink')).find(elem => elem instanceof HTMLElement && elem.innerText === 'Model Viewer');
 					if (modelViewerElement) modelViewerElement.setAttribute('target', '_blank');
 				}
@@ -1408,7 +1225,6 @@ function patchSettings(_userPrefs: UserPrefs) {
 			return result;
 		};
 
-		// whenever we change tabs, if it's client tab, run renderSettings, otherwise remove our class
 		settingsWindow.changeTab = (...args: unknown[]) => {
 			const result = changeTabHook(...args);
 
@@ -1426,8 +1242,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 			let patched = result;
 			runHookExtras('getSettings', () => {
-				// Krunker's markup is not ours to rely on: a missing region <select> means no match
-				// at all, and reading .length off that null used to throw straight into the game.
+
 				const regionOptionMatches = typeof result === 'string' && result.includes('window.setSetting("defaultRegion"')
 					? result.match(regionOptionsRegex)
 					: null;
@@ -1438,7 +1253,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 				for (let i = 0; i < optionElements.length; i++) {
 					const opt = optionElements[i];
-					// bad hack to fix it getting added multiple times (don't know why..)
+
 					if ((opt.textContent ?? '').includes("[")) continue;
 					try {
 						opt.textContent += ` ${getTimezoneByRegionKey('id', opt.value)}`;
@@ -1459,7 +1274,7 @@ function patchSettings(_userPrefs: UserPrefs) {
 
 		settingsWindow.searchList = (...args: unknown[]) => {
 			// biome-ignore lint/suspicious/noExplicitAny: hook code, expected to be hacky
-			const result: any = searchHook(...args); // Do normal krunker settings search things
+			const result: any = searchHook(...args);
 			runHookExtras('searchList', () => {
 				if (searchRenderTimer !== undefined) window.clearTimeout(searchRenderTimer);
 				searchRenderTimer = window.setTimeout(() => {

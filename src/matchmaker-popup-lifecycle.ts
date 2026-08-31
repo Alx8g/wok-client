@@ -10,7 +10,6 @@ export interface MatchmakerPopupDismissal {
 	playSelect: boolean;
 }
 
-/** Return whether a pointerdown target is outside the popup, including a missing target. */
 export function matchmakerPointerDownIsOutside(
 	popup: { contains(target: Node | null): boolean },
 	target: Node | null
@@ -30,7 +29,6 @@ export class MatchmakerPopupLifecycle {
 	private session = 0;
 	private state: MatchmakerPopupState = 'closed';
 
-	/** Opens a new popup session. Input begun on an older rendered view cannot act on this one. */
 	public show(state: ActiveMatchmakerPopupState): number {
 		this.session++;
 		this.state = state;
@@ -74,7 +72,6 @@ export class MatchmakerPopupLifecycle {
 		};
 	}
 
-	/** Close without user feedback; repeated teardown calls have no effect. */
 	public teardown(): MatchmakerPopupDismissal {
 		const state = this.takeState();
 		if (state === 'closed') return NO_DISMISSAL;

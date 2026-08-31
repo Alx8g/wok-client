@@ -23,7 +23,6 @@ function nodeTouchesSelector(
 		|| (includeDescendants && element.querySelector?.(selector) != null);
 }
 
-/** Ignore document-wide mutations that cannot add, remove, or change the owned surface. */
 export function mutationRecordsTouchSelector(
 	records: readonly MutationRecordLike[],
 	selector: string

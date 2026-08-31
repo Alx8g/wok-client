@@ -1,6 +1,6 @@
 import { readdirSync } from 'fs';
 import { DISPLAY_PREFERENCE_AUTO, type DisplayOption } from './display-selection.ts';
-import { ipcRenderer, shell } from 'electron'; // add app if crashes
+import { ipcRenderer, shell } from 'electron';
 import { createElement, haveSameContents, toggleSettingCSS, parseKeybindSettingDisplay, turnKeyboardEventIntoSettingValue, objectsAreEqual } from './utils.ts';
 import { NOTICES_URL, WEBSITE_URL, REPO_URL } from './branding.ts';
 import { applyClientMatchmakerSettings, applyClientMotionBlurSettings, applyPublicServerPingSortSettings, applyTheme, styleSettingsCSS, getTimezoneByRegionKey, strippedConsole } from './preload.ts';
@@ -33,7 +33,7 @@ const RefreshEnum = {
 interface IPaths { [path: string]: string }
 let userPrefs: UserPrefs;
 let userPrefsPath: string;
-let userPrefsCache: UserPrefs; // the userprefs on path
+let userPrefsCache: UserPrefs;
 let refreshNeeded: SettingsRefreshRequirement = RefreshEnum.notNeeded;
 let displayedRefreshNeeded: SettingsRefreshRequirement = RefreshEnum.notNeeded;
 let refreshNotifElement: HTMLElement | undefined;
@@ -46,12 +46,6 @@ const requestUserPrefs = () => { ipcRenderer.send('settingsUI_requests_userPrefs
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', requestUserPrefs, { once: true });
 else requestUserPrefs();
 
-// Theme options are declared here so that TS knows they are the correct type for modifications under the m_userPrefs_for_settingUI message
-/**
- * The monitor list is whatever is attached right now, so main enumerates it and sends it with the
- * preferences; this declaration exists up front only so TS knows the type being mutated. Values are
- * opaque display keys (src/display-selection.ts), which is why this select needs optLabels.
- */
 const displayOption: SelectSettingDescItem = {
 	title: 'Display',
 	type: 'sel',
@@ -80,20 +74,17 @@ const themeOption: SelectSettingDescItem = {
 }
 
 ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, received_userPrefs: UserPrefs, received_displays: DisplayOption[]) => {
-	// A missing list (older main, or an enumeration failure) leaves the picker on Automatic only.
-	// The stored key is never rewritten from here: main already appends an entry for a remembered
-	// monitor that is not attached, so unplugging one shows the truth without discarding the choice.
+
 	const displayOptions = Array.isArray(received_displays) && received_displays.length > 0
 		? received_displays
 		: [{ value: DISPLAY_PREFERENCE_AUTO, label: 'Automatic (primary display)' }];
 	displayOption.opts = displayOptions.map(option => option.value);
 	displayOption.optLabels = displayOptions.map(option => option.label);
 
-	// main sends us the path to settings and also settings themselves on initial load.
 	userPrefsPath = received_paths.settingsPath;
 	paths = received_paths;
 	userPrefs = received_userPrefs;
-	userPrefsCache = { ...received_userPrefs }; // cache userprefs
+	userPrefsCache = { ...received_userPrefs };
 	settingsRefreshTracker.reset();
 	refreshNeeded = RefreshEnum.notNeeded;
 	displayedRefreshNeeded = RefreshEnum.notNeeded;
@@ -108,17 +99,15 @@ ipcRenderer.on('m_userPrefs_for_settingsUI', (_event, received_paths: IPaths, re
 	const themeOptions = buildThemeOptions(userThemeFiles);
 	themeOption.opts = themeOptions.values;
 	themeOption.optLabels = themeOptions.labels;
-	// A file the user deleted since last launch must not stay selected in a dropdown that no
-	// longer lists it, or the picker would show a value it cannot apply.
+
 	userPrefs.theme = normalizeThemeSelection(userPrefs.theme, userThemeFiles);
 	resolveSettingsReady();
 });
 
-/** joins the data: userPrefs and Desc: SettingsDesc into one array of objects */
 function transformMarrySettings(data: UserPrefs, desc: SettingsDesc, callback: Callbacks): RenderReadySetting[] {
 	const renderReadySettings = Object.keys(desc)
 		.map(key => ({ key, ...desc[key] })) // embeds key into the original object: hideAds: {title: 'Hide Ads', ...} => {key: 'hideAds', title: 'Hide Ads', ...}
-		.map(obj => ({ callback, value: data[obj.key], ...obj })); // adds value (from the data object) and callback ('normal' by default)
+		.map(obj => ({ callback, value: data[obj.key], ...obj }));
 
 	return renderReadySettings;
 }
@@ -128,31 +117,11 @@ function openPath(e: MouseEvent, path: string) {
 	shell.openPath(path).catch(err => strippedConsole.error(err));
 }
 
-/**
- * Live theme switching. The settings UI shares a renderer with the injector, so it reuses the
- * preload's applier rather than keeping a second copy of the mounting, caching and race handling.
- */
 function applyThemeSelection(value: string) {
 	void applyTheme(value, paths.cssPath)
 		.catch(error => { strippedConsole.error(`Failed to apply the theme ${value}`, error); });
 }
 
-/**
- * each setting is defined here as a SettingsDesc object. check typescript intelliSense to see if you have all required props.
- * some setting types, like 'sel' will have more required props, for example 'opts'.
- * note: for each key in userPrefs, there should exist an entry under the same key here.
- *
- * optional props and their defaults:
- * desc (description): omitting it or leaving it "" will not render any description
- * cat (category): omitting will put the setting in the first (0th) category
- * instant: true means the setting applies immediately.
- * refreshOnly: true means the setting requires a page reload.
- *
- * Neither flag means a full client restart. The flags are exclusive.
- *
- * note: settings will get rendered in the order you define them.
- * based on my generative settings from https://github.com/KraXen72/glide, precisely https://github.com/KraXen72/glide/blob/master/settings.js
- */
 const settingsDesc: SettingsDesc = {
 	wokMenuDeclutter: { title: 'Clean Menu UI', type: 'bool', desc: 'Removes promotions, Manage Ads, and low-value menu items while keeping balances and core controls.', safety: 0, cat: 2, instant: true },
 	wokPublicServerPingSort: { title: 'Sort Public Regions by Ping', type: 'bool', desc: 'Shows each Public region’s ping and puts the fastest regions first. Fixed categories stay pinned.', safety: 0, cat: 3, instant: true },
@@ -207,7 +176,6 @@ const settingsDesc: SettingsDesc = {
 	competitionAutomation: { title: 'Competition Host Automation', type: 'bool', desc: 'Lets confirmed WOK links create and fill private rooms. Competition tooling only.', safety: 4, cat: 4, instant: true }
 };
 
-/** index-based safety descriptions. goes in title attribute */
 const safetyDesc = [
 	'This setting is safe/standard',
 	'Proceed with caution',
@@ -216,7 +184,6 @@ const safetyDesc = [
 	'This setting is experimental and unstable. Use at your own risk.'
 ];
 
-/** index-based category names. n = name, c = class */
 const categoryNames: CategoryName[] = [
 	{ name: 'Performance', cat: 'mainSettings' },
 	{ name: 'Game', cat: 'gameSettings' },
@@ -226,7 +193,6 @@ const categoryNames: CategoryName[] = [
 	{ name: 'About', cat: 'aboutSettings' }
 ];
 
-/** About holds links and file shortcuts rather than settings, so the renderer must mount it explicitly. */
 const ABOUT_CATEGORY_INDEX = categoryNames.length - 1;
 
 const pendingSettingsUpdates: Record<string, UserPrefs[keyof UserPrefs]> = {};
@@ -240,7 +206,7 @@ function flushSettingsUpdates() {
 }
 
 function saveSettings(key: string, value: UserPrefs[keyof UserPrefs]) {
-	// Send at most one settings patch per frame and persist it asynchronously in the main process.
+
 	pendingSettingsUpdates[key] = value;
 	if (settingsUpdateFrame === undefined) settingsUpdateFrame = requestAnimationFrame(flushSettingsUpdates);
 }
@@ -329,10 +295,8 @@ function sanitizeString(string: string) {
 	return string.replace(reg, (match: string) => (map[match as keyof typeof map]));
 }
 
-/** creates a new Setting element */
 class SettingElem {
 
-	// s-update is the class for element to watch
 	props: RenderReadySetting;
 
 	type: ValidTypes;
@@ -348,27 +312,21 @@ class SettingElem {
 	#disabled: boolean;
 
 	constructor(props: RenderReadySetting, trusted: boolean = true) {
-		/** @type {Object} save the props from constructor to this class (instance) */
+
 		this.props = props;
 
-		/** @type {String} type of this settingElem, can be {'bool' | 'sel' | 'heading' | 'text' | 'num'} */
 		this.type = props.type;
 
-		/** @type {String} innerHTML for settingElement */
 		this.HTML = '';
 
-		/** @type {String} is the eventlistener to use. for checkbox its be onclick, for select its be onchange etc. */
 		this.updateMethod = '';
 
-		/** @type {String} is the key to get checked when writing an update, for checkboxes it's checked, for selects its value etc.*/
 		this.updateKey = '';
 
 		this.#wrapper = false;
 
 		this.#disabled = false;
 
-		// Warnings and reload requirements need visible markers. Instant changes are the normal case
-		// and do not need an icon on every row.
 		if (this.props.safety > 0) this.HTML += skeleton.safetyIcon(safetyDesc[this.props.safety]);
 		else if (this.props.refreshOnly) this.HTML += skeleton.refreshIcon();
 
@@ -419,9 +377,7 @@ class SettingElem {
 				this.HTML = `<h1 class="setting-title">${sanitize(props.title)}</h1>`;
 				break;
 			case 'sel': {
-				// Option values are persisted ids and labels are display text, so a theme can be
-				// renamed without invalidating anyone's settings.json. Both are always escaped:
-				// user theme filenames reach this string and settings render as trusted.
+
 				const optionLabels = props.optLabels ?? props.opts;
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
           			<select class="s-update inputGrey2">
@@ -443,7 +399,7 @@ class SettingElem {
 							<div class="optCheck"></div>
 						</label>`).join('')}
 					</div>`;
-				this.updateKey = 'value'; // this is bypassed anyway, because type === 'multisel'. '' throws
+				this.updateKey = 'value';
 				this.updateMethod = 'onchange';
 				break;
 			}
@@ -453,7 +409,7 @@ class SettingElem {
 							<input class="s-update" type="color" value="${props.value ? props.value : ''}" ${this.#disabled ? 'disabled' : ''}/>
 					</label>`;
 				this.updateKey = 'value';
-				this.updateMethod = 'onchange'; // oninput works too, but will fire each frame the selector is dragged, causing performance drops. onchange will fire when the selector is closed, ultimately achieving the same effect.
+				this.updateMethod = 'onchange';
 				break;
 			case 'keybind':
 				this.HTML += `<span class="setting-title">${sanitize(props.title)}</span>
@@ -470,20 +426,13 @@ class SettingElem {
 				this.HTML = `<span class="setting-title">${sanitize(props.title)}</span><span>Unknown setting type</span>`;
 		}
 
-		// add desc
 		if (props.desc && props.desc !== '') this.HTML += `<div class="setting-desc-new">${sanitize(props.desc)}</div>`;
 	}
 
-
-	/**
-	 * update the settings when you change something in the gui
-	 * not sure if you can currently synthetically update the settings, but at that point just change userPrefs and re-render?
-	 */
 	update(elem: HTMLElement, callback: Callbacks, event?: InputEvent) {
 		if (this.updateKey === '') throw new Error('Invalid update key');
 		const target = elem.querySelector('.s-update') as HTMLInputElement;
 
-		// parse & sanitize the value from our input element
 		let dirtyValue: UserPrefs[keyof UserPrefs] = target[this.updateKey];
 
 		if (this.props.type === 'multisel') {
@@ -506,8 +455,6 @@ class SettingElem {
 			updateUI(); // synchronize slider and number inputs visually
 		}
 
-		// Local display identity: coerce while typing so the stored value is always one the
-		// preference loader accepts, and reflect dropped characters straight back into the input.
 		if (isCustomIdentityTextPreferenceKey(this.props.key)) {
 			const isClanKey = this.props.key === CUSTOM_CLAN_PREFERENCE_KEY || this.props.key === REAL_CLAN_PREFERENCE_KEY;
 			const sanitized = isClanKey ? sanitizeCustomClan(dirtyValue) : sanitizeCustomName(dirtyValue);
@@ -515,12 +462,11 @@ class SettingElem {
 			dirtyValue = sanitized;
 		}
 
-		const value = (this.props.type === "keybind") ? JSON.parse(`${dirtyValue}`) : dirtyValue; // so we don't accidentally mutate it later
+		const value = (this.props.type === "keybind") ? JSON.parse(`${dirtyValue}`) : dirtyValue;
 
 		if (this.props.type === "keybind") {
 			elem.querySelector('.keyIcon').innerHTML = parseKeybindSettingDisplay(value);
 
-			// Calculate whether or not this conflicts with any other keybinds
 			if (callback === "normal") {				const warningElement = elem.querySelector('.wok-keybind-conflict');
 				updateKeybindConflictDisplay(this.props.key, value, userPrefs[this.props.key] as KeybindUserPref, warningElement);
 			}
@@ -545,11 +491,8 @@ class SettingElem {
 			if (this.props.key === 'wokMenuDeclutter') applyMenuDeclutterSettings(userPrefs);
 			if (this.props.key === 'wokPublicServerPingSort') applyPublicServerPingSortSettings(userPrefs);
 
-			// Live-applies: the replacement engine runs in this renderer, so there is nothing to
-			// reload. Clearing the values puts the game's own text straight back.
 			if (isCustomIdentityPreferenceKey(this.props.key)) applyCustomIdentity(userPrefs);
 
-			// you can add custom instant refresh callbacks for settings here
 			if (typeof value === 'boolean') {
 				if (this.props.key === 'menuTimer') toggleSettingCSS(styleSettingsCSS.menuTimer, this.props.key, value);
 				if (this.props.key === 'quickClassPicker') toggleSettingCSS(styleSettingsCSS.quickClassPicker, this.props.key, value);
@@ -562,12 +505,9 @@ class SettingElem {
 		}
 	}
 
-
-	/** this initializes the element and its eventlisteners.*/
 	get elem() {
-		if (this.#wrapper !== false) return this.#wrapper; // return the element if already initialized
+		if (this.#wrapper !== false) return this.#wrapper;
 
-		// i only create the element after .elem is called so i don't pollute the dom with virutal elements when making settings
 		const classes = ['setting', 'settName', `safety-${this.props.safety}`, this.type];
 		if (this.props.button) classes.push('has-button');
 
@@ -587,7 +527,7 @@ class SettingElem {
 			wrapper.querySelector('.keyIcon').addEventListener('mousedown', () => {
 				triggerKeybindSettingDialog(this);
 			})
-			// The reason we do this is to transmit the value when updating the value, since there's no <input> for JS objects themselves.
+
 			wrapper.querySelector('input').setAttribute("value", JSON.stringify(this.props.value));
 
 			wrapper.querySelector('.wok-unbind-button').addEventListener('mousedown', () => {
@@ -606,7 +546,7 @@ class SettingElem {
 			}
 		}
 
-		if (typeof this.props.callback === 'undefined') this.props.callback = 'normal'; // default callback
+		if (typeof this.props.callback === 'undefined') this.props.callback = 'normal';
 
 		// @ts-ignore
 		wrapper[this.updateMethod] = (event: InputEvent) => {
@@ -619,18 +559,11 @@ class SettingElem {
 
 }
 
-/**
- * Updates the displayed keybinding conflict elements
- * @param key the object key of the setting that was changed
- * @param value the value of the setting after the change
- * @param oldValue the value of the setting before the change
- * @param baseWarningElement the initiator's baseWarningElement
- */
 function updateKeybindConflictDisplay(key: string, value: KeybindUserPref, oldValue: KeybindUserPref, baseWarningElement: Element) {
 	const conflictingOptions: string[] = [];
 	const warningElementsToModify: Element[] = [baseWarningElement];
 	Object.keys(settingsDesc).forEach((settingKey: keyof typeof settingsDesc) => {
-		// If the setting type is a keybind, and the setting isn't the initiator, and the keybind change matches another setting before/after the change
+
 		if (settingsDesc[settingKey].type === "keybind" && settingKey !== key && (objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, value) || objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, oldValue))) {
 			if (settingElementPairs[settingKey]) warningElementsToModify.push(settingElementPairs[settingKey].elem.querySelector('.wok-keybind-conflict'));
 			if (objectsAreEqual(userPrefs[settingKey] as KeybindUserPref, value)) conflictingOptions.push(settingsDesc[settingKey].title);
@@ -650,13 +583,8 @@ function updateKeybindConflictDisplay(key: string, value: KeybindUserPref, oldVa
 
 let capturingKeybindSetting: false | SettingElem = false;
 
-/**
- * True while the keybind-capture dialog is on screen. The preload's gameplay keydown handler
- * checks this instead of scanning the document for the dialog class on every keypress.
- */
 export const isKeybindCaptureActive = (): boolean => capturingKeybindSetting !== false;
 
-// Construct keybind overlay
 const keybindSettingDialogElement = createElement('div', {
 	class: ['customKeybindSettingWrapper']
 })
@@ -703,21 +631,14 @@ keybindSettingDialogCard.appendChild(keybindSettingDialogContent);
 
 keybindSettingDialogElement.appendChild(keybindSettingDialogCard);
 
-/**
- * Stores class name for active modifier elements
-*/
 const activeIndicatorClass = 'activeIndicator';
 
 function setKeybindSetting(settingElem: SettingElem, setting: KeybindUserPref) {
-	// We transmit the change through the <input> element to keep the flow the same; there's no <input> for JS objects themselves.
+
 	settingElem.elem.querySelector('input').setAttribute("value", JSON.stringify(setting));
 	settingElem.update(settingElem.elem, settingElem.props.callback);
 }
 
-/**
- * The handler for key rebinding. This is where the setting is updated and the reset function is called.
- * @param event KeyboardEvent that triggered the keybind dialog listener
- */
 function keybindSettingDialogListener(event: KeyboardEvent) {
 	event.stopImmediatePropagation();
 	event.preventDefault();
@@ -734,7 +655,7 @@ function keybindSettingDialogListener(event: KeyboardEvent) {
 
 document.addEventListener('keydown', (event) => {
 	if (capturingKeybindSetting !== false) {
-		// These event stoppers are here to prevent other keys being accessed while rebinding something.
+
 		event.stopImmediatePropagation();
 		event.preventDefault();
 
@@ -754,18 +675,12 @@ document.addEventListener('keydown', (event) => {
 	}
 })
 
-/**
- * Resets the classLists of the key modifier elements
- */
 function resetKeybindModifierIndicators() {
 	keybindSettingDialogCtrlIndicator.classList.remove(activeIndicatorClass);
 	keybindSettingDialogShiftIndicator.classList.remove(activeIndicatorClass);
 	keybindSettingDialogAltIndicator.classList.remove(activeIndicatorClass);
 }
 
-/**
- * Removes the keybind dialog, resets the auxilary variable, and removes the event listener.
- */
 function removeKeybindSettingDialog() {
 	resetKeybindModifierIndicators();
 	document.removeEventListener('keyup', keybindSettingDialogListener, true);
@@ -773,10 +688,6 @@ function removeKeybindSettingDialog() {
 	capturingKeybindSetting = false;
 }
 
-/**
- * Shows the rebind dialog, element is the SettingElem that requires the dialog.
- * @param element The setting that the dialog should use for rebinding.
- */
 function triggerKeybindSettingDialog(element: SettingElem) {
 	if (capturingKeybindSetting === false) {
 		capturingKeybindSetting = element;
@@ -787,13 +698,8 @@ function triggerKeybindSettingDialog(element: SettingElem) {
 	}
 }
 
-/** a settings generation helper. has some skeleton elements and methods that make them. purpose: prevents code duplication */
 const skeleton = {
-	/**
-	 * make a setting with some text (notice)
-	 * @param desc description of the notice
-	 * @param opts desc => description, iconHTML => icon's html, generate through skeleton's *icon methods
-	 */
+
 	notice: (notice: string, opts?: { desc?: string, iconHTML?: string }) => `
 	<div class="settName setting">
 		${(opts?.iconHTML ?? false) ? opts.iconHTML : ''}
@@ -801,19 +707,16 @@ const skeleton = {
 		${(opts?.desc ?? false) ? `<div class="setting-desc-new">${opts.desc}</div>` : ''}
 	</div>`,
 
-	/** wrapped safety warning icon (color gets applied through css) */
 	safetyIcon: (safety: string) => `
 	<span class="desc-icon" title="${safety}">
 		<svg xmlns="http://www.w3.org/2000/svg" height="24" width="24"><path d="M12 12.5ZM3.425 20.5Q2.9 20.5 2.65 20.05Q2.4 19.6 2.65 19.15L11.2 4.35Q11.475 3.9 12 3.9Q12.525 3.9 12.8 4.35L21.35 19.15Q21.6 19.6 21.35 20.05Q21.1 20.5 20.575 20.5ZM12 10.2Q11.675 10.2 11.463 10.412Q11.25 10.625 11.25 10.95V14.45Q11.25 14.75 11.463 14.975Q11.675 15.2 12 15.2Q12.325 15.2 12.538 14.975Q12.75 14.75 12.75 14.45V10.95Q12.75 10.625 12.538 10.412Q12.325 10.2 12 10.2ZM12 17.8Q12.35 17.8 12.575 17.575Q12.8 17.35 12.8 17Q12.8 16.65 12.575 16.425Q12.35 16.2 12 16.2Q11.65 16.2 11.425 16.425Q11.2 16.65 11.2 17Q11.2 17.35 11.425 17.575Q11.65 17.8 12 17.8ZM4.45 19H19.55L12 6Z"/></svg>
 	</span>`,
 
-	/** wrapped refresh icon (color gets applied through css) */
 	refreshIcon: () => `
 	<span class="desc-icon refresh-icon" title="Refresh page to see changes">
 		<svg xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 0 24 24" width="24px" fill="#000000"><path d="M12 6v1.79c0 .45.54.67.85.35l2.79-2.79c.2-.2.2-.51 0-.71l-2.79-2.79c-.31-.31-.85-.09-.85.36V4c-4.42 0-8 3.58-8 8 0 1.04.2 2.04.57 2.95.27.67 1.13.85 1.64.34.27-.27.38-.68.23-1.04C6.15 13.56 6 12.79 6 12c0-3.31 2.69-6 6-6zm5.79 2.71c-.27.27-.38.69-.23 1.04.28.7.44 1.46.44 2.25 0 3.31-2.69 6-6 6v-1.79c0-.45-.54-.67-.85-.35l-2.79 2.79c-.2.2-.2.51 0 .71l2.79 2.79c.31.31.85.09.85-.35V20c4.42 0 8-3.58 8-8 0-1.04-.2-2.04-.57-2.95-.27-.67-1.13-.85-1.64-.34z"/></svg>
 	</span>`,
 
-	/** make a settings category body element */
 	catBodElem: (elemClass: string, content: string) => createElement('div', {
 		class: `setBodH wok-set-body ${elemClass}`.split(' '),
 		innerHTML: content
@@ -842,29 +745,16 @@ const skeleton = {
 	}
 };
 
-/**
- * The function used to filter settings to match the search term
- * @param setting The setting that may be filtered out
- * @param query The search term
- * @returns Whether or not the setting meets the search term
- */
 function settingSearchFilter(setting: RenderReadySetting, query: string) {
 	return `${setting.title}${setting.desc ?? ""}`.toLowerCase().includes(query);
 }
 
-/**
- * HTML element that holds WOK's settings.
- */
 const wokSettingsHolder = createElement('div', {
 	class: ['wok-settings']
 })
 
-/**
- * Stores setting/element key pairs. Used for when setting changes affect different settings. (e.g. keybinding conflicts)
- */
 let settingElementPairs: { [key: string]: SettingElem } = {};
 
-/** Sidebar section the user last opened; survives re-renders so a refresh never dumps them back to the top. */
 let activeSettingsCategory = 0;
 
 export function rememberSettingsCategory(categoryIndex: number): void {
@@ -884,14 +774,11 @@ export function renderSettings() {
 	const settings = transformMarrySettings(userPrefs, settingsDesc, 'normal')
 		.filter(setting => settingIsVisible(setting.key, userPrefs))
 		.filter(setting => settingSearchFilter(setting, filter));
-	// Krunker's own results remain in #settHolder. Add nothing when the query has no WOK match
-	// instead of showing empty Performance and About sections beside unrelated game results.
+
 	if (filter.length > 0 && settings.length === 0) return;
 	const categoryBodies = new Map<number, HTMLElement>();
 	const categorySections = new Map<number, HTMLElement>();
-	// Sidebar layout: sections are chosen from a persistent nav rather than hunted for by
-	// scrolling through stacked collapsibles. One section is visible at a time, so the list the
-	// user is reading is never buried under the ones they are not.
+
 	const nav = createElement('div', { class: ['wok-settings-nav'] });
 	const pane = createElement('div', { class: ['wok-settings-pane'] });
 	wokSettingsHolder.append(nav, pane);
@@ -918,8 +805,6 @@ export function renderSettings() {
 		return body;
 	};
 
-	// Create visible sections in the declared navigation order before settings are appended. Building
-	// sections from the settings object instead made the first setting in each category control the UI order.
 	for (const categoryIndex of categoryNames.keys()) {
 		const hasVisibleSetting = settings.some(setting => (setting.cat ?? 0) === categoryIndex);
 		if (hasVisibleSetting || (filter.length === 0 && categoryIndex === ABOUT_CATEGORY_INDEX)) ensureCategory(categoryIndex);
@@ -931,8 +816,6 @@ export function renderSettings() {
 		ensureCategory(setting.cat ?? 0).appendChild(settingElement.elem);
 	}
 
-	// Links and file shortcuts live in About: they are reference material, not things anyone
-	// came into settings to change, so they must not sit above the settings people did come for.
 	if (filter.length === 0) {
 		const aboutCategory = ensureCategory(ABOUT_CATEGORY_INDEX);
 		const supportHolder = createElement('div', { class: ['wok-button-holder', 'setting', 'settName'], innerHTML: '<span class="buttons-title">Links:</span>'});

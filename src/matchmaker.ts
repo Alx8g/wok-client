@@ -42,18 +42,11 @@ export {
 } from './matchmaker-data.ts';
 
 const MATCHMAKER_REQUEST_TIMEOUT_MS = 10_000;
-/**
- * The searching state has to be visible long enough to read.
- *
- * A search with warm filters and a cached ping resolves in a few hundred milliseconds, so the
- * searching view was being replaced before the user could see it had appeared at all - the
- * feedback existed but nobody could perceive it. Holding the result briefly costs nothing a
- * player notices and is the difference between "it searched" and "something flashed".
- */
+
 const MATCHMAKER_MINIMUM_SEARCH_VISIBLE_MS = 750;
 
 const MATCHMAKER_GAME_LIST_URL = 'https://matchmaker.krunker.io/game-list';
-/** How long the "Search Cancelled" confirmation stays up before it clears itself. */
+
 const MATCHMAKER_CANCELLED_POPUP_MS = 1_400;
 
 class MatchmakerHttpError extends Error {
@@ -73,7 +66,6 @@ class MatchmakerRequestSupersededError extends Error {
 	}
 }
 
-// Hacky, but needed (?) until there's a better system to store state
 let openServerWindow: boolean;
 let matchmakerRequest: AbortController | undefined;
 let matchmakerRequestGeneration = 0;
@@ -81,8 +73,6 @@ let matchmakerBindListener: AbortController | undefined;
 let matchmakerConnectionObserver: MutationObserver | undefined;
 const popupLifecycle = new MatchmakerPopupLifecycle();
 let currentPopupSession = 0;
-
-// https://greasyfork.org/en/scripts/468482-kraxen-s-krunker-utils
 
 function abortActiveMatchmakerSearch() {
 	matchmakerRequestGeneration++;
@@ -101,10 +91,6 @@ function disconnectMatchmakerConnectionObserver() {
 	matchmakerConnectionObserver = undefined;
 }
 
-/**
- * Close every matchmaker-owned resource without making a sound or opening another window.
- * This is deliberately safe to call from several independent lifecycle events.
- */
 export function teardownMatchmakerPopup() {
 	const dismissal = popupLifecycle.teardown();
 	stopMatchmakerTicker();
@@ -123,15 +109,14 @@ function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
 	if (dismissal.abortSearch) abortActiveMatchmakerSearch();
 	detachMatchmakerPopupListeners();
 	disconnectMatchmakerConnectionObserver();
-	// Remove first. Joining navigates synchronously below, and the old popup must never survive
-	// long enough to be painted over the destination page.
+
 	popupElement.remove();
 	if (dismissal.playSelect) window.playSelect();
 	if (dismissal.joinGame && currentMatch !== 'none') {
 		window.location.href = `https://krunker.io/?game=${currentMatch}`;
 		return;
 	}
-	// A cancelled search is confirmed briefly instead of vanishing without explanation.
+
 	if (dismissal.abortSearch) {
 		showMatchmakerCancelledPopup();
 		return;
@@ -139,17 +124,12 @@ function applyMatchmakerPopupDismissal(dismissal: MatchmakerPopupDismissal) {
 	if (dismissal.openServerWindow) window.openServerWindow(0);
 }
 
-/**
- * Acts on the user's input for the matchmaker popup
- * @param accept whether or not the new game was accepted
- */
 function decideMatchmakerDecision(session: number, accept: boolean) {
 	applyMatchmakerPopupDismissal(
 		popupLifecycle.decide(session, accept, openServerWindow)
 	);
 }
 
-/** Replace the popup and invalidate the old request as one synchronous transition. */
 function replaceMatchmakerPopup() {
 	popupLifecycle.replace();
 	stopMatchmakerTicker();
@@ -160,13 +140,10 @@ function replaceMatchmakerPopup() {
 	popupElement.remove();
 }
 
-// ID of the container element, used to construct and to check if it's attached to the DOM.
 const popupContainerID = "matchmakerPopupContainer";
 
-// Create popup element
 const popupElement = createElement('div', { id: popupContainerID });
 
-// One strip across the top: it sweeps while searching, then turns solid in the colour of the outcome.
 const popupProgress = createElement('div', { id: "matchmakerSearchProgress" });
 popupProgress.appendChild(createElement('div', { id: "matchmakerSearchProgressBar" }));
 popupElement.appendChild(popupProgress);
@@ -210,8 +187,6 @@ function createMatchmakerButton(id: string, accept: boolean): MatchmakerPopupBut
 	button.appendChild(label);
 	button.appendChild(hotkey);
 
-	// Keep each pointer's originating session. A replacement view or another simultaneous pointer
-	// cannot turn an old Cancel/Join interaction into an action on the current popup.
 	const pointerSessions = new Map<number, number>();
 	button.addEventListener('pointerdown', event => {
 		if (
@@ -237,8 +212,7 @@ function createMatchmakerButton(id: string, accept: boolean): MatchmakerPopupBut
 		decideMatchmakerDecision(session, accept);
 	});
 	button.addEventListener('click', event => {
-		// Physical pointer activation was handled above with a pointer-specific session. Keep the
-		// zero-detail path for accessibility/programmatic activation, scoped to the visible view.
+
 		if (event.detail !== 0) return;
 		if (!popupElement.isConnected) {
 			teardownMatchmakerPopup();
@@ -272,7 +246,7 @@ const popupHint = createElement('div', { id: "matchmakerPopupHint" });
 popupBody.appendChild(popupHint);
 
 let hotkeyLabels: MatchmakerHotkeyLabels = { accept: 'ENTER', cancel: 'ESCAPE', search: 'F1' };
-/** The chip whose value keeps counting down while a lobby is offered. */
+
 let countdownValue: HTMLElement | undefined;
 let popupTicker: number | undefined;
 let popupAutoDismiss: number | undefined;
@@ -319,7 +293,7 @@ function observeMatchmakerPopupConnection(session: number) {
 }
 
 document.addEventListener('pointerlockchange', handleMatchmakerPointerLockChange, { capture: true });
-// pagehide only fires once navigation is actually proceeding; beforeunload can be cancelled.
+
 window.addEventListener('pagehide', handleMatchmakerPageTeardown);
 window.addEventListener('wok-matchmaker-disabled', handleMatchmakerPageTeardown);
 
@@ -364,10 +338,6 @@ function renderMatchmakerView(view: MatchmakerView) {
 	applyMatchmakerAction(popupCancelOption, view.cancel);
 }
 
-/**
- * Handles keyboard input for the matchmaker
- * @param event The keyboard event that initiated the handler
- */
 function handleMatchmakerBind(event: KeyboardEvent, session: number) {
 	if (!popupLifecycle.isCurrent(session)) return;
 	if (!popupElement.isConnected || document.pointerLockElement) {
@@ -377,10 +347,10 @@ function handleMatchmakerBind(event: KeyboardEvent, session: number) {
 	const matchesAcceptKey = keyboardEventMatchesCustomSetting(confirmKey, event);
 	const matchesCancelKey = keyboardEventMatchesCustomSetting(cancelKey, event);
 	if (!matchesAcceptKey && !matchesCancelKey) return;
-	// The popup owns these keys. Do not let Krunker's menu/game handlers also act on the same press.
+
 	event.preventDefault();
 	event.stopImmediatePropagation();
-	// A held cancel key must not immediately dismiss the short cancellation confirmation.
+
 	if (event.repeat) return;
 	decideMatchmakerDecision(session, matchesAcceptKey);
 }
@@ -393,16 +363,14 @@ function handleMatchmakerPointerDown(event: PointerEvent, session: number) {
 	}
 	const target = event.target instanceof Node ? event.target : null;
 	if (!matchmakerPointerDownIsOutside(popupElement, target)) return;
-	// An outside press means the player chose the game/menu rather than the popup. Tear down silently
-	// and let that same press continue, so entering gameplay never requires a second click.
+
 	teardownMatchmakerPopup();
 }
 
 function showMatchmakerPopup(view: MatchmakerView): number | undefined {
 	stopMatchmakerTicker();
 	clearMatchmakerAutoDismiss();
-	// A result replaces the previous view synchronously. Taking the old state here prevents a late
-	// input callback from applying the previous view's action to the newly rendered one.
+
 	popupLifecycle.replace();
 	detachMatchmakerPopupListeners();
 	disconnectMatchmakerConnectionObserver();
@@ -440,11 +408,6 @@ function showMatchmakerPopup(view: MatchmakerView): number | undefined {
 	return session;
 }
 
-/**
- * Sets the matchmaker element styles & content, shows the popup
- * @param game The game that was retrieved by the custom matchmaker
- * @param latencyMs The measured latency of the game's region, when one is known
- */
 function showMatchmakerLobbyPopup(game: IMatchmakerGame, latencyMs: number | undefined) {
 	const mapIndex = MATCHMAKER_MAP_ICON_INDICES.indexOf(game.map);
 	popupElement.style.backgroundImage = mapIndex >= 0
@@ -471,10 +434,6 @@ function showMatchmakerNoGamesPopup(criteria: IMatchmakerCriteria) {
 	showMatchmakerPopup(matchmakerNoGamesView(criteria, hotkeyLabels, openServerWindow));
 }
 
-/**
- * Waits out the remainder of the minimum searching window. Aborts immediately if the search was
- * superseded, so a rapid re-search is never delayed by the previous one's floor.
- */
 function holdSearchingViewUntilReadable(shownAt: number, request: AbortController): Promise<void> {
 	const remaining = MATCHMAKER_MINIMUM_SEARCH_VISIBLE_MS - (Date.now() - shownAt);
 	if (remaining <= 0 || request.signal.aborted) return Promise.resolve();
@@ -514,7 +473,7 @@ function showMatchmakerErrorPopup(message: string) {
 }
 
 function showMatchmakerCancelledPopup() {
-	// currentMatch is left alone: a cancelled search should not un-reject the lobby the user last skipped.
+
 	popupElement.style.backgroundImage = '';
 	const session = showMatchmakerPopup(
 		matchmakerCancelledView(hotkeyLabels)
@@ -528,10 +487,6 @@ function showMatchmakerCancelledPopup() {
 	}, MATCHMAKER_CANCELLED_POPUP_MS);
 }
 
-/**
- * The last found match ID, used to filter matchmaker results and to handle acceptance or rejection of the new lobby
- * - When set to "none", popup interactions act like no lobby was found.
- */
 let currentMatch = '';
 
 function assertCurrentMatchmakerRequest(
@@ -589,10 +544,6 @@ function matchmakerHotkeyLabel(value: unknown, fallback: string): string {
 		: fallback;
 }
 
-/**
- * Retrieves a lobby using the custom matchmaker, presents the user with a popup
- * @param _userPrefs User Preferences Object
- */
 export async function fetchGame(_userPrefs: UserPrefs) {
 	if (_userPrefs.matchmaker !== true) {
 		teardownMatchmakerPopup();
@@ -607,7 +558,6 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 		search: matchmakerHotkeyLabel(_userPrefs.matchmakerKey, '')
 	};
 
-	// Replacing a popup for a retry is not a user cancellation.
 	replaceMatchmakerPopup();
 	const criteria = {
 		regions: _userPrefs.matchmaker_regions,
@@ -659,12 +609,6 @@ export async function fetchGame(_userPrefs: UserPrefs) {
 			return;
 		}
 
-		// The fresh list is used only to revalidate the candidates we already ranked. Fetch and
-		// parse it while region latency is being measured instead of after that IPC round trip;
-		// both operations depend only on the initial candidate set. If the list fetch fails, fall
-		// back to the old sequential behavior, where the first request's result is the freshest.
-		// Attach both handlers immediately. The refresh can fail before latency measurement
-		// finishes, so leaving rejection handling until a later await can emit an unhandled rejection.
 		const freshListPromise = loadMatchmakerGameList(
 			request,
 			requestGeneration,

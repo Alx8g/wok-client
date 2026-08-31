@@ -137,7 +137,6 @@ test('discovery reads the name out of Krunker game activity and then stops', () 
 		}
 	});
 
-	// Krunker has not defined it yet, then defines it before it knows the player.
 	assert.deepEqual(names, []);
 	activity = () => ({ id: 'FRA:h83cx', map: 'Subzero' });
 	timers.shift()?.();
@@ -168,7 +167,6 @@ test('discovery survives a hostile activity object and gives up eventually', () 
 	assert.deepEqual(names, []);
 	assert.equal(timers.length, 0, 'it stops rather than polling a broken game forever');
 
-	// Values that are not a usable account name are refused.
 	for (const user of ['', '   ', 'not a name', 42, null, 'x'.repeat(64)]) {
 		const found: string[] = [];
 		startRealIdentityDiscovery({
@@ -279,8 +277,6 @@ test('discovery does not promote a generated alias over the saved Lamborghini ca
 		harness.runFrames();
 		assert.equal(accountName.data, 'Goat');
 
-		// The menu reader sees WOK's generated Goat until it reads the source with the display swap
-		// temporarily restored. The real Premium alias is published only after this feedback-loop check.
 		harness.setRenderedIdentity(() => ({ name: premiumAlias || accountName.data }));
 		harness.runTimers();
 		assert.equal(accountName.data, 'Goat', 'the generated alias must be restored and reapplied, not become a new rule');
@@ -341,7 +337,7 @@ test('a name that only arrives once the game has loaded still starts the swap', 
 	const root = element('BODY', [chat]);
 	const harness = createEnvironment(root);
 	try {
-		// Krunker has not published getGameActivity yet, which is the normal case at DOM-ready.
+
 		applyCustomIdentity({ customName: 'Nightfall' }, harness.environment);
 		harness.runFrames();
 		assert.equal(harness.observerCount, 0, 'nothing to search for yet, so nothing is observed');
@@ -362,7 +358,7 @@ test('a manually configured real name is used when the game never reports one', 
 	const root = element('BODY', [chat]);
 	const harness = createEnvironment(root);
 	try {
-		// No getGameActivity at all: this is the fallback the setting exists for.
+
 		applyCustomIdentity({ customName: 'Nightfall', realName: 'Rocketeer' }, harness.environment);
 		harness.runFrames();
 		assert.equal(chat.data, 'Nightfall: gg');
@@ -430,7 +426,6 @@ test('text this client copies back out is read with the real name in place', () 
 		const copied = withRealIdentity(() => scoreboardName.data);
 		assert.equal(copied, 'Rocketeer', 'a pasted match result must not rename anyone');
 
-		// The display swap comes straight back afterwards.
 		harness.runFrames();
 		assert.equal(scoreboardName.data, 'Nightfall');
 	} finally {
@@ -487,15 +482,12 @@ test('teardown disconnects, restores, and clears the shared state', () => {
 	assert.deepEqual(getCustomIdentity(), { clan: '', name: '' });
 	assert.deepEqual(getRealIdentityForDisplay(), { clan: '', name: '' });
 
-	// Repeating teardown is harmless.
 	stopCustomIdentityDisplay();
 	assert.equal(harness.disconnectCount, 1);
 });
 
 test('discovery keeps watching past the first minute, because the name only exists in a match', () => {
-	// Field evidence: getGameActivity() carries `user` only once the player is in a game. A
-	// ceiling of sixty attempts expired while the player was still in the menu, so by the time the
-	// name existed nothing was watching and the feature silently required manual entry.
+
 	const timers: (() => void)[] = [];
 	let activity: unknown;
 	let discovered = '';
@@ -508,7 +500,6 @@ test('discovery keeps watching past the first minute, because the name only exis
 		setTimer: callback => { timers.push(callback); return timers.length; }
 	});
 
-	// Two hundred attempts of menu time - well past the old ceiling.
 	for (let attempt = 0; attempt < 200; attempt++) {
 		const next = timers.shift();
 		assert.ok(next, `discovery stopped watching after ${attempt} attempts`);
@@ -516,8 +507,6 @@ test('discovery keeps watching past the first minute, because the name only exis
 	}
 	assert.equal(discovered, '', 'nothing to find while still in the menu');
 
-	// The player finally joins a match.
-	// getGameActivity resolves to Krunker's function, which returns the activity.
 	activity = () => ({ id: 'SYD:t2d9f', user: 'lamboiigoni', map: 'Sandstorm' });
 	const next = timers.shift();
 	assert.ok(next, 'discovery must still be watching when the match starts');

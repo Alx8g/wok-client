@@ -1,12 +1,6 @@
 import type { CalibrationResult, CalibrationState } from './calibration.ts';
 import type { GraphicsProfileState, GraphicsSelection } from './graphics-profile.ts';
 
-/**
- * Builds the plain-text diagnostics block behind "Copy diagnostics report". Everything a remote
- * report needs to be actionable instead of vibes: hardware identity, which backend is live and
- * why, and calibration evidence including artifact flags. Pure and Electron-free so the exact
- * output is testable.
- */
 export interface DiagnosticsReportInput {
 	appVersion: string;
 	calibration?: CalibrationState;
@@ -21,8 +15,7 @@ export interface DiagnosticsReportInput {
 }
 
 const REPORTED_PREFERENCE_KEYS = [
-	// Which monitor the launch targeted: "it opened on the wrong screen" reports are unactionable
-	// without it, since the key also says whether the choice was made at all.
+
 	'display',
 	'fpsUncap',
 	'fullscreen',
@@ -53,8 +46,7 @@ function calibrationResultLine(result: CalibrationResult): string {
 function calibrationSection(calibration: CalibrationState | undefined): string[] {
 	if (!calibration) return ['CALIBRATION: never run'];
 	const lines = [`CALIBRATION: ${calibration.status}${calibration.confirmation ? ` (confirmation: ${calibration.confirmation})` : ''}`];
-	// A completion without a benchmark cycle (no backend comparison available, audit C2) must
-	// read differently from a measured run that produced no results.
+
 	if (calibration.completionReason) lines.push(`  ${calibration.completionReason}`);
 	for (const result of calibration.results) lines.push(calibrationResultLine(result));
 	if (calibration.recommendedSelection) lines.push(`  recommended: ${calibration.recommendedSelection.candidate.id}`);
@@ -65,8 +57,7 @@ function calibrationSection(calibration: CalibrationState | undefined): string[]
 export function buildDiagnosticsReport(input: DiagnosticsReportInput): string {
 	const profile = input.graphicsProfile;
 	const quarantined = profile.blockedBackends.length > 0 ? profile.blockedBackends.join(', ') : 'none';
-	// The full failure history, not just active quarantines: manual selections record failures
-	// without ever being quarantined (audit C5), and this line is where they become actionable.
+
 	const backendFailures = profile.backendFailures.length > 0
 		? profile.backendFailures
 			.map(failure => `${failure.backend} x${failure.failureCount}${failure.reason ? ` — ${failure.reason}` : ''}`)

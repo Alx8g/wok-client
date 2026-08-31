@@ -13,9 +13,7 @@ const result = await build({
 	format: 'esm',
 	logLevel: 'info',
 	metafile: true,
-	// Whitespace/syntax minification only: identifiers must stay readable because the shipped
-	// calibration chunk embeds workload functions via Function.prototype.toString and re-evaluates
-	// them (scripts/verify-bundle.mjs), which breaks if esbuild renames internal references.
+
 	minifyWhitespace: true,
 	minifySyntax: true,
 	minifyIdentifiers: false,

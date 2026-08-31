@@ -22,7 +22,6 @@ export const GAMEPLAY_BRANDING_CSS = `
 }
 `;
 
-/** Insert one static, click-through brand strip between Krunker's timer and match details. */
 export function mountGameplayBranding(targetDocument: Document = document): boolean {
 	if (targetDocument.getElementById(GAMEPLAY_BRANDING_ID)) return true;
 	const holder = targetDocument.getElementById('topLeftMatchData');
@@ -48,7 +47,6 @@ export function mountGameplayBranding(targetDocument: Document = document): bool
 	return true;
 }
 
-/** Observe only until Krunker's static HUD shell has been parsed, then leave no running work. */
 export function installGameplayBranding(): () => void {
 	if (mountGameplayBranding()) return () => {};
 	if (typeof MutationObserver !== 'function') return () => {};

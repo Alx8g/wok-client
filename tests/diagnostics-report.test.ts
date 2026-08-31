@@ -45,7 +45,7 @@ test('surfaces non-quarantining manual backend failures in the failure history',
 	input.graphicsSelection = { backend: 'd3d11', preference: 'd3d11', reason: 'Using the manually selected d3d11 graphics backend.', source: 'manual' };
 
 	const report = buildDiagnosticsReport(input);
-	// Recorded and visible, yet never quarantined (audit C5).
+
 	assert.ok(report.includes('quarantined backends: none'));
 	assert.ok(report.includes('backend failures: d3d11 x1 — GPU process crashed with exit code 5.'));
 	assert.ok(report.includes('last launch: gpu-failure — GPU process crashed with exit code 5.'));

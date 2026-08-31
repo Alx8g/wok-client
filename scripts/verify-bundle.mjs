@@ -1,14 +1,4 @@
-// Verifies a bundle/ build (scripts/bundle.mjs) against src/ without launching the app:
-//
-// 1. Entry outputs exist and every deliberate lazy boundary (dynamic import() site) stayed
-//    outside the eager entry bundles, so bundling cannot flatten the startup path.
-// 2. The serialized-module mechanism survived bundling: the calibration trial page built by
-//    the real shipped calibration-window chunk embeds calibration-workload/-benchmark
-//    functions via Function.prototype.toString, and this script evaluates that embedded
-//    script as plain JavaScript and proves it emits the identical WebGL command stream as
-//    the raw src/ modules (the same digest check as tests/calibration-workload.test.ts).
-//
-// Exits non-zero with a message on the first violated invariant.
+
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -19,8 +9,6 @@ import { createWorkload, createWorkloadSpec, createWorkloadSpin, mulberry32, WOR
 const rootDirectory = join(import.meta.dirname, '..');
 const metafile = JSON.parse(readFileSync(join(rootDirectory, 'bundle', 'metafile.json'), 'utf-8'));
 
-// --- 1. entries + preserved lazy boundaries -------------------------------------------------
-
 const lazyBoundaries = [
 	'src/settingsui.ts',
 	'src/matchmaker.ts',
@@ -29,7 +17,6 @@ const lazyBoundaries = [
 	'src/calibration-window.ts'
 ];
 
-/** Transitive input set of an output file: its own inputs plus every statically imported chunk's. */
 function eagerInputsOf(outputPath, seen = new Set()) {
 	if (seen.has(outputPath)) return new Set();
 	seen.add(outputPath);
@@ -91,11 +78,8 @@ for (const boundary of lazyBoundaries) {
 	);
 }
 
-// main.mjs must point Electron at the bundled preload, never the raw TypeScript one.
 const mainSource = readFileSync(join(rootDirectory, 'bundle', 'main.mjs'), 'utf-8');
 assert.ok(mainSource.includes('preload.mjs'), 'bundle/main.mjs does not reference preload.mjs');
-
-// --- 2. serialized-module equivalence against the shipped chunk -----------------------------
 
 const calibrationWindowOutput = Object.keys(metafile.outputs).find(outputPath =>
 	Object.keys(metafile.outputs[outputPath].inputs).some(inputPath => inputPath.replaceAll('\\', '/') === 'src/calibration-window.ts'));
@@ -119,7 +103,6 @@ assert.equal(embedded.mulberry32(123)(), mulberry32(123)(), 'embedded mulberry32
 assert.equal(embedded.createWorkloadSpin(WORKLOAD_SEED, 500)(), createWorkloadSpin(WORKLOAD_SEED, 500)(),
 	'embedded createWorkloadSpin diverged from src');
 
-// Recording GL + digest, mirroring tests/calibration-workload.test.ts.
 function createRecordingGl() {
 	const calls = [];
 	let objectCounter = 0;
@@ -180,8 +163,6 @@ function renderDigest(createWorkloadImplementation) {
 assert.equal(renderDigest(embedded.createWorkload), renderDigest(createWorkload),
 	'the bundled trial page workload no longer emits the identical command stream as src');
 
-// A null-GL trial exercises runBenchmarkTrial end-to-end, proving its BENCHMARK_* free
-// variables all resolve inside the embedded script scope.
 const trial = await embedded.runBenchmarkTrial({
 	environment: { devicePixelRatio: 1, drawingBufferHeight: 0, drawingBufferWidth: 0 },
 	getTimerQueryExt: () => null,

@@ -25,7 +25,7 @@ import { parseUserPreferencePatch } from '../src/user-preferences.ts';
 test('trims surrounding whitespace before anything else', () => {
 	assert.equal(sanitizeCustomName('   Rocketeer   '), 'Rocketeer');
 	assert.equal(sanitizeCustomClan('\t WOK \n'), 'WOK');
-	// Trimming happens first so padding never consumes the length budget.
+
 	assert.equal(sanitizeCustomName(`   ${'a'.repeat(CUSTOM_NAME_MAX_LENGTH)}   `), 'a'.repeat(CUSTOM_NAME_MAX_LENGTH));
 });
 
@@ -39,10 +39,10 @@ test('enforces the length limits', () => {
 test('keeps only characters a Krunker-style handle can contain', () => {
 	assert.equal(sanitizeCustomName('Rocket_Man-7'), 'Rocket_Man-7');
 	assert.equal(sanitizeCustomClan('W_O-K'), 'W_O-K');
-	// Inner whitespace and punctuation are dropped rather than kept or escaped.
+
 	assert.equal(sanitizeCustomName('Rocket Man'), 'RocketMan');
 	assert.equal(sanitizeCustomName('a.b,c;d'), 'abcd');
-	// Nothing that could break out of the settings UI markup can survive.
+
 	assert.equal(sanitizeCustomName('"><img src=x>'), 'imgsrcx');
 	assert.equal(sanitizeCustomClan("'onerror'"), 'onerr');
 	assert.equal(sanitizeCustomName('héllo→ü'), 'hllo');
@@ -71,7 +71,7 @@ test('empty means unset, and so does anything that sanitizes to nothing', () => 
 
 test('resolves an identity from a preferences object', () => {
 	assert.deepEqual(resolveCustomIdentity({ customClan: 'WOK', customName: 'Rocketeer' }), { clan: 'WOK', name: 'Rocketeer' });
-	// A preferences object that somehow carries junk still yields a safe identity.
+
 	assert.deepEqual(resolveCustomIdentity({ customClan: '<b>', customName: 'a'.repeat(64) }), { clan: 'b', name: 'a'.repeat(CUSTOM_NAME_MAX_LENGTH) });
 	assert.equal(customIdentitiesAreEqual({ clan: 'WOK', name: 'Bob' }, { clan: 'WOK', name: 'Bob' }), true);
 	assert.equal(customIdentitiesAreEqual({ clan: 'WOK', name: 'Bob' }, { clan: 'WOK', name: 'Rob' }), false);
@@ -89,8 +89,7 @@ test('accepts only already-clean stored values', () => {
 	assert.equal(parseCustomIdentityPreference('customClan', 'WOK'), 'WOK');
 	assert.equal(parseCustomIdentityPreference('customName', ''), '');
 	assert.equal(parseCustomIdentityPreference('customClan', ''), '');
-	// Values that would need sanitizing are dropped, so the empty default applies instead of a
-	// silently mangled one.
+
 	assert.equal(parseCustomIdentityPreference('customName', ' Rocketeer '), undefined);
 	assert.equal(parseCustomIdentityPreference('customName', 'a'.repeat(17)), undefined);
 	assert.equal(parseCustomIdentityPreference('customClan', 'WOKKK!'), undefined);
@@ -120,14 +119,14 @@ test('the manual real-identity keys follow the same rules as the custom ones', (
 
 	assert.equal(parseCustomIdentityPreference('realName', 'Rocketeer'), 'Rocketeer');
 	assert.equal(parseCustomIdentityPreference('realClan', 'WOK'), 'WOK');
-	// realClan is a clan key, so it gets the short ceiling rather than the name one.
+
 	assert.equal(parseCustomIdentityPreference('realClan', 'WOKKK!'), undefined);
 	assert.equal(parseCustomIdentityPreference('realName', ' Rocketeer '), undefined);
 
 	assert.deepEqual(resolveConfiguredRealIdentity({ realClan: 'OLD', realName: 'Rocketeer' }), { clan: 'OLD', name: 'Rocketeer' });
 	assert.deepEqual(resolveConfiguredRealIdentity({}), EMPTY_CUSTOM_IDENTITY);
 	assert.deepEqual(resolveConfiguredRealIdentity(undefined), EMPTY_CUSTOM_IDENTITY);
-	// The custom half and the manual real half are read independently of each other.
+
 	assert.deepEqual(resolveCustomIdentity({ realClan: 'OLD', realName: 'Rocketeer' }), EMPTY_CUSTOM_IDENTITY);
 });
 
@@ -156,7 +155,7 @@ test('recognises something that could be the account name Krunker prints', () =>
 	for (const candidate of ['Rocketeer', 'KraXen72', 'a', 'x'.repeat(32), 'ünïcode', 'no.dots?fine']) {
 		assert.equal(isPlausibleRealName(candidate), true, JSON.stringify(candidate));
 	}
-	// Blanks, sentences, markup and oversized values are not account names.
+
 	for (const candidate of ['', ' ', 'two words', 'x'.repeat(33), '<b>', 'a&b', 'quote"', 42, null, undefined, {}]) {
 		assert.equal(isPlausibleRealName(candidate), false, JSON.stringify(candidate));
 	}
@@ -164,7 +163,7 @@ test('recognises something that could be the account name Krunker prints', () =>
 
 test("reads the player's name out of Krunker's game activity, defensively", () => {
 	assert.equal(readGameActivityName(() => ({ class: { name: 'Triggerman' }, user: 'KraXen72' })), 'KraXen72');
-	// Everything Krunker could hand back instead. None of it may throw or leak a bad needle.
+
 	assert.equal(readGameActivityName(() => ({ user: '' })), '');
 	assert.equal(readGameActivityName(() => ({ user: 'not signed in' })), '');
 	assert.equal(readGameActivityName(() => ({})), '');
@@ -179,15 +178,15 @@ test('recovers the clan tag from the game printing it beside the real name', () 
 	assert.equal(extractClanTag('[OLD] Rocketeer', 'Rocketeer'), 'OLD');
 	assert.equal(extractClanTag('[OLD]Rocketeer: gg', 'Rocketeer'), 'OLD');
 	assert.equal(extractClanTag('  [O_1] Rocketeer  ', 'Rocketeer'), 'O_1');
-	// Someone else's tag, or a bracketed word that is not one.
+
 	assert.equal(extractClanTag('[OLD] Bandit', 'Rocketeer'), '');
 	assert.equal(extractClanTag('[OLD] Rocketeer2', 'Rocketeer'), '');
-	// Unbracketed is too ambiguous to act on: chat says things like this constantly.
+
 	assert.equal(extractClanTag('gg Rocketeer', 'Rocketeer'), '');
 	assert.equal(extractClanTag('[WAYTOOLONG] Rocketeer', 'Rocketeer'), '');
 	assert.equal(extractClanTag('[OLD] Rocketeer', ''), '');
 	assert.equal(extractClanTag(undefined, 'Rocketeer'), '');
-	// A name carrying regex syntax is matched literally rather than compiled into a pattern.
+
 	assert.equal(extractClanTag('[OLD] a.b', 'a.b'), 'OLD');
 	assert.equal(extractClanTag('[OLD] axb', 'a.b'), '');
 });
@@ -197,7 +196,7 @@ test('merges what the user configured with what the game reported', () => {
 		mergeRealIdentityCandidates({ clan: 'OLD', name: 'Rocketeer' }, { clan: 'NEW', name: 'KraXen72' }),
 		{ clans: ['OLD', 'NEW'], names: ['Rocketeer', 'KraXen72'] }
 	);
-	// Duplicates and blanks never become a pattern alternative that matches everywhere.
+
 	assert.deepEqual(
 		mergeRealIdentityCandidates({ clan: '', name: 'Rocketeer' }, { clan: '', name: 'Rocketeer' }),
 		{ clans: [], names: ['Rocketeer'] }
@@ -209,14 +208,12 @@ test('merges what the user configured with what the game reported', () => {
 });
 
 test('placeholder names are never taken for the player, so discovery keeps looking', () => {
-	// Field evidence: Krunker reports 'Guest' before the account session exists. Discovery stops
-	// on its first hit, so latching onto the placeholder meant the real name was never seen and
-	// the custom identity replaced a name the player never had.
+
 	assert.equal(isPlausibleRealName('Guest'), false);
 	assert.equal(isPlausibleRealName('guest'), false);
 	assert.equal(isPlausibleRealName('Player'), false);
 	assert.equal(isPlausibleRealName('lamboiigoni'), true);
-	// Only the exact placeholder is rejected; a real account may legitimately contain the word.
+
 	assert.equal(isPlausibleRealName('Guest123'), true);
 	assert.equal(readGameActivityName(() => ({ user: 'Guest' })), '');
 	assert.equal(readGameActivityName(() => ({ user: 'lamboiigoni' })), 'lamboiigoni');

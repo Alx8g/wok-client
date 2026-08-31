@@ -27,7 +27,7 @@ export interface GraphicsProfileState {
 	driverFingerprint: string;
 	recommendedBackend: AppliedGraphicsBackend;
 	recommendationReason: string;
-	/** Active quarantines retained for compatibility with calibration callers. */
+
 	blockedBackends: AppliedGraphicsBackend[];
 	backendFailures: GraphicsBackendFailure[];
 	retainedBackend?: AppliedGraphicsBackend;
@@ -119,16 +119,10 @@ export function graphicsHardwareFingerprint(devices: GraphicsDevice[]): string {
 export interface IntegratedGpuAssessment {
 	discreteVendorPresent: boolean;
 	integratedActive: boolean;
-	/** True when the Intel adapter is active while an NVIDIA or AMD adapter is also present. */
+
 	suspectedIntegratedFallback: boolean;
 }
 
-/**
- * Flags the one clearly detectable dual-GPU misconfiguration: an NVIDIA or AMD adapter is present
- * but the Intel adapter is the active one, so the game is probably running on the power-saving
- * GPU. Advisory only — vendor IDs cannot distinguish every hybrid layout (Intel Arc discrete,
- * AMD APU plus AMD discrete), so this never drives an automatic action.
- */
 export function assessIntegratedGpuUsage(devices: GraphicsDevice[], webglRenderer = ''): IntegratedGpuAssessment {
 	const discreteVendorPresent = devices.some(device => device.vendorId === NVIDIA_VENDOR_ID || device.vendorId === AMD_VENDOR_ID);
 	const activeDevices = devices.filter(device => device.active);
@@ -137,8 +131,7 @@ export function assessIntegratedGpuUsage(devices: GraphicsDevice[], webglRendere
 	const integratedActive = activeDevices.length > 0
 		? activeDevices.every(device => device.vendorId === INTEL_VENDOR_ID)
 		: rendererLooksIntel;
-	// A renderer string that contradicts the device flags (ANGLE already reporting the discrete
-	// vendor) clears the suspicion rather than warning against direct evidence.
+
 	const suspectedIntegratedFallback = discreteVendorPresent && integratedActive && !rendererLooksDiscrete;
 	return { discreteVendorPresent, integratedActive, suspectedIntegratedFallback };
 }
@@ -185,8 +178,6 @@ function activeQuarantinedBackends(state: GraphicsProfileState, now: number): Ap
 		if (failure.backend !== 'default' && failure.quarantineUntil > now) active.add(failure.backend);
 	}
 
-	// Profiles written before bounded quarantine had only blockedBackends. Treat those
-	// entries as one short cooldown instead of preserving a permanent block.
 	for (const backend of state.blockedBackends) {
 		if (
 			backend !== 'default'
@@ -427,17 +418,13 @@ function recordGpuFailure(
 	quarantine: boolean,
 	now: number
 ): GraphicsProfileState {
-	// Chromium can report several teardown events for one failed GPU process. Once this
-	// launch has recorded its confirmed failure, later same-run events are diagnostics,
-	// not independent launches that should lengthen the backend quarantine.
+
 	if (!state.launchPending && state.lastLaunchOutcome === 'gpu-failure') return state;
 
 	const previous = state.backendFailures.find(failure => failure.backend === backend);
 	const previousIsRecent = previous && now <= previous.quarantineUntil + GRAPHICS_QUARANTINE_MAX_MS;
 	const failureCount = previousIsRecent ? previous.failureCount + 1 : 1;
-	// A non-quarantining record (and any 'default' failure, which has no safer fallback) keeps
-	// the failure history without ever blocking the backend: quarantineUntil never lies in the
-	// future, so activeQuarantinedBackends ignores the entry.
+
 	const quarantineUntil = !quarantine || backend === 'default' ? now : now + graphicsBackendCooldownMs(failureCount);
 	const failure: GraphicsBackendFailure = {
 		backend,
@@ -472,13 +459,6 @@ export function recordGraphicsGpuFailure(
 	return recordGpuFailure(state, backend, reason, true, now);
 }
 
-/**
- * Records a GPU-process failure for a manually selected backend without quarantining it (audit
- * C5): the user's explicit choice keeps applying on the next launch, but the crash enters the
- * failure history so the settings advisory and the diagnostics report can show a crash-looping
- * manual selection instead of dropping the evidence. A later clean launch of the same backend
- * clears the history exactly like a quarantined one.
- */
 export function recordManualGraphicsGpuFailure(
 	state: GraphicsProfileState,
 	backend: AppliedGraphicsBackend,
@@ -488,11 +468,6 @@ export function recordManualGraphicsGpuFailure(
 	return recordGpuFailure(state, backend, reason, false, now);
 }
 
-/**
- * Advisory for a crash-looping manual backend selection. Manual selections are exempt from
- * quarantine by design, so this advisory (surfaced through gpuAdvisory) and the diagnostics
- * failure history are the only places their GPU-process failures become visible.
- */
 export function describeManualBackendFailures(
 	state: GraphicsProfileState,
 	selection: Pick<GraphicsSelection, 'backend' | 'source'>

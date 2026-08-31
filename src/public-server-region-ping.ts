@@ -8,9 +8,9 @@ export interface PublicServerRegionPingEntry {
 }
 
 export interface PublicServerRegionSortOptions {
-	/** Additional labels used by the Public screen for non-geographic sections. */
+
 	fixedCategories?: readonly string[];
-	/** Additional region codes or labels recognised as geographic. */
+
 	geographicRegions?: readonly string[];
 }
 
@@ -97,13 +97,11 @@ function buildFixedCategorySet(additionalCategories: readonly string[] = []): Re
 	]);
 }
 
-/** Resolve a displayed code/name/endpoint alias to the canonical code used by the latency service. */
 export function resolvePublicServerRegionCode(value: unknown): string | undefined {
 	if (typeof value !== 'string' || value.trim().length === 0) return undefined;
 	return buildGeographicRegionLookup().get(normalizeRegionLabel(value));
 }
 
-/** Classify a Public-screen section without treating unknown labels as geographic. */
 export function classifyPublicServerRegion(
 	value: unknown,
 	options: PublicServerRegionSortOptions = {}
@@ -127,16 +125,11 @@ function numericPing(value: unknown): number | undefined {
 	return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
-/** Format a measured ping for the compact label used beside a Public-screen region. */
 export function formatPublicServerPingLabel(value: unknown, unknownLabel = '—'): string {
 	const ping = numericPing(value);
 	return ping === undefined ? unknownLabel : `${Math.round(ping)} ms`;
 }
 
-/**
- * Return a new list with fixed sections first, measured geographic regions next, and unresolved
- * rows last. Every tie, including the unresolved section, keeps the source order.
- */
 export function sortPublicServerRegions<T extends PublicServerRegionPingEntry>(
 	entries: readonly T[],
 	options: PublicServerRegionSortOptions = {}

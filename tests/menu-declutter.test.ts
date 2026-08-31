@@ -681,8 +681,6 @@ test('collapses empty ad slots, removes the hidden promo grid column, and moves 
 	assert.equal(fixture.streamsOverlay.attributes.has(MENU_DECLUTTER_STREAMS_RAISED_ATTRIBUTE), true);
 	assert.equal(fixture.streamsOverlay.attributes.get(MENU_DECLUTTER_STREAMS_WIDTH_ATTRIBUTE), '408');
 
-	// The hidden row no longer participates in the right-panel flow, so Live Streams is the first
-	// visible child in the former ad area. The original panel and button nodes stay untouched.
 	assert.deepEqual(
 		fixture.panel.children.filter(child => !child.attributes.has(MENU_DECLUTTER_COLLAPSE_ATTRIBUTE)),
 		[fixture.streamsOverlay]

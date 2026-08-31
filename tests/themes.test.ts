@@ -31,11 +31,6 @@ function readAsset(name: string): string {
 const PALETTE_ASSETS = BUNDLED_THEMES.map(theme => themeAssetName(theme.id));
 const ALL_THEME_ASSETS = [...THEME_LAYER_ASSETS, ...PALETTE_ASSETS];
 
-/**
- * The class and id hooks Krunker's own stylesheets actually declare, generated from the live files
- * by scripts/fetch-krunker-css-inventory.mjs. Committed rather than fetched so the suite stays
- * offline; refresh it when Krunker ships a UI change.
- */
 interface KrunkerCssInventory {
 	classes: string[];
 	customProperties: string[];
@@ -48,7 +43,6 @@ const KRUNKER_CSS: KrunkerCssInventory = JSON.parse(
 	readFileSync(join(import.meta.dirname, 'fixtures', 'krunker-css-inventory.json'), { encoding: 'utf-8' })
 );
 
-/** Strip comments, then pull the selector of every top-level rule. */
 function selectorsOf(css: string): string[] {
 	const withoutComments = css.replaceAll(/\/\*[\s\S]*?\*\//gu, '');
 	assert.ok(!/@(media|supports|container)/u.test(withoutComments),
@@ -59,7 +53,6 @@ function selectorsOf(css: string): string[] {
 		.flatMap(selector => selector.split(',').map(part => part.trim()));
 }
 
-/** Every rule in a stylesheet as a selector/body pair, one entry per comma-separated selector. */
 function rulesOf(css: string): { body: string; selector: string }[] {
 	const withoutComments = css.replaceAll(/\/\*[\s\S]*?\*\//gu, '');
 	return [...withoutComments.matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
@@ -68,7 +61,6 @@ function rulesOf(css: string): { body: string; selector: string }[] {
 		.filter(rule => rule.selector.length > 0 && !rule.selector.startsWith('@'));
 }
 
-/** The `.class` and `#id` hooks a selector depends on. Element and pseudo parts are not hooks. */
 function hooksOf(selector: string): { classes: string[]; ids: string[] } {
 	return {
 		classes: [...selector.matchAll(/\.([A-Za-z][\w-]*)/gu)].map(match => match[1]),
@@ -76,16 +68,11 @@ function hooksOf(selector: string): { classes: string[]; ids: string[] } {
 	};
 }
 
-/*
- * A selector is WOK's own if it names an element WOK adds to the page. WOK's surfaces and
- * Krunker's are themed by different files under different rules, so the boundary is checked rather
- * than trusted.
- */
 const WOK_SELECTOR_TOKENS = [
-	'wok-', // settings, splash stage, diagnostics, and weapon loader
-	'matchmaker', // src/matchmaker.ts builds the whole popup; Krunker has no matchmaker of its own
-	'matchResultButton', // src/preload.ts
-	'refresh-popup', // src/settingsui.ts, the settings refresh notice
+	'wok-',
+	'matchmaker',
+	'matchResultButton',
+	'refresh-popup',
 	'customKeybindSetting' // src/settingsui.ts, the keybind capture dialog
 ];
 
@@ -94,41 +81,33 @@ function isWokOwnedSelector(selector: string): boolean {
 	return WOK_SELECTOR_TOKENS.some(token => selector.includes(token));
 }
 
-/** Whether every hook a selector names is one Krunker's stylesheets actually declare. */
 function isLiveKrunkerSelector(selector: string): boolean {
 	const hooks = hooksOf(selector);
 	return hooks.classes.every(name => KRUNKER_CSS.classes.includes(name))
 		&& hooks.ids.every(name => KRUNKER_CSS.ids.includes(name));
 }
 
-/*
- * Hooks whose colour or presence is the information, not the decoration. A theme repainting these
- * would be repainting what the player is reading: where the enemies are, how much health is left,
- * who is on which team, what is locked, who just died. Ads are on the list for a different reason:
- * hiding them is a separate, off-by-default setting and must never ride in on a theme.
- */
 const OFF_LIMITS_HOOKS = [
-	// Aim and hit feedback.
+
 	'crosshair', 'aimDot', 'aimRecticle', 'recticleImg', 'hitmarker', 'vignette', 'bloodDisplay',
-	// Health and armour.
+
 	'nHealthBar', 'nHealthBarE', 'nHealthBarSeg', 'nHpBSeg', 'bottomLeftHealth', 'maxHP',
 	'bhHolder', 'bhArm', 'bhBody', 'bhHead', 'bhLeg', 'spectHPB', 'spectHPBI', 'spectHPV',
-	// Who is who: leaderboard names, team totals and team wins are all colour-coded.
+
 	'leaderName', 'leaderNameM', 'leaderNameF',
 	'newLeaderName', 'newLeaderNameM', 'newLeaderNameF',
 	'teamTotalN0', 'teamTotalN1', 'teamWin0', 'teamWin1', 'teamNm', 'specTeam0', 'specTeam1',
-	// Killfeed and death report text.
+
 	'killfeedMsg', 'death-report-text', 'death-row-user-stat',
-	// Ownership and progress states.
+
 	'lockedCard', 'lockedClass', 'lockedSkin', 'lockedClassText', 'classLimitIcon', 'bpCardLock',
-	// Ammo and timers.
+
 	'ammoVal', 'ammoMax', 'timerVal', 'roundsVal', 'strike-timer',
-	// Ads.
+
 	'adIcon', 'adIconL', 'adIconSq', 'eventAd', 'freeKRAd', 'homeStoreAd', 'bpAdIcon',
 	'krDiscountAd', 'updateAdIcon', 'topLeftAdHolder', 'topRightAdHolder'
 ];
 
-/** Properties that would remove information rather than restyle it. */
 const REMOVAL_DECLARATIONS = [
 	/display\s*:\s*none/u,
 	/visibility\s*:\s*hidden/u,
@@ -136,11 +115,6 @@ const REMOVAL_DECLARATIONS = [
 	/content\s*:\s*none/u
 ];
 
-/*
- * backdrop-filter is the one genuinely expensive thing a theme can ask for, so where it is allowed
- * is a list rather than a judgement call. Every entry is a surface that only exists in a menu or a
- * popup: nothing on this list is on screen while the player is shooting.
- */
 const BLUR_ALLOWED_SELECTORS = new Set([
 	'#menuWindow',
 	'#popupContent',
@@ -154,7 +128,6 @@ const BLUR_ALLOWED_SELECTORS = new Set([
 
 type Rgba = [number, number, number, number];
 
-/** Parse the colour notations the palettes use: #rgb, #rrggbb, rgb() and rgba(). */
 function parseColour(value: string): Rgba | undefined {
 	const text = value.trim();
 	const hex = /^#([0-9a-f]{3}|[0-9a-f]{6})$/iu.exec(text);
@@ -174,7 +147,6 @@ function parseColour(value: string): Rgba | undefined {
 	return [parts[0], parts[1], parts[2], parts.length > 3 ? parts[3] : 1];
 }
 
-/** Composite a possibly translucent colour over an opaque one. */
 function over(top: Rgba, bottom: Rgba): Rgba {
 	return [
 		top[0] * top[3] + bottom[0] * (1 - top[3]),
@@ -192,14 +164,12 @@ function relativeLuminance([red, green, blue]: Rgba): number {
 	return 0.2126 * channel(red) + 0.7152 * channel(green) + 0.0722 * channel(blue);
 }
 
-/** WCAG 2 contrast ratio, 1 (identical) to 21 (black on white). */
 function contrast(foreground: Rgba, background: Rgba): number {
 	const [lighter, darker] = [relativeLuminance(foreground), relativeLuminance(background)]
 		.sort((first, second) => second - first);
 	return (lighter + 0.05) / (darker + 0.05);
 }
 
-/** Read a palette's `:root` block into a name/value map. */
 function paletteValues(css: string): Map<string, string> {
 	const root = /:root\s*\{([^}]*)\}/u.exec(css.replaceAll(/\/\*[\s\S]*?\*\//gu, ''));
 	assert.ok(root, 'a palette must declare its values in a :root block');
@@ -208,10 +178,8 @@ function paletteValues(css: string): Map<string, string> {
 	return values;
 }
 
-/** A game frame is neither black nor white, so HUD legibility is judged against mid grey. */
 const GAMEPLAY_STAND_IN: Rgba = [110, 110, 110, 1];
 
-/** The near-black outline Krunker bakes into every label that sits on artwork. */
 const ART_OUTLINE: Rgba = [32, 32, 32, 1];
 
 test('every bundled theme ships the palette and shared layers it resolves to', () => {
@@ -311,7 +279,7 @@ test('every hook the game layer targets exists in the committed Krunker styleshe
 				+ 'Re-run scripts/fetch-krunker-css-inventory.mjs and fix the rule; a renamed hook is a rule that does nothing.');
 		}
 	}
-	// Guards the guard: a parser that stopped finding hooks would make this test vacuously pass.
+
 	assert.ok(hookedSelectors > 100, `only ${hookedSelectors} game-layer selectors carry a class or id hook`);
 });
 
@@ -375,13 +343,6 @@ test('backdrop-filter is confined to surfaces that only exist in menus', () => {
 	assert.ok(blurred > 0, 'nothing reads --wok-blur any more; drop the variable or restore the rules');
 });
 
-/*
- * The failure mode a full-game theme has that a panel-only theme did not: a palette that reads
- * beautifully on WOK's own surfaces can still paint white text onto a white menu window, and
- * nobody finds out until they open the shop. Each pair below is a place the layers actually draw
- * one of these colours on the other, so the arithmetic is the same check a person would do by
- * squinting, done for every theme on every commit.
- */
 test('every palette keeps its text readable on the surface it is drawn on', () => {
 	for (const theme of BUNDLED_THEMES) {
 		const values = paletteValues(readAsset(themeAssetName(theme.id)));
@@ -426,7 +387,7 @@ test('the committed Krunker inventory records what it was generated from', () =>
 		assert.match(source.sha256, /^[0-9a-f]{64}$/u);
 		assert.ok(source.bytes > 0);
 	}
-	// A truncated fetch would silently shrink the allowlist and let dead selectors through.
+
 	assert.ok(KRUNKER_CSS.ids.length > 400, `only ${KRUNKER_CSS.ids.length} ids in the inventory`);
 	assert.ok(KRUNKER_CSS.classes.length > 900, `only ${KRUNKER_CSS.classes.length} classes in the inventory`);
 });
@@ -501,9 +462,9 @@ test('id and filename predicates stay disjoint', () => {
 test('a css swapper selection carries over to the theme preference exactly once', () => {
 	assert.equal(migrateThemePreference({ cssSwapper: 'mine.css' }), 'mine.css');
 	assert.equal(migrateThemePreference({ cssSwapper: 'None' }), THEME_NONE);
-	// Already migrated: the new key wins and the stale one is ignored.
+
 	assert.equal(migrateThemePreference({ cssSwapper: 'mine.css', theme: 'wok' }), undefined);
-	// Never had the old key, so there is nothing to migrate.
+
 	assert.equal(migrateThemePreference({ theme: 'wok' }), undefined);
 	assert.equal(migrateThemePreference({}), undefined);
 });
@@ -528,7 +489,7 @@ test('the generated user template is a working theme plus the documented contrac
 	for (const variable of THEME_VARIABLES) {
 		assert.ok(template.includes(variable.name), `the template never mentions ${variable.name}`);
 		assert.ok(template.includes(variable.description), `the template does not explain ${variable.name}`);
-		// Real values, not blanks: the template has to render as a theme the moment it is selected.
+
 		assert.match(template, new RegExp(`${variable.name}\\s*:\\s*\\S`, 'u'));
 	}
 	assert.ok(template.includes('.wok-settings'), 'the template must carry the base layer, not just describe it');

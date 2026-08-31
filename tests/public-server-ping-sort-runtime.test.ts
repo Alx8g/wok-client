@@ -384,7 +384,7 @@ test('keeps timed-out regions at the bottom in their original unresolved order',
 		await flushRuntime();
 
 		assert.deepEqual(headingLabels(holder), ['Frankfurt', 'Sydney', 'Moon Base', 'Tokyo']);
-		// Observer callbacks caused by WOK's own first reorder must not redefine source order.
+
 		harness.triggerMutations();
 		await flushRuntime();
 		assert.deepEqual(headingLabels(holder), ['Frankfurt', 'Sydney', 'Moon Base', 'Tokyo']);

@@ -10,11 +10,6 @@ import {
 	startIdentityRewriteEngine
 } from '../src/identity-rewrite.ts';
 
-/*
- * A DOM small enough to read. The engine only ever touches nodeType, childNodes, data, tagName,
- * hasAttribute and isConnected, so these plain objects exercise the real code paths.
- */
-
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
 const COMMENT_NODE = 8;
@@ -127,12 +122,11 @@ test('replaces whole-token names and leaves lookalikes alone', () => {
 	assert.equal(swapRocketeer('Bandit killed Rocketeer'), 'Bandit killed Nightfall');
 	assert.equal(swapRocketeer('nice shot Rocketeer!'), 'nice shot Nightfall!');
 
-	// Another player whose name merely contains yours is a different player.
 	assert.equal(swapRocketeer('Rocketeer2'), undefined);
 	assert.equal(swapRocketeer('xRocketeer'), undefined);
 	assert.equal(swapRocketeer('Rocketeer_alt'), undefined);
 	assert.equal(swapRocketeer('Rocketeer-alt'), undefined);
-	// Case-sensitive: Krunker upper-cases with CSS, which does not change the text.
+
 	assert.equal(swapRocketeer('rocketeer'), undefined);
 	assert.equal(swapRocketeer('Bandit killed Sniper'), undefined);
 });
@@ -153,7 +147,7 @@ test('reports one combined range for a bracketed clan and name', () => {
 		fragments: [{ end: 19, start: 4 }],
 		text: 'say [WOK] Nightfall!'
 	});
-	// The range is one whole identity fragment, not one range per character.
+
 	assert.equal(rewrite('[OLD] Rocketeer: gg')?.fragments.length, 1);
 });
 
@@ -190,12 +184,12 @@ test('replaces the clan tag only where it is unambiguously a clan tag', () => {
 	assert.ok(swapRocketeer);
 	assert.equal(swapRocketeer('[OLD] Rocketeer'), '[WOK] Nightfall');
 	assert.equal(swapRocketeer('[OLD]Rocketeer: hello'), '[WOK]Nightfall: hello');
-	// A tag rendered in its own element, with the brackets coming from CSS.
+
 	assert.equal(swapRocketeer('OLD'), 'WOK');
 	assert.equal(swapRocketeer('  OLD  '), '  WOK  ');
-	// Unbracketed, but glued to the player's real name, so it is the tag and not a word.
+
 	assert.equal(swapRocketeer('OLD Rocketeer'), 'WOK Nightfall');
-	// The same three letters in a sentence are just three letters.
+
 	assert.equal(swapRocketeer('that OLD map again'), undefined);
 	assert.equal(swapRocketeer('[OLD] Bandit'), '[WOK] Bandit');
 });
@@ -227,11 +221,11 @@ test('matches any of several candidate names, longest first', () => {
 
 test('there is nothing to build when nothing would change', () => {
 	assert.equal(createIdentityTextRewriter({ clans: [], displayClan: '', displayName: '', names: [] }), undefined);
-	// Set, but with no idea what to look for.
+
 	assert.equal(createIdentityTextRewriter({ clans: [], displayClan: 'WOK', displayName: 'Nightfall', names: [] }), undefined);
-	// Set to exactly what the game already prints.
+
 	assert.equal(createIdentityTextRewriter({ clans: [], displayClan: '', displayName: 'Rocketeer', names: ['Rocketeer'] }), undefined);
-	// Blank candidates never become an empty alternative that would match everywhere.
+
 	assert.equal(createIdentityTextRewriter({ clans: [''], displayClan: 'WOK', displayName: '', names: [''] }), undefined);
 });
 
@@ -248,7 +242,7 @@ test('sweeps the existing tree on the first frame and reports what it holds', ()
 	const harness = createHarness(root, swapRocketeer);
 
 	assert.deepEqual(harness.observedOptions, { characterData: true, childList: true, subtree: true });
-	// Nothing happens until a frame: the engine batches instead of walking inside the callback.
+
 	assert.equal(chat.data, 'Rocketeer: gg');
 
 	harness.runFrames();
@@ -266,7 +260,7 @@ test('a burst of mutations costs one frame, and only the mutated subtrees are wa
 	harness.childAdded(root, killFeed);
 	harness.childAdded(root, chat);
 	const untouched = element('DIV', [text('Rocketeer elsewhere')]);
-	// Present in the tree but never announced: the engine walks what it was told about.
+
 	root.childNodes.push(untouched);
 
 	const before = harness.frameCount;
@@ -290,13 +284,11 @@ test('the engine ignores the mutations its own writes produce', () => {
 	assert.equal(chat.data, 'Nightfall: gg');
 	const callsAfterFirstPass = rewriteCalls;
 
-	// Exactly what a real MutationObserver delivers after the engine writes.
 	harness.characterDataChanged(chat, 'Nightfall: gg');
 	harness.runFrames(4);
 	assert.equal(chat.data, 'Nightfall: gg');
 	assert.equal(rewriteCalls, callsAfterFirstPass, 'an echo of our own write is recognised, not re-rewritten');
 
-	// Krunker rewriting the same node is not an echo and is processed normally.
 	harness.characterDataChanged(chat, 'Rocketeer: wp');
 	harness.runFrames();
 	assert.equal(chat.data, 'Nightfall: wp');
@@ -398,7 +390,6 @@ test('detached nodes are swept out so the tracking map cannot grow forever', () 
 	harness.runFrames(4);
 	assert.equal(harness.engine.rewrittenNodeCount, 6);
 
-	// Chat lines scroll off and Krunker drops them.
 	for (const line of lines.slice(0, 5)) line.isConnected = false;
 	harness.childAdded(root, text('Rocketeer again'));
 	harness.runFrames(4);
@@ -414,8 +405,6 @@ test('restoreAll hands back exactly what the game wrote, and only that', () => {
 	harness.runFrames();
 	assert.equal(mine.data, 'Nightfall: gg');
 
-	// Krunker replaced this node's text after the engine touched it; that value is already
-	// correct and must survive the restore untouched.
 	overwritten.data = 'Bandit: wp';
 
 	harness.engine.restoreAll();
@@ -424,7 +413,6 @@ test('restoreAll hands back exactly what the game wrote, and only that', () => {
 	assert.equal(overwritten.data, 'Bandit: wp');
 	assert.equal(harness.engine.rewrittenNodeCount, 0);
 
-	// refresh() re-applies from scratch.
 	harness.engine.refresh();
 	harness.runFrames(4);
 	assert.equal(mine.data, 'Nightfall: gg');
@@ -447,7 +435,6 @@ test('stopping detaches the observer, drops queued work and cancels the pending 
 	harness.runFrames(4);
 	assert.deepEqual(allText(root), ['Rocketeer: gg', 'Rocketeer: again']);
 
-	// Repeating teardown is harmless.
 	harness.engine.stop();
 	assert.equal(harness.disconnectCount, 1);
 });

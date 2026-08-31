@@ -126,11 +126,6 @@ import {
 	type RuntimeProfilePaths
 } from './runtime-profiler.ts';
 
-// Diagnostic-only userData override for isolated test profiles. Inert unless WOK_USER_DATA_DIR is
-// set to an absolute path. Must run before any app.getPath('userData') use so config, caches, and
-// the single-instance lock all land in the override directory. sessionData is pointed there too:
-// it defaults to the original userData location and would otherwise keep writing Chromium caches
-// into the real profile.
 const userDataOverrideDir = process.env.WOK_USER_DATA_DIR;
 if (userDataOverrideDir) {
 	if (pathIsAbsolute(userDataOverrideDir)) {
@@ -142,9 +137,8 @@ if (userDataOverrideDir) {
 	}
 }
 
-// Process start is needed by both ordinary startup profiling and optional diagnostic marks.
 const processStartWallClockMs = estimateProcessStartWallClockMs(Date.now(), process.uptime());
-// Diagnostic-only startup marks. Inert unless WOK_PERF_MARKS is set in the environment.
+
 const perfMarksEnabled = Boolean(process.env.WOK_PERF_MARKS);
 const perfExitAfterLoadMs = Number.parseInt(process.env.WOK_PERF_EXIT_MS ?? '', 10);
 let perfExitScheduled = false;
@@ -156,10 +150,6 @@ function logPerfMark(name: string, wallClockMs = Date.now()) {
 
 logPerfMark('main-module-eval-start');
 
-// Diagnostic-only Chromium content tracing. Inert unless WOK_TRACE_MS is set in the environment.
-// WOK_TRACE_MS=<n> records a trace for n ms, starting WOK_TRACE_DELAY_MS (default 3000) after
-// did-finish-load, writes it to WOK_TRACE_OUT (or a temp file when unset), then quits the app.
-// WOK_TRACE_CATEGORIES optionally overrides the default comma-separated category list.
 const traceDurationMs = Number.parseInt(process.env.WOK_TRACE_MS ?? '', 10);
 const traceEnabled = Number.isFinite(traceDurationMs) && traceDurationMs > 0;
 const parsedTraceDelayMs = Number.parseInt(process.env.WOK_TRACE_DELAY_MS ?? '', 10);
@@ -206,7 +196,7 @@ async function runDiagnosticTrace(): Promise<void> {
 const configPath = pathJoin(app.getPath('userData'), 'config');
 const legacyRoamingConfigPath = pathJoin(app.getPath('appData'), 'crankshaft', 'config');
 const legacyDocumentsConfigPath = pathJoin(app.getPath('documents'), 'Crankshaft');
-const windowScale = 0.8; // In windowed mode, the window will cover 80% of the height/width of the screen.
+const windowScale = 0.8;
 
 let clientUrlStartup: string | null = null;
 const clientProtocols = [APP_PROTOCOL, LEGACY_APP_PROTOCOL] as const;
@@ -298,7 +288,6 @@ if (!gotTheLock) {
 		else clientUrlStartup = url;
 	});
 
-	// macOS delivers custom protocol links through open-url rather than process.argv.
 	app.on('open-url', (event, rawUrl) => {
 		event.preventDefault();
 		const url = parseClientUrl(rawUrl);
@@ -312,9 +301,6 @@ if (!gotTheLock) {
 		}
 	});
 
-// Phase 1 copies only settings.json and filters.txt, the top-level legacy files this
-// module reads or seeds before command-line switches and window creation. All unknown
-// regular files and directory trees migrate in phase 2 once a window exists.
 let deferredMigrationSources: LegacyConfigSource[] = [];
 try {
 	const migration = migrateLegacyConfigsPhaseOne(configPath, [
@@ -339,33 +325,29 @@ const filtersPath = pathJoin(configPath, 'filters.txt');
 const cssPath = pathJoin(configPath, 'css');
 const themeTemplatePath = pathJoin(cssPath, THEME_TEMPLATE_FILE);
 
-// Declared with the other paths rather than beside the window code: ensureCssStorage() reads the
-// bundled theme assets during startup preference handling, long before a window exists.
 const $assets = pathResolve(import.meta.dirname, '..', 'assets');
 
 const settingsSkeleton = {
 	fpsUncap: true,
 	rawMouseInput: true,
 	graphicsBackend: 'auto',
-	// Mark selected menu controls and promotions as hidden while preserving their original DOM.
+
 	wokMenuDeclutter: true,
-	// Public screen only: pin fixed categories, then show and sort geographic regions by ping.
+
 	wokPublicServerPingSort: true,
 	motionBlur: false,
 	motionBlurStrength: 50,
 	motionBlurQuality: 'native',
 	menuTimer: false,
 	quickClassPicker: false,
-	// Local display only: swapped into this renderer's own UI, never sent to Krunker. Empty = real
-	// one. realName/realClan are the manual fallback for what to search for; normally detected.
+
 	customName: '',
 	customClan: '',
 	customIdentityRgbCycle: false,
 	realName: '',
 	realClan: '',
-	fullscreen: 'windowed', // windowed, maximized, fullscreen, borderless
-	// 'auto' means the OS primary display, which is what every launch did before this preference
-	// existed. Any other value is a display key; see src/display-selection.ts.
+	fullscreen: 'windowed',
+
 	display: DISPLAY_PREFERENCE_AUTO,
 	resourceSwapper: false,
 	theme: THEME_NONE,
@@ -378,7 +360,7 @@ const settingsSkeleton = {
 	overrideURL: undefined as string | undefined,
 	alwaysWaitForDevTools: false,
 	safeFlags_disableBackgrounding: true,
-	// Chromium already GPU-rasterizes by default; true would only force past the driver blocklist.
+
 	safeFlags_gpuRasterizing: false,
 	safeFlags_highPerformanceGpu: true,
 	experimentalFlags_experimental: false,
@@ -424,9 +406,7 @@ if (!existsSync(settingsPath)) writeFileSync(settingsPath, JSON.stringify(settin
 try {
 	const rawSettings: unknown = JSON.parse(readFileSync(settingsPath, { encoding: 'utf-8' }));
 	const migrateMatchmakerMapScope = shouldMigrateMatchmakerMapScope(rawSettings);
-	// The CSS swapper became the theme picker; a profile that selected a .css file keeps it. The
-	// rewrite that drops the old key is triggered by 'cssSwapper' being in the obsolete-key set,
-	// which is true exactly when this returns a value.
+
 	const migratedTheme = migrateThemePreference(rawSettings);
 	settingsNeedCanonicalRewrite = containsObsoletePreferences(rawSettings) || migrateMatchmakerMapScope;
 	Object.assign(userPrefs, parseUserPreferencePatch(rawSettings));
@@ -438,11 +418,6 @@ try {
 
 const startupProfilePath = pathJoin(configPath, 'startup-profile.json');
 
-/**
- * How long this machine's recent launches actually took. Drives which launch animation is chosen,
- * so a fast machine is never made to wait for one and a slow machine is never left staring at a
- * static screen. See src/startup-profile.ts.
- */
 function loadStartupProfile(): StartupProfile {
 	if (!existsSync(startupProfilePath)) return createStartupProfile();
 	try {
@@ -587,7 +562,6 @@ function normalizeBenchmarkMetrics(value: unknown): CalibrationMetrics {
 	};
 }
 
-/** Applies a main-process-detected trial rejection (for example a powerMonitor AC/battery flip). */
 function markMetricsRejected(metrics: CalibrationMetrics, reason: CalibrationTrialRejectionReason): CalibrationMetrics {
 	return {
 		...metrics,
@@ -619,13 +593,11 @@ if (
 	queuedCalibrationCandidate = getPendingCalibrationCandidate(calibrationState);
 }
 
-// A provisional profile whose confirmation evidence stalls for 14 days is parked unwatched (design §4.4).
 if (calibrationState && calibrationProvisionalExpired(calibrationState)) {
 	calibrationState = markCalibrationUnwatched(calibrationState);
 	writeCalibrationStateSync(calibrationState);
 }
 
-// A measured backend/frame policy is useful independently of the removed visual-reduction preset.
 const activeCalibrationSelection = calibrationState?.status === 'complete'
 	? calibrationState.activeSelection
 	: undefined;
@@ -665,12 +637,6 @@ function ensureFilterStorage() {
 `);
 }
 
-/**
- * The user's theme folder. Any .css dropped here shows up in the Theme picker; the template is a
- * working copy of a bundled theme (its palette plus the shared layers) so that writing one is
- * editing values rather than reverse-engineering selectors. It is only written when missing, so
- * deleting it is how a user asks for a fresh one after an update.
- */
 function ensureCssStorage() {
 	if (!existsSync(cssPath)) mkdirSync(cssPath, { recursive: true });
 	if (existsSync(themeTemplatePath)) return;
@@ -696,17 +662,10 @@ function ensureOptionalFeatureStorage() {
 if (userPrefs.customFilters) ensureFilterStorage();
 if (userPrefs.theme !== THEME_NONE) ensureCssStorage();
 
-
-// convert legacy settings files to newer formats
 let modifiedSettings = settingsNeedCanonicalRewrite;
 
 const indexedUserPrefs = userPrefs as UserPrefs;
 
-// Existing profiles may carry defaults this project no longer ships (Terms-sensitive features
-// and the default-on safeFlags_gpuRasterizing era). Each baseline version resets them once and
-// then preserves any later explicit user choice; see src/settings-baseline.ts. A marker that
-// exists but cannot be parsed leaves everything untouched: never rewrite preferences on
-// ambiguous evidence.
 let settingsBaselineMarker: SettingsBaselineMarker | undefined;
 let settingsBaselineMarkerUnreadable = false;
 if (existsSync(safetyBaselinePath)) {
@@ -726,28 +685,24 @@ for (const [key, value] of Object.entries(settingsBaselinePlan.patch)) {
 	modifiedSettings = true;
 }
 
-// initially, fullscreen was a true/false, now it's "windowed", "fullscreen" or "borderless"
 if (typeof userPrefs.fullscreen === 'boolean') {
 	modifiedSettings = true;
 	if (userPrefs.fullscreen === true) userPrefs.fullscreen = 'fullscreen'; else userPrefs.fullscreen = 'windowed';
 }
 
-// initially, hideAds was a true/false, now it's "block", "hide" or "off"
 if (typeof userPrefs.hideAds === 'boolean') {
 	modifiedSettings = true;
 	if (userPrefs.hideAds === true) userPrefs.hideAds = 'hide'; else userPrefs.hideAds = 'off';
 }
 
-// Move untouched legacy splash defaults to the WOK palette while preserving custom colours.
 if (userPrefs.immersiveSplashBackgroundColor === '#171717') {
 	userPrefs.immersiveSplashBackgroundColor = '#0A0A0A';
 	modifiedSettings = true;
 }
-// write the new settings format to the settings.json file right after the conversion
+
 if (modifiedSettings) writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
 if (settingsBaselinePlan.marker) {
-	// May overwrite a version-1 marker during the upgrade; the preference patch above has
-	// already been applied and persisted, so the marker is safe to advance.
+
 	writeFileSync(safetyBaselinePath, JSON.stringify(settingsBaselinePlan.marker, null, 2), { encoding: 'utf-8' });
 }
 
@@ -809,28 +764,18 @@ function isTrustedGameIpcSender(event: IpcMainEvent | IpcMainInvokeEvent): boole
 	return parseKrunkerUrl(event.senderFrame.url, true) !== undefined;
 }
 
-/*
- * Stuck-load diagnostics from the renderer's splash deadline.
- *
- * A launch that never becomes usable cannot be reproduced on demand, so the renderer always sends
- * the overrun summary - what the readiness predicate could see at the deadline, and which page it
- * was looking at - and sends the rest of the trace only under WOK_SPLASH_LOG. Printing it here puts
- * it alongside the other WOK diagnostics rather than in a DevTools console nobody had open.
- */
 ipcMain.on('wok_loading_diag', (event, line: unknown) => {
 	if (!isTrustedGameIpcSender(event)) return;
 	if (typeof line !== 'string' || line.length === 0 || line.length > 2_000) return;
 	console.log(`[wok-load] ${line}`);
 });
 
-// Diagnostic-only identity-source hunt (WOK_FIND_IDENTITY).
 if (process.env.WOK_FIND_IDENTITY) {
 	ipcMain.on('wok_identity_probe', (event, text: unknown) => {
 		if (!isTrustedGameIpcSender(event)) return;
 		if (typeof text !== 'string' || text.length > 100_000) return;
 		console.log(text);
-		// Also append to a file: a probe whose findings only reach stdout is lost the moment the
-		// client is closed, which is exactly when a short diagnostic session ends.
+
 		try {
 			const probePath = pathJoin(configPath, 'identity-probe.log');
 			writeFileSync(probePath, `${new Date().toISOString()}
@@ -843,7 +788,6 @@ ${text}
 	});
 }
 
-// Diagnostic-only Krunker menu probe (WOK_DUMP_DOM). Prints the real markup of a menu region.
 if (process.env.WOK_DUMP_DOM) {
 	ipcMain.on('wok_dom_probe', (event, text: unknown) => {
 		if (!isTrustedGameIpcSender(event)) return;
@@ -852,8 +796,6 @@ if (process.env.WOK_DUMP_DOM) {
 	});
 }
 
-// Diagnostic-only gameplay frame log (WOK_FPS_LOG). Emits one line per sampled window so a
-// backend A/B can be played uninterrupted; reading the overlay by hand perturbs the tail.
 if (process.env.WOK_FPS_LOG) {
 	ipcMain.on('wok_fps_log', (event, sample: unknown) => {
 		if (!isTrustedGameIpcSender(event)) return;
@@ -864,7 +806,6 @@ if (process.env.WOK_FPS_LOG) {
 	});
 }
 
-// Diagnostic-only WebGL call census (WOK_DRAW_STATS). Logs one bounded report per session.
 if (process.env.WOK_DRAW_STATS) {
 	ipcMain.on('wok_draw_stats', (event, report: unknown) => {
 		if (!isTrustedGameIpcSender(event)) return;
@@ -892,8 +833,7 @@ app.on('gpu-info-update', () => {
 
 function getGraphicsRuntimeInfo(): GraphicsRuntimeInfo {
 	const integratedGpuAssessment = assessIntegratedGpuUsage(graphicsProfileState.devices);
-	// A crash-looping manual backend outranks the integrated-GPU hint: manual selections are
-	// never quarantined, so this advisory is the only surface where those failures show up.
+
 	const manualFailureAdvisory = describeManualBackendFailures(graphicsProfileState, graphicsSelection);
 	return {
 		activeBackend: graphicsSelection.backend,
@@ -980,7 +920,7 @@ let persistedSettingsRevision = 0;
 let settingsReadyToQuit = false;
 
 function persistGraphicsProfile() {
-	// Recovery state is tiny and must reach disk before a GPU/process failure can terminate the app.
+
 	writeGraphicsProfileSync(graphicsProfileState);
 }
 
@@ -1026,8 +966,6 @@ app.on('before-quit', event => {
 const graphicsFailureReasons = new Set(['abnormal-exit', 'crashed', 'oom', 'launch-failed', 'integrity-failure']);
 let activeCalibrationFailureReason: string | undefined;
 
-// GPU-process teardown during an app quit is shutdown noise, not evidence against the
-// backend. Without this guard a crash while quitting quarantines a healthy backend.
 let appQuitting = false;
 app.on('before-quit', () => { appQuitting = true; });
 
@@ -1036,14 +974,12 @@ app.on('child-process-gone', (_event, details) => {
 		appQuitting
 		|| details.type !== 'GPU'
 		|| !graphicsFailureReasons.has(details.reason)
-		// Recovery launches already run the safest fallback; there is no better backend to
-		// steer to and no user choice to advise about.
+
 		|| graphicsSelection.source === 'recovery'
 	) return;
 
 	const reason = `GPU process ${details.reason} with exit code ${details.exitCode}.`;
-	// A manual selection is recorded without quarantine (audit C5): the explicit choice keeps
-	// applying, but the crash loop becomes visible in diagnostics and the settings advisory.
+
 	const failedState = graphicsSelection.source === 'manual'
 		? recordManualGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason)
 		: recordGraphicsGpuFailure(graphicsProfileState, graphicsSelection.backend, reason);
@@ -1066,8 +1002,6 @@ function observeGraphicsLaunchRenderer(window: BrowserWindow, onRendererGone?: (
 		onRendererGone?.();
 		if (appQuitting || !graphicsProfileState.launchPending) return;
 
-		// A renderer exit interrupts the launch, but only child-process-gone with type GPU is
-		// evidence that the selected backend itself failed and should be quarantined.
 		graphicsProfileState = recordUnknownGraphicsLaunchInterruption(
 			graphicsProfileState,
 			`Renderer process ${details.reason} with exit code ${details.exitCode}; no GPU-process failure was observed.`
@@ -1091,9 +1025,7 @@ async function persistSettingsAndRelaunch(reopenSettingsCategory?: number): Prom
 	await settingsWriteQueue;
 	const args = buildRelaunchArguments(process.argv.slice(1), reopenSettingsCategory);
 	app.relaunch({ args });
-	// User-triggered settings relaunches should run normal shutdown hooks so Discord, graphics
-	// health tracking, and any future cleanup finish cleanly. Calibration retains the immediate
-	// relaunch path above because its state machine persists each transition before calling it.
+
 	app.quit();
 }
 
@@ -1111,11 +1043,6 @@ function persistCalibrationRetryState(next: CalibrationState): void {
 	calibrationState = next;
 }
 
-/**
- * Consent path shared by every calibration entry point (design §4.2): stages a rerun-consented
- * plan and relaunches into it. When no state exists yet, the complete GPU identity is fetched
- * first so the signature is real.
- */
 async function requestCalibrationRunAndRelaunch(): Promise<void> {
 	if (!calibrationState) {
 		const gpuInfo = await refreshCompleteGraphicsInfo();
@@ -1125,7 +1052,6 @@ async function requestCalibrationRunAndRelaunch(): Promise<void> {
 	relaunchClient();
 }
 
-/** One-time dismissible notice for benchmark-only staleness (design §5.2). */
 async function maybeShowStaleCalibrationPrompt(): Promise<void> {
 	if (
 		calibrationState?.signatureStale !== true
@@ -1152,13 +1078,6 @@ async function maybeShowStaleCalibrationPrompt(): Promise<void> {
 	}
 }
 
-/**
- * Let the renderer ask for preferences rather than only receiving them.
- *
- * Krunker replaces the document during start-up, so a preload instance that never received the
- * boot payload or the injectClientCSS push has no preferences at all - and every feature that
- * needs them silently never starts in the document that actually survives.
- */
 ipcMain.handle('wok_get_user_prefs', event => (isTrustedGameIpcSender(event) ? userPrefs : undefined));
 
 ipcMain.handle('competitiveMode_getBackup', event => (
@@ -1183,17 +1102,14 @@ ipcMain.on('calibration_request_rerun', event => {
 	void requestCalibrationRunAndRelaunch();
 });
 
-// initial request of settings to populate the settingsUI
 ipcMain.on('settingsUI_requests_userPrefs', event => {
 	if (!isTrustedGameIpcSender(event)) return;
 	ensureOptionalFeatureStorage();
 	const paths = { settingsPath, swapperPath, cssPath, filtersPath, configPath };
-	// The display list is enumerated per request rather than at startup, so opening settings after
-	// plugging a monitor in shows it. Electron's screen module is main-process only, hence IPC.
+
 	mainWindow.webContents.send('m_userPrefs_for_settingsUI', paths, userPrefs, listGameplayDisplayOptions());
 });
 
-// Preload requests the latest settings to feed into matchmaker.
 ipcMain.on('matchmaker_requests_userPrefs', event => {
 	if (!isTrustedGameIpcSender(event)) return;
 	mainWindow.webContents.send('matchmakerRedirect', userPrefs);
@@ -1208,7 +1124,6 @@ ipcMain.handle('matchmaker_measure_region_latency', async (event, regions: unkno
 	}
 });
 
-// Coalesce validated renderer updates and persist them without blocking the UI or main process.
 ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
 	if (!isTrustedGameIpcSender(event)) return;
 	const parsedUpdates = parseUserPreferencePatch(data);
@@ -1222,8 +1137,6 @@ ipcMain.on('settingsUI_updates_userPrefs', (event, data: unknown) => {
 	settingsRevision++;
 	scheduleSettingsWrite();
 
-	// The preload owns live renderer hooks. Sending the validated complete snapshot keeps those
-	// hooks coherent when several controls change in the same animation frame.
 	mainWindow.webContents.send('settings_runtime_preferences', userPrefs);
 	if (changedKeys.includes('fullscreen') || changedKeys.includes('display')) applyLiveGameplayWindowSettings();
 	if (changedKeys.includes('discordRPC') || changedKeys.includes('extendedRPC')) synchronizeDiscordRuntime?.();
@@ -1268,7 +1181,6 @@ ipcMain.on('settingsUI_relaunch_wok', (event, category: unknown) => {
 	});
 });
 
-// Allow the trusted preload to quit the entire Electron process.
 ipcMain.on('closeClient', event => {
 	if (isTrustedGameIpcSender(event)) app.quit();
 });
@@ -1277,12 +1189,6 @@ function calibrationDataUrl(html: string): string {
 	return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 }
 
-/**
- * The monitor this launch uses, from the `display` preference. Resolved per call rather than
- * cached: the intro, the game window, and calibration are created at different moments, and a
- * stale Display object would carry a stale rectangle if the user changed resolution in between.
- * A preference naming a monitor that is not attached resolves to primary (src/display-selection.ts).
- */
 function getGameplayDisplay(): { display: Display; isPrimary: boolean } {
 	const primary = screen.getPrimaryDisplay();
 	const resolution = selectGameplayDisplay(userPrefs.display, screen.getAllDisplays(), primary);
@@ -1292,7 +1198,6 @@ function getGameplayDisplay(): { display: Display; isPrimary: boolean } {
 	return { display: resolution.display, isPrimary: resolution.display.id === primary.id };
 }
 
-/** Dropdown entries for the `display` setting, labelled for a player rather than by Electron id. */
 function listGameplayDisplayOptions(): DisplayOption[] {
 	try {
 		return buildDisplayOptions(screen.getAllDisplays(), screen.getPrimaryDisplay().id, userPrefs.display);
@@ -1302,15 +1207,12 @@ function listGameplayDisplayOptions(): DisplayOption[] {
 	}
 }
 
-/** Keeps calibration and gameplay on the same display surface and window mode. */
 function getGameplayWindowGeometry(): BrowserWindowConstructorOptions {
 	const { display, isPrimary } = getGameplayDisplay();
-	// Explicit placement only when the target is not primary: Electron's own centring already does
-	// the right thing there, and leaving it alone keeps the default launch byte-identical.
+
 	return resolveGameplayWindowGeometry(userPrefs.fullscreen, display, windowScale, !isPrimary);
 }
 
-/** Move the existing Windows game window without replacing its renderer or network connection. */
 function applyLiveGameplayWindowSettings(): void {
 	if (process.platform !== 'win32' || !mainWindow || mainWindow.isDestroyed()) return;
 	const { display } = getGameplayDisplay();
@@ -1334,8 +1236,7 @@ const CALIBRATION_TRIAL_DEADLINE_MS = WORKLOAD_CONSTANTS.warmupMaxMs + CALIBRATI
 const CALIBRATION_MAXIMIZE_GRACE_MS = 1_500;
 
 async function createCalibrationWindow(deadlineAt: number): Promise<BrowserWindow> {
-	// Use the same geometry and mode as the real game window so backend and frame-policy ranking
-	// sees the pixel load the selected profile will actually drive (design §1.2).
+
 	const calibrationWindow = new BrowserWindow({
 		...getGameplayWindowGeometry(),
 		alwaysOnTop: true,
@@ -1359,8 +1260,7 @@ async function createCalibrationWindow(deadlineAt: number): Promise<BrowserWindo
 
 	try {
 		if (userPrefs.fullscreen === 'maximized' && !calibrationWindow.isMaximized()) {
-			// Native maximize can occasionally fail to signal. Give it a short grace period,
-			// bounded again by the trial's one end-to-end absolute deadline.
+
 			let onMaximized: () => void = () => {};
 			let onClosed: () => void = () => {};
 			const maximizeDeadline = Math.min(deadlineAt, Date.now() + CALIBRATION_MAXIMIZE_GRACE_MS);
@@ -1402,8 +1302,7 @@ async function runCalibrationTrial(
 			import('./calibration-window.ts'),
 			readFile(pathJoin($assets, 'wok-mark.svg'), 'utf-8')
 		]), deadlineAt, 'Calibration assets');
-		// Same-launch trials and retries reuse the window with a page reload: fresh GL context, no
-		// extra window churn (design §2.4, §3.2).
+
 		if (!mainWindow || mainWindow.isDestroyed()) {
 			mainWindow = await runBeforeDeadline(
 				() => createCalibrationWindow(deadlineAt),
@@ -1413,8 +1312,7 @@ async function runCalibrationTrial(
 		}
 		trialWindow = mainWindow;
 		const activeTrialWindow = trialWindow;
-		// The refresh rate the trial page reports has to be the one the game will actually run
-		// against, so it follows the display preference rather than the primary display.
+
 		const { display } = getGameplayDisplay();
 		const trialUrl = calibrationDataUrl(buildCalibrationTrialPage(candidate, step, total, markSvg, {
 			attempt,
@@ -1519,8 +1417,7 @@ function prepareCalibrationForGraphicsIdentity(
 	const preparedState = prepareCalibrationState(calibrationState, signature, candidates, false, process.platform);
 	if (preparedState !== previousCalibrationState) {
 		writeCalibrationStateSync(preparedState);
-		// Off Windows the candidate space offers no backend comparison, so calibration completes
-		// immediately instead of consenting, relaunching, and benchmarking one candidate (C2).
+
 		if (preparedState.completionReason && preparedState.completionReason !== previousCalibrationState?.completionReason) {
 			console.log(`Calibration completed without a benchmark cycle: ${preparedState.completionReason}`);
 		}
@@ -1548,12 +1445,6 @@ function finalizeCalibrationIfRunTimeBudgetExhausted(): boolean {
 	return true;
 }
 
-/**
- * Runs one trial slot with the design §2.4 retry policy: a rejected trial is retried once,
- * immediately, in the same launch (page reload, fresh GL context), bounded by the global per-run
- * retry budget; when both attempts are rejected, the better one is kept as warn-and-continue
- * evidence and the other is persisted for diagnostics.
- */
 async function runCalibrationTrialWithRetry(
 	candidate: CalibrationCandidate,
 	step: number,
@@ -1621,12 +1512,6 @@ async function runCalibrationTrialWithRetry(
 	});
 }
 
-/**
- * Lane-tuning harness (design §1.4): WOK_CALIBRATION_TUNING=1 opens the calibration window, runs
- * one workload trial on the currently selected backend, prints every lane metric as
- * `[wok-tune] key value` lines, and quits. This lets a quiet reference-machine session measure
- * the workload constants without code changes (used for the WORKLOAD_VERSION 1 freeze).
- */
 async function runCalibrationTuningHarness(): Promise<void> {
 	try {
 		const candidate: CalibrationCandidate = {
@@ -1634,10 +1519,7 @@ async function runCalibrationTuningHarness(): Promise<void> {
 			framePolicy: effectiveFramePolicy,
 			id: calibrationCandidateId(graphicsSelection.backend, effectiveFramePolicy)
 		};
-		// Lane acceptance (design §1.4) needs trace evidence of the workload itself: with
-		// WOK_TRACE_MS set, record a Chromium trace concurrently with the trial. There is no
-		// did-finish-load in tuning mode, so WOK_TRACE_DELAY_MS counts from trial start — set it
-		// past warmup so the recording covers only the measurement window.
+
 		const tracePromise = traceEnabled
 			? (async () => {
 				await new Promise(resolve => { setTimeout(resolve, traceDelayMs); });
@@ -1676,8 +1558,6 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 	prepareCalibrationForGpuInfo(gpuInfo);
 	if (!calibrationState || calibrationState.status === 'complete' || calibrationState.status === 'uncalibrated') return false;
 
-	// Check before incrementing: launch six is allowed to run, while launch seven is rejected.
-	// Within an admitted launch, only the wall-clock budget can stop same-launch work.
 	if (calibrationState.status === 'running') {
 		const admittedLaunch = tryRecordCalibrationLaunch(calibrationState);
 		if (admittedLaunch) persistCalibrationState(admittedLaunch);
@@ -1702,7 +1582,6 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 				return true;
 			}
 
-			// Same-candidate trials share this launch with a cooldown and page reload between them (§3.2).
 			const launchTrialCount = Math.max(1, getPendingLaunchSlotIndices(calibrationState).length);
 			for (let trialInLaunch = 0; trialInLaunch < launchTrialCount; trialInLaunch++) {
 				if (finalizeCalibrationIfRunTimeBudgetExhausted()) break;
@@ -1721,7 +1600,7 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 					return true;
 				}
 				persistCalibrationState(recordCalibrationResult(calibrationState, pendingCandidate, outcome.metrics, outcome.failureReason));
-				// A GPU-process failure dooms the rest of this launch group; relaunch handles recovery.
+
 				if (outcome.failureReason || finalizeCalibrationIfRunTimeBudgetExhausted()) break;
 			}
 			if (graphicsProfileState.launchPending) {
@@ -1756,8 +1635,7 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 		if (applyRecommendation && calibrationState.activeSelection) {
 			graphicsProfileState = clearKeptGraphicsBackend(graphicsProfileState);
 			persistGraphicsProfile();
-			// Persist the measured winner as an explicit preference rather than 'auto', so the
-			// measured backend remains active independently of the removed visual-reduction preset.
+
 			userPrefs.graphicsBackend = calibrationState.activeSelection.candidate.backend;
 			userPrefs.fpsUncap = calibrationState.activeSelection.candidate.framePolicy === 'uncapped';
 			writeFileSync(settingsPath, JSON.stringify(userPrefs, null, 2), { encoding: 'utf-8' });
@@ -1780,12 +1658,8 @@ async function runCalibrationFlow(gpuInfo: unknown): Promise<boolean> {
 	return true;
 }
 
-// apply settings and flags
 applyCommandLineSwitches(userPrefs, graphicsSelection.backend, effectiveFramePolicy);
 
-// Scheme privileges must be declared before app ready. The handler remains token-locked and has
-// an empty resource map while Resource Swapper is off, which lets the setting activate after a
-// game reload without broadening what local files the renderer can request.
 protocol.registerSchemesAsPrivileged([ {
 	scheme: 'krunker-resource-swapper',
 	privileges: {
@@ -1827,9 +1701,7 @@ async function refreshRuntimeGraphicsInfo(): Promise<boolean> {
 		);
 		const devices = normalizeGraphicsDevices(gpuInfo);
 		graphicsProfileState = updateGraphicsDetection(graphicsProfileState, process.platform, devices);
-		// Basic information deliberately does not touch the driver fingerprint. Chromium's complete
-		// Windows query is the path that froze the live renderer, and only explicit calibration needs
-		// the driver fields it supplies.
+
 		persistGraphicsProfile();
 		console.log(`Refreshed ${devices.length} graphics adapter${devices.length === 1 ? '' : 's'}; next-launch recommendation: ${graphicsProfileState.recommendedBackend}`);
 		return true;
@@ -1839,7 +1711,6 @@ async function refreshRuntimeGraphicsInfo(): Promise<boolean> {
 	}
 }
 
-// Listen for app to get ready
 app.on('ready', async () => {
 	logPerfMark('app-ready');
 	app.setAppUserModelId(APP_ID);
@@ -1849,17 +1720,8 @@ app.on('ready', async () => {
 		return;
 	}
 
-	// Fresh installs never block on calibration (design §4.1): startup detours through the
-	// calibration window only to resume a flow the user already consented to.
 	const calibrationBlocksStartup = calibrationResumeRequired(calibrationState);
 
-	// Overlap DNS/TCP/TLS setup for the game origin with the rest of startup. One socket:
-	// krunker.io negotiates h2 and every request multiplexes over a single session, so Chromium
-	// clamps larger asks to 1 once it knows the origin (net-log verified); asking for 1 keeps
-	// fresh profiles from dialing a second connection that h2 makes permanently idle.
-	// Adding a second preconnect to gapi.svc.krunker.io (the data API behind skins/spins) was tried
-	// and reverted: repeated A/B runs contradicted each other because rate limiting dropped samples
-	// from one arm, so it should not return without clean, rate-limit-free evidence.
 	if (!calibrationBlocksStartup) {
 		try {
 			session.defaultSession.preconnect({ numSockets: 1, url: 'https://krunker.io' });
@@ -1875,19 +1737,13 @@ app.on('ready', async () => {
 
 	clientUrlStartup ??= findClientUrl(process.argv) ?? null;
 
-	// Choose the launch animation before the window exists, so nothing waits on it. A fresh profile
-	// gets the longest variant: a first launch pays for cold HTTP, shader and V8 caches and is the
-	// slowest a user ever sees.
 	const startupProfile = loadStartupProfile();
 	const introVariant = selectIntroVariant(startupProfile);
 
-	// Hand the preload everything it needs to inject CSS and mount the splash at document
-	// start instead of waiting for did-finish-load. The preload falls back to the
-	// injectClientCSS IPC message when the argument is missing or unparsable.
 	const bootPayloadArguments = (() => {
 		try {
 			const payload = encodeURIComponent(JSON.stringify({ cssPath, userPrefs, version: app.getVersion() }));
-			// Stay far below the Windows command-line length limit.
+
 			return payload.length <= 24_000 ? [`--wok-boot=${payload}`] : [];
 		} catch (error) {
 			console.error('Failed to serialize the preload boot payload', error);
@@ -1900,25 +1756,19 @@ app.on('ready', async () => {
 		show: false,
 		webPreferences: {
 			additionalArguments: bootPayloadArguments,
-			// The bundled runtime (scripts/bundle.mjs) emits this module as bundle/main.mjs with
-			// the compiled preload beside it; running from src/ loads the raw TypeScript preload.
+
 			preload: pathJoin(import.meta.dirname, import.meta.url.endsWith('.mjs') ? 'preload.mjs' : 'preload.ts'),
 			spellcheck: false,
-			// Always false for the game window: the always-on-top intro fully occludes it during
-			// Krunker's heaviest load, and Windows occlusion tracking would background-throttle
-			// that load. The safeFlags_disableBackgrounding pref governs only the tab-away
-			// Chromium switches, not launch-time renderer priority.
+
 			backgroundThrottling: false,
 			nodeIntegration: false,
-			// not ideal, but preload does a lot of interaction w/ the page
-			// turning this on will also likely require transpiling the preload script to js
+
 			contextIsolation: false,
 			sandbox: false
 		},
 		backgroundColor: '#000000'
 	};
 
-	// Maximized mode is applied at ready-to-show; the shared resolver handles every other mode.
 	mainWindow = new BrowserWindow(mainWindowProps);
 	logPerfMark('window-created');
 	if (userPrefs.fullscreen === 'borderless') mainWindow.moveTop();
@@ -1996,10 +1846,6 @@ app.on('ready', async () => {
 		void captureInMatchRuntimeProfile();
 	}
 
-	// Phase 2 of the legacy migration: copy deferred regular files and directory trees in
-	// the background now that a window exists. The request handler indexes the resource
-	// swapper before these files land, so migrated resources are only served after its next
-	// indexing pass (next launch).
 	if (deferredMigrationSources.length > 0) {
 		const migrationSources = deferredMigrationSources;
 		deferredMigrationSources = [];
@@ -2108,8 +1954,6 @@ app.on('ready', async () => {
 		else scheduleDiscordRPCStart(0);
 	};
 
-	// The receiver stays registered while RPC is disabled; validated activity is ignored until the
-	// user enables it, so turning the feature back on needs no renderer or app restart.
 	ipcMain.on('preload_updates_DiscordRPC', (event, value: unknown) => {
 		if (!isTrustedGameIpcSender(event) || !value || typeof value !== 'object' || Array.isArray(value)) return;
 		const data = value as Record<string, unknown>;
@@ -2123,28 +1967,19 @@ app.on('ready', async () => {
 		else if (userPrefs.discordRPC) pendingDiscordActivity = { details: data.details, state: data.state };
 	});
 
-	// Keep RPC construction away from the initial navigation burst. Runtime enables start now.
 	mainWindow.webContents.once('did-finish-load', () => { scheduleDiscordRPCStart(2_000); });
 	app.on('before-quit', stopDiscordRPC);
 	mainWindow.on('closed', stopDiscordRPC);
 
-	/**
-	 * The launch intro owns the first reveal of the game window: it shows the window behind the
-	 * opaque half of the animation so the handoff has no visible seam, then hands focus over when
-	 * the animation ends. Every later ready-to-show (reloads, navigation) reveals immediately.
-	 */
 	const introHandoff = createIntroGameWindowHandoff(
 		mainWindow,
 		userPrefs.fullscreen
 	);
 
-	// General ready-to-show, including later refreshes and navigations.
 	mainWindow.on('ready-to-show', () => {
 		introHandoff.handleReadyToShow();
 	});
 
-	// Telling "the renderer never reported readiness" apart from "readiness arrived but the window
-	// stayed hidden" is the whole diagnosis of a stuck launch, so record the first signal here too.
 	let gameUsableReportedAt: number | undefined;
 	const noteGameUsable = (event: IpcMainEvent) => {
 		if (!isTrustedGameIpcSender(event) || gameUsableReportedAt !== undefined) return;
@@ -2171,7 +2006,7 @@ app.on('ready', async () => {
 	});
 
 	mainWindow.webContents.on('dom-ready', () => {
-		// DOM construction is not evidence that WebGL/ANGLE will remain stable through game startup.
+
 		logPerfMark('dom-ready');
 	});
 
@@ -2213,7 +2048,6 @@ app.on('ready', async () => {
 		if (discordRPCReady) mainWindow.webContents.send('initDiscordRPC');
 	});
 
-	/** submenu for in-game shortcuts */
 	const gameSubmenu: (MenuItemConstructorOptions | MenuItem) = {
 		label: 'Game',
 		submenu: [
@@ -2256,7 +2090,6 @@ app.on('ready', async () => {
 
 	if (process.platform !== 'darwin') csMenuTemplate.push({ label: 'About', submenu: aboutSubmenu });
 
-	// the other submenus are defined in menu.ts
 	const csMenu = Menu.buildFromTemplate([...macAppMenuArr, gameSubmenu, ...csMenuTemplate]);
 
 	Menu.setApplicationMenu(csMenu);
@@ -2295,15 +2128,13 @@ app.on('ready', async () => {
 	try {
 		requestHandlerStarted = await requestHandler.start();
 		if (!requestHandlerStarted) {
-			// Registration failures are normally deterministic, but a single bounded retry
-			// covers transient session setup races without delaying the healthy startup path.
+
 			await new Promise(resolve => setTimeout(resolve, 100));
 			requestHandlerStarted = await requestHandler.start();
 			if (!requestHandlerStarted) console.error('WOK Client request filters remained unavailable after retry.');
 		}
 	} catch (error) {
-		// Blocking and swapping are optional. Unexpected setup failures must never keep
-		// the hidden game window from reaching its initial navigation.
+
 		requestHandlerStarted = false;
 		console.error('WOK Client request features are unavailable for this launch.', error);
 	}
@@ -2313,9 +2144,7 @@ app.on('ready', async () => {
 	});
 
 	if (!calibrationBlocksStartup) {
-		// Keep ordinary gameplay on Chromium's basic cached adapter query. On Windows the complete
-		// query performs extra system enumeration and was measured freezing the visible renderer for
-		// about 1.34 seconds. Complete driver identity is now fetched only by explicit calibration.
+
 		const GPU_IDENTITY_REFRESH_DELAY_MS = 15_000;
 		let gpuIdentityRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 		const clearGpuIdentityRefreshTimer = () => {
@@ -2347,8 +2176,7 @@ app.on('ready', async () => {
 						) {
 							console.log('Graphics identity changed; calibration can be rerun from Settings when convenient.');
 						}
-						// Version-only staleness can be evaluated from the complete identity already on disk;
-						// no live complete query is needed to retain its one-time prompt (§5.2).
+
 						void maybeShowStaleCalibrationPrompt();
 					}
 				});
@@ -2356,9 +2184,6 @@ app.on('ready', async () => {
 		});
 	}
 
-	// Record how long an ordinary launch took to become usable so the next launch can choose an
-	// animation that fits this machine. Register before navigation, consume only the first trusted
-	// signal, and keep calibration launches out of the normal startup profile.
 	if (!calibrationBlocksStartup) {
 		const removeStartupSampleListener = () => {
 			ipcMain.removeListener('wok_game_usable', recordStartupSampleFromRenderer);
@@ -2377,9 +2202,6 @@ app.on('ready', async () => {
 	logPerfMark('loadurl-called');
 	const gameNavigation = mainWindow.loadURL('https://krunker.io');
 
-	// Start the intro only once the game navigation is under way, so the identity animation can
-	// never delay the first byte of Krunker's load. Calibration launches skip it: that flow has
-	// already put windows in front of the user and should reach the game as directly as possible.
 	let cancelActiveIntro: (() => void) | undefined;
 	if (userPrefs.introAnimation && introVariant !== 'none' && !calibrationBlocksStartup) {
 		introHandoff.beginIntro();
@@ -2406,9 +2228,7 @@ app.on('ready', async () => {
 				timing: INTRO_VARIANTS[introVariant],
 				source: selectIntroSource(introDisplay, introBounds),
 				audio: userPrefs.introAudio,
-				// Reveal the game window behind the opaque frame. No focus change: the animation is
-				// still on screen, and this also stops Chromium treating the game renderer as hidden
-				// for the rest of Krunker's load.
+
 				onReveal: () => {
 					introHandoff.revealBehindIntro();
 				},
@@ -2432,15 +2252,6 @@ app.on('ready', async () => {
 		}
 	}
 
-	/*
-	 * Last line of defence for the launch itself.
-	 *
-	 * The game window is created hidden and is revealed by the intro or by ready-to-show. A renderer
-	 * that never paints - a hung lookup, a wedged GPU process, a navigation that neither finishes nor
-	 * fails - produces neither, and the renderer-side splash deadline cannot help because it lives in
-	 * that renderer. This shows the window anyway. It sits after the intro's own ceiling, so a
-	 * healthy launch has always resolved long before it can fire.
-	 */
 	const revealDeadline = startLoadingDeadline({
 		deadlineMs: WINDOW_REVEAL_DEADLINE_MS,
 		now: () => Date.now(),
@@ -2454,7 +2265,7 @@ app.on('ready', async () => {
 				? 'never'
 				: `after ${Math.round(gameUsableReportedAt - processStartWallClockMs)}ms`;
 			if (mainWindow.isVisible()) {
-				// Visible but not usable: the renderer owns this one, and has already said so.
+
 				console.log(`[wok-load] window visible-but-not-usable elapsed=${Math.round(resolution.elapsedMs)}ms gameUsable=${readiness}`);
 				return;
 			}
@@ -2463,7 +2274,7 @@ app.on('ready', async () => {
 			introHandoff.revealForUse();
 		},
 		subscribe: listener => {
-			// Already visible: whatever revealed it got there first.
+
 			if (!mainWindow.isDestroyed() && mainWindow.isVisible()) {
 				listener();
 				return () => {};

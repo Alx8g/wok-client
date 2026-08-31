@@ -27,9 +27,6 @@ const NATIVE_URL_SCHEME_DEFAULT_PORTS: Readonly<Record<string, string>> = {
 	wss: '443'
 };
 
-// Electron 44 registered 1,024 synthetic exact patterns in 7.9-13.4 ms on the
-// reference machine; 2,048 took 11.2-13.9 ms and 4,000 took 21.4-26.4 ms.
-// Beyond this crossover, a small fixed set of scoped prefixes avoids linear matcher retention.
 const MAX_EXACT_SWAP_PATTERNS = 1_024;
 const DIRECT_RESOURCE_DIRECTORIES = ['models', 'textures', 'sound', 'scares', 'videos'] as const;
 const DIRECT_RESOURCE_DIRECTORY_SET = new Set<string>(DIRECT_RESOURCE_DIRECTORIES);
@@ -293,10 +290,6 @@ export default class RequestHandler {
 
 	private customFiltersPath: string;
 
-	/**
-	 * Set the target window.
-	 * @param browserWindow - The target window.
-	 */
 	public constructor(browserWindow: Electron.BrowserWindow, swapDir: string, swapperEnabled: boolean, blockerEnabled: boolean, customFiltersEnabled: boolean, defaultFiltersStr: string, customFiltersPath: string) {
 		this.browserWindow = browserWindow;
 		this.swapDir = swapDir;
@@ -320,7 +313,6 @@ export default class RequestHandler {
 			: [];
 	}
 
-	/** Replace request features without restarting Electron. The caller reloads the game afterward. */
 	public async reconfigure(preferences: RequestHandlerPreferences): Promise<boolean> {
 		try {
 			this.browserWindow.webContents.session.webRequest.onBeforeRequest(null);
@@ -339,10 +331,6 @@ export default class RequestHandler {
 		return this.start();
 	}
 
-	/**
-	 * Initialize the request handler for the target window.
-	 * @returns Whether initialization is complete. Registration failures remain retryable.
-	 */
 	public async start(): Promise<boolean> {
 		if (this.started) return true;
 		const deadlineAt = Date.now() + MAX_REQUEST_HANDLER_START_MS;
@@ -409,8 +397,7 @@ export default class RequestHandler {
 		if (filter.urls.length > 0) {
 			try {
 				if (!this.swapperActive) {
-					// Electron already selected this callback using the validated blocker patterns,
-					// so blocker-only mode needs no second URL parse and linear matcher scan.
+
 					this.browserWindow.webContents.session.webRequest.onBeforeRequest(filter, (_details, callback) => {
 						callback({ cancel: true });
 					});
@@ -433,11 +420,6 @@ export default class RequestHandler {
 					});
 				}
 
-			// Fix the CORS problem only for browserfps.com instead of processing every response.
-			// Registering any webRequest listener makes Electron interpose every request in the
-			// session, so the mirror-domain CORS fixer only registers when a request feature has
-			// already forced that interposition. With every request feature disabled the session
-			// keeps Chromium's direct loading path.
 			this.browserWindow.webContents.session.webRequest.onHeadersReceived(BROWSER_FPS_CORS_FILTER, ({ responseHeaders }, callback) => {
 				if (!responseHeaders) return callback({});
 
@@ -445,7 +427,6 @@ export default class RequestHandler {
 				for (const [key, values] of Object.entries(responseHeaders)) {
 					const lowercase = key.toLowerCase();
 
-					// If the credentials mode is 'include', changing the origin to '*' would make the request fail CORS.
 					if (lowercase === 'access-control-allow-credentials' && values?.[0] === 'true') {
 						return callback({ responseHeaders });
 					}
@@ -463,8 +444,7 @@ export default class RequestHandler {
 				return callback({ responseHeaders: updatedHeaders });
 			});
 			} catch (error) {
-				// Registration is atomic from the handler's point of view. If the dependent headers
-				// listener fails, remove the already-installed request listener so a retry starts cleanly.
+
 				try {
 					this.browserWindow.webContents.session.webRequest.onBeforeRequest(null);
 				} catch (rollbackError) {
@@ -479,7 +459,6 @@ export default class RequestHandler {
 		return true;
 	}
 
-	/** Resolve only opaque tokens created for files indexed inside the swapper directory. */
 	public resolveSwapProtocolRequest(rawUrl: string): string | undefined {
 		try {
 			const url = new URL(rawUrl);
@@ -518,7 +497,6 @@ export default class RequestHandler {
 		return hostname === TARGET_GAME_DOMAIN || hostname.endsWith(`.${TARGET_GAME_DOMAIN}`);
 	}
 
-	/** Index swap resources with fixed concurrency, size, depth, and one absolute startup deadline. */
 	private async indexSwapDirectory(deadlineAt: number): Promise<IndexedSwapResources> {
 		const resourcePaths: string[] = [];
 		const requestResources = new Map<string, string>();

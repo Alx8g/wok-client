@@ -71,7 +71,6 @@ function signatureWith(overrides: Partial<CalibrationSignature>): CalibrationSig
 	return { ...signature, ...overrides };
 }
 
-/** Starts the run with a plan-creation time whose counterbalancing coin flip stages the wanted candidate first. */
 function startRunWithOrder(state: CalibrationState, firstCandidateId: string): CalibrationState {
 	for (let now = 1_000; now < 1_200; now++) {
 		const started = startCalibrationRun(state, now);
@@ -111,8 +110,6 @@ test('never stages a capped (vsync) recovery candidate, even after severe uncapp
 	healthyState = recordCalibrationResult(healthyState, candidates[0], stableMetrics);
 	assert.equal(healthyState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 
-	// A competitive preset never auto-applies vsync on synthetic evidence: instability that is
-	// real gets caught by the real-gameplay validation loop, not traded for hidden latency.
 	let unstableState = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	unstableState = recordCalibrationResult(unstableState, candidates[0], unstableMetrics());
 	assert.equal(unstableState.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
@@ -245,7 +242,7 @@ test('recommends only uncapped profiles from the automatic path, even under inst
 });
 
 test('legacy persisted capped evidence is only used when no uncapped evidence exists', () => {
-	// A resumed pre-removal plan can still hold capped results; they may win only by default.
+
 	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, false), candidates[0].id);
 	const legacyCapped = { backend: 'd3d11on12' as const, framePolicy: 'capped' as const, id: 'd3d11on12:capped' };
@@ -263,8 +260,7 @@ test('legacy persisted capped evidence is only used when no uncapped evidence ex
 });
 
 test('v5 signatures stamp the current benchmark and workload versions', () => {
-	// Benchmark 5 adds independent animation-callback corroboration to the depth-6 fence pacing
-	// policy; workload 4 remains the measured Krunker render and main-thread entity lanes.
+
 	assert.equal(CALIBRATION_VERSION, 5);
 	assert.equal(signature.benchmarkVersion, CALIBRATION_VERSION);
 	assert.equal(signature.workloadVersion, WORKLOAD_VERSION);
@@ -435,14 +431,12 @@ test('benchmark page reports contamination and keeps measured-loop UI work bound
 test('trial page embeds the workload and completion-honest measurement modules', () => {
 	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
 
-	// The unit-tested modules are serialized into the page, so page and tests cannot drift.
 	assert.match(page, /const createWorkload = /);
 	assert.match(page, /const createEntitySimulation = /);
 	assert.match(page, /const createWorkloadSpin = /);
 	assert.match(page, /const runBenchmarkTrial = /);
 	assert.match(page, /"jsSpinIterations":160000/);
-	// v4 constants travel with the page: the main-thread entity lane and the census-shaped
-	// render lane inside WORKLOAD_SPEC, the depth-6 pacing through the embedded-constant block.
+
 	assert.match(page, /"entityCount":12288/);
 	assert.match(page, /"entitySubsteps":4/);
 	assert.match(page, /"entityNeighborChecks":24576/);
@@ -453,13 +447,13 @@ test('trial page embeds the workload and completion-honest measurement modules',
 	assert.match(page, /const BENCHMARK_FENCE_QUEUE_DEPTH = 6;/);
 	assert.match(page, /const BENCHMARK_FENCE_RING_SIZE = 7;/);
 	assert.match(page, /bufferSubData/);
-	// The entity lane must run inside the measured frame, before submission.
+
 	assert.match(page, /spin: \(\) => \{ spinSink \+= simulateEntities\(\) \+ spin\(\); return spinSink; \}/);
 	assert.match(page, /EXT_disjoint_timer_query_webgl2/);
 	assert.match(page, /fenceSync/);
 	assert.match(page, /"desynchronized":false/);
 	assert.match(page, /"depth":true/);
-	// Full-window canvas at real dimensions x devicePixelRatio, plus the CSS-only DOM overlay.
+
 	assert.match(page, /window\.innerWidth \* devicePixelRatioValue/);
 	assert.match(page, /overlay-gradient/);
 	assert.match(page, /data-feed-row/);
@@ -619,7 +613,7 @@ test('result page displays low-confidence and backend-verification evidence with
 	assert.match(page, /WebGL context loss/);
 	assert.match(page, /severe event-loop disturbance/);
 	assert.match(page, /Effective renderer verified as d3d11on12/);
-	// The page must never imply it measured input latency; it measures frame delivery only.
+
 	assert.ok(!/input.?latency/iu.test(page), 'the results page must not claim a latency measurement');
 	assert.doesNotMatch(page, /renderer-response estimate/);
 });
@@ -643,16 +637,14 @@ test('result page reports GPU-timing status honestly and lists repeated trials',
 	assert.match(page, /2 trials, median shown/);
 	assert.match(page, /Trial 1:/);
 	assert.match(page, /Trial 2:/);
-	// The page must still promise provisional application and automatic revert, in plain language.
+
 	assert.match(page, /check this profile/iu);
 	assert.match(page, /runs badly.*switches back on its own/iu);
 	assert.match(page, /runs badly.*switches back on its own/iu);
 });
 
 test('a fence-pacing artifact invalidates the comparison and keeps the current backend', () => {
-	// Field reproduction (Iris Xe): the benchmark stalled 75% of ticks on d3d11on12 with ~2 ms of
-	// measured GPU time, scored it 2x below default, and switched a machine whose real gameplay
-	// runs 2x FASTER on d3d11on12. The artifact flag must keep the benchmark from deciding.
+
 	const artifactMetrics: CalibrationMetrics = {
 		...stableMetrics,
 		averageFps: 106.29,
@@ -680,12 +672,10 @@ test('a fence-pacing artifact invalidates the comparison and keeps the current b
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[0].id);
 	state = recordCalibrationResult(state, candidates[0], artifactMetrics);
 
-	// Synthetic instability from the artifact must not stage a capped recovery launch.
 	assert.equal(state.candidates.some(candidate => candidate.framePolicy === 'capped'), false);
 
 	state = recordCalibrationResult(state, candidates[1], defaultWinnerMetrics);
 
-	// Repeating trials reproduces a deterministic artifact; no ABAB stage may be scheduled.
 	assert.equal(state.plan.some(slot => slot.stage === 'repeat'), false);
 
 	const finalized = finalizeCalibration(state);
@@ -720,8 +710,7 @@ test('the same slow trial without the artifact flag still lets the numeric winne
 });
 
 test('non-Intel Windows machines retain hardware D3D11 instead of probing a WARP fallback', () => {
-	// Chromium default on Windows is already ANGLE-D3D11. Field verification on AMD showed that
-	// forcing d3d11on12 can resolve to d3d11-warp-webgl, so it is not a generic challenger.
+
 	const amdOrNvidiaCandidates = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'uncapped',
@@ -731,7 +720,6 @@ test('non-Intel Windows machines retain hardware D3D11 instead of probing a WARP
 	assert.deepEqual(amdOrNvidiaCandidates.map(candidate => candidate.id), ['default:uncapped']);
 	assert.equal(calibrationOffersBackendComparison(amdOrNvidiaCandidates, 'win32'), false);
 
-	// Explicit D3D11 is equivalent to Chromium default on Windows, not another backend.
 	const explicitD3d11Candidates = createCalibrationCandidates({
 		currentBackend: 'd3d11',
 		currentFramePolicy: 'uncapped',
@@ -764,10 +752,8 @@ test('the results page explains an artifact-affected verdict instead of claiming
 });
 
 test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped profile', () => {
-	// Exact field reproduction: default:uncapped trips the low-ratio instability heuristic and
-	// stages default:capped recovery; d3d11on12 wins the uncapped bracket via the artifact
-	// guard; the capped rescue must not then use the artifact numbers to swap in default:capped.
-	const candidates = createWindowsCandidates(); // d3d11on12 current, default challenger
+
+	const candidates = createWindowsCandidates();
 	let state = startRunWithOrder(prepareCalibrationState(undefined, signature, candidates, true), candidates[1].id);
 
 	state = recordCalibrationResult(state, candidates[1], {
@@ -779,7 +765,7 @@ test('an artifact-retained uncapped winner cannot be rescue-swapped to a capped 
 		stallRatio: 0.01,
 		webglRenderer: 'ANGLE (Intel, Iris Xe, Direct3D11 vs_5_0 ps_5_0, D3D11)'
 	});
-	// Even genuine instability no longer stages a capped (vsync) candidate.
+
 	assert.deepEqual(state.candidates.map(candidate => candidate.id), [
 		'd3d11on12:uncapped',
 		'default:uncapped'
@@ -814,7 +800,6 @@ test('only genuinely different renderer backends count as a comparison on every 
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'linux'), false);
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'darwin'), false);
 
-	// A frame-policy pair of one backend is still one backend: nothing to compare off Windows.
 	const policyPair = createCalibrationCandidates({
 		currentBackend: 'default',
 		currentFramePolicy: 'capped',
@@ -824,7 +809,6 @@ test('only genuinely different renderer backends count as a comparison on every 
 	assert.equal(policyPair.length, 2);
 	assert.equal(calibrationOffersBackendComparison(policyPair, 'linux'), false);
 
-	// A manual vulkan selection contributes a genuinely different backend on Linux.
 	const vulkanChallenge = createCalibrationCandidates({
 		currentBackend: 'vulkan',
 		currentFramePolicy: 'uncapped',
@@ -833,7 +817,6 @@ test('only genuinely different renderer backends count as a comparison on every 
 	});
 	assert.equal(calibrationOffersBackendComparison(vulkanChallenge, 'linux'), true);
 
-	// Intel D3D11on12 versus default D3D11 remains a real Windows comparison; one default is not.
 	assert.equal(calibrationOffersBackendComparison(createWindowsCandidates(), 'win32'), true);
 	assert.equal(calibrationOffersBackendComparison(singleDefault, 'win32'), false);
 });
@@ -844,8 +827,7 @@ test('non-Windows calibration completes immediately with the default profile, cl
 	assert.equal(state.status, 'complete');
 	assert.equal(state.completionReason, CALIBRATION_NO_COMPARISON_REASON);
 	assert.equal(typeof state.completedAt, 'number');
-	// Nothing was applied or planned: the automatic default profile stays in charge and no
-	// consent, relaunch, or trial cycle is owed on the next startup.
+
 	assert.equal(state.activeSelection, undefined);
 	assert.equal(state.recommendedSelection, undefined);
 	assert.deepEqual(state.plan, []);
@@ -903,16 +885,12 @@ test('the unmeasured completion reason survives the persistence round trip', () 
 	assert.ok(parsed);
 	assert.equal(parsed.status, 'complete');
 	assert.equal(parsed.completionReason, CALIBRATION_NO_COMPARISON_REASON);
-	// A later same-signature prepare leaves the completed state untouched.
+
 	assert.equal(prepareCalibrationState(parsed, signature, createLinuxCandidates(), false, 'linux'), parsed);
 });
 
 test('every constant the serialized trial function references is embedded in the page', () => {
-	// runBenchmarkTrial is injected into the calibration page by function serialization, so a
-	// constant it closes over is NOT carried with it: it must be written into the same scope by
-	// the page generator. Missing one throws a ReferenceError on the first frame and the trial
-	// silently never starts. Field regression: BENCHMARK_PROGRESS_WARMUP_SHARE shipped unembedded
-	// and calibration hung on "Preparing renderer".
+
 	const page = buildCalibrationTrialPage(createWindowsCandidates()[0], 1, 2, '<svg></svg>');
 	const source = runBenchmarkTrial.toString();
 	const referenced = new Set(source.match(/\bBENCHMARK_[A-Z0-9_]+\b/gu) ?? []);

@@ -30,11 +30,6 @@ import {
 	runBenchmarkTrial
 } from './calibration-benchmark.ts';
 
-/**
- * 'capped' is not a frame-rate cap: it is simply the uncap switches absent, i.e. compositor
- * vsync left on. Krunker has no in-browser frame-cap setting, so the honest user-facing label
- * is display synchronization, not a cap.
- */
 function framePolicyLabel(framePolicy: CalibrationCandidate['framePolicy']): string {
 	return framePolicy === 'capped' ? 'display-synced' : framePolicy;
 }
@@ -64,11 +59,6 @@ function embedJson(value: unknown): string {
 	return JSON.stringify(value).replaceAll('<', '\\u003c');
 }
 
-/**
- * The measurement logic lives in `calibration-workload.ts` / `calibration-benchmark.ts` (unit
- * tested with injected fakes); the page embeds those exact functions by serialization, together
- * with the constants they reference, so page and tests can never drift apart.
- */
 function embeddedModulesScript(): string {
 	const constants: Record<string, unknown> = {
 		BENCHMARK_EVENT_LOOP_SAMPLE_MS,
@@ -144,20 +134,6 @@ function sharedStyles(): string {
 		`;
 }
 
-/**
- * DOM/UI compositing overlay (design §1.2): the game composites a large HTML UI over its canvas,
- * so the workload does too. Panel and HUD animate through compositor-driven CSS keyframes only;
- * the feed text updates at most 5 Hz through the throttled updater. Zero per-frame JS DOM writes.
- *
- * The keyframes use stepped timing (~14 updates/s): lane tuning showed that smooth compositor-only
- * animations let the uncapped compositor free-run presents far past the workload frame rate
- * (461/s vs 135 canvas frames/s on the reference machine), untethering the present path from the
- * scene under test and inflating GPU-process busy ~35% beyond the design §1.4 lane gate. Stepped
- * timing keeps the persistent composited overlay layers and their per-present composite cost while
- * the canvas drives present cadence, matching the measured menu behavior. `will-change` pins the
- * layer promotion so it cannot vary across Chromium versions. Part of the WORKLOAD_VERSION 1
- * freeze: changing this overlay changes the measured lane shape.
- */
 function overlayStyles(): string {
 	return `
 			.overlay-gradient { position: fixed; inset: -12vh -12vw; z-index: 10; pointer-events: none; opacity: .06; background: linear-gradient(115deg, #FBC02D 0%, #202840 45%, #7B3131 100%); animation: wok-pan 7s steps(96) infinite alternate; will-change: transform; }
@@ -183,10 +159,10 @@ function overlayMarkup(): string {
 }
 
 export interface CalibrationTrialPageExtras {
-	/** 1-based attempt number; 2 renders the retry messaging (design §2.4). */
+
 	attempt?: number;
 	onBattery?: boolean;
-	/** Diagnostics from the rejected attempt that caused this retry. */
+
 	previousEventLoopWorstMs?: number;
 	previousRejectionReasons?: CalibrationLowConfidenceReason[];
 	refreshRateHz?: number;

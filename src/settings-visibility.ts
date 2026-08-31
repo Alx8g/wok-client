@@ -19,7 +19,6 @@ export const SETTINGS_VISIBILITY_CONTROLLER_KEYS = new Set([
 	'motionBlur'
 ]);
 
-/** Keep secondary controls out of the normal view until their parent feature is enabled. */
 export function settingIsVisible(key: string, preferences: Readonly<Partial<UserPrefs>>): boolean {
 	if (key === 'motionBlurStrength' || key === 'motionBlurQuality') return preferences.motionBlur === true;
 	if (key === 'extendedRPC') return preferences.discordRPC === true;

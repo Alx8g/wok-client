@@ -44,8 +44,7 @@ test('a fresh install matching every baseline still records the marker with an e
 });
 
 test('version 1 installs migrate only the stale gpuRasterizing default, never user choices', () => {
-	// The user re-enabled matchmaker after the v1 reset; that explicit choice must survive the
-	// v2 migration while the never-touched gpuRasterizing default is flipped off once.
+
 	const plan = planSettingsBaseline({ appliedAt: NOW - 5_000, version: 1 }, {
 		matchmaker: true,
 		safeFlags_gpuRasterizing: true
@@ -87,8 +86,7 @@ test('parses the shipped version-1 marker document and rejects malformed ones', 
 		parseSettingsBaselineMarker({ appliedAt: 1_700_000_000_000, version: 1 }),
 		{ appliedAt: 1_700_000_000_000, version: 1 }
 	);
-	// appliedAt is informational; a missing value must not reject the marker (that would
-	// re-run resets against an install that already had them).
+
 	assert.deepEqual(parseSettingsBaselineMarker({ version: 2 }), { appliedAt: 0, version: 2 });
 	assert.equal(parseSettingsBaselineMarker(undefined), undefined);
 	assert.equal(parseSettingsBaselineMarker('baseline'), undefined);

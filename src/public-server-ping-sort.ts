@@ -1,11 +1,4 @@
-/**
- * Renderer integration for sorting Find Game > Public region sections by measured latency.
- *
- * Krunker's legacy Public browser renders region headings into #serverHolder and replaces that HTML
- * whenever the search, tab, or server list changes. WOK observes that stable surface, keeps each
- * heading/body block intact, annotates geographic headings with numeric ping, and reorders only the
- * blocks. Krunker's game rows and click handlers are never recreated.
- */
+
 
 import { matchmakerRegionLatency } from './matchmaker-selection.ts';
 import { mutationRecordsTouchSelector } from './mutation-relevance.ts';
@@ -39,7 +32,6 @@ interface OriginalPublicServerOrder {
 	headings: ReadonlySet<HTMLElement>;
 }
 
-/** Read only the heading's direct text, excluding online counts, Quick Join, and icon children. */
 export function readPublicServerRegionHeadingLabel(
 	heading: Pick<HTMLElement, 'childNodes'>
 ): string {
@@ -50,7 +42,6 @@ export function readPublicServerRegionHeadingLabel(
 		.join(' ');
 }
 
-/** Stable pure block ranking used by the live DOM controller and focused tests. */
 export function sortPublicServerRegionBlocks<T>(
 	blocks: readonly PublicServerRegionBlock<T>[],
 	latencies: Readonly<Record<string, unknown>>
@@ -241,9 +232,7 @@ function maybeMeasure(regions: readonly string[]): void {
 		.finally(() => {
 			if (measurementInFlight !== measurement) return;
 			measurementInFlight = undefined;
-			// The Public DOM can be replaced while a previous region batch is still measuring.
-			// Reconcile after releasing the in-flight guard so the replacement batch is not
-			// stranded until Krunker happens to mutate the server list again.
+
 			if (enabled) scheduleReconcile();
 		});
 	measurementInFlight = measurement;
@@ -305,7 +294,6 @@ function stopRuntime(): void {
 	lastMeasuredAt = 0;
 }
 
-/** Start, update, or restore the renderer-only Public-region ping sorting feature. */
 export function applyPublicServerPingSortSettings(
 	preferences: Readonly<Partial<UserPrefs>> | undefined,
 	measure?: MeasurePublicServerRegionLatency

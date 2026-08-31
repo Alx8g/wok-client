@@ -66,8 +66,7 @@ test('latency measurements deduplicate known regions and use the bounded cache',
 	assert.deepEqual(await service.measure(['FRA', 'FRA', 'MOON', 42]), { FRA: 12 });
 	assert.deepEqual(await service.measure(['FRA']), { FRA: 12 });
 	assert.equal(loadCount, 1);
-	// Each reachable region is sampled MATCHMAKER_LATENCY_PROBE_ATTEMPTS times; the first connect
-	// to a host also pays DNS, so the best sample is kept.
+
 	assert.equal(probeCount, MATCHMAKER_LATENCY_PROBE_ATTEMPTS);
 
 	now += MATCHMAKER_LATENCY_CACHE_TTL_MS + 1;
@@ -170,10 +169,8 @@ test('an expired target list is reused only within its bounded stale window', as
 	assert.equal(probeCount, 2 * MATCHMAKER_LATENCY_PROBE_ATTEMPTS);
 });
 
-
 test('falls back to a reachable port when the advertised game port never answers', async () => {
-	// Field evidence: Krunker advertises port 3000, which times out on ordinary networks for every
-	// region, so no latency was ever recorded and the popup showed a dash. Port 443 answers.
+
 	const attempted: number[] = [];
 	const service = new MatchmakerRegionLatencyService({
 		loadTargets: () => Promise.resolve({ 'au-syd': 'lobby-a.sydney.krunker.io:3000' }),
@@ -190,7 +187,7 @@ test('falls back to a reachable port when the advertised game port never answers
 });
 
 test('keeps the best sample so first-connect DNS cost is not reported as latency', async () => {
-	// Measured on the reference machine: 153 ms on the first connect to a host, ~55 ms after.
+
 	const samples = [153, 55];
 	let index = 0;
 	const service = new MatchmakerRegionLatencyService({
@@ -215,9 +212,7 @@ test('a dead port is negatively cached and skipped on later measurements', async
 
 	assert.deepEqual(await service.measure(['SYD']), { SYD: 30 });
 	now = 1_011;
-	// The ordinary latency cache expired, but the dead advertised port is skipped without a probe;
-	// only the fallback
-	// port pays for a fresh sample.
+
 	assert.deepEqual(await service.measure(['SYD']), { SYD: 30 });
 	assert.deepEqual(attempted, [
 		3000,
@@ -227,7 +222,6 @@ test('a dead port is negatively cached and skipped on later measurements', async
 		MATCHMAKER_LATENCY_FALLBACK_PORT
 	]);
 
-	// After the dead-port window the advertised port is retried, so a future fix upstream is picked up.
 	now = 2_000;
 	assert.deepEqual(await service.measure(['SYD']), { SYD: 30 });
 	assert.deepEqual(attempted, [

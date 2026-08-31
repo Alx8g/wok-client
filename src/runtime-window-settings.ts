@@ -15,10 +15,6 @@ export interface RuntimeWindowTarget {
 	unmaximize(): void;
 }
 
-/**
- * Apply decorated window modes without replacing the BrowserWindow or its game renderer.
- * Borderless is intentionally excluded because Electron fixes `frame` at construction.
- */
 export function applyRuntimeWindowSettings(
 	window: RuntimeWindowTarget,
 	mode: string,
@@ -26,7 +22,6 @@ export function applyRuntimeWindowSettings(
 ): boolean {
 	if (mode === 'borderless') return false;
 
-	// Bounds cannot reliably move a fullscreen or maximized native window to another display.
 	if (window.isFullScreen()) window.setFullScreen(false);
 	if (window.isMaximized()) window.unmaximize();
 

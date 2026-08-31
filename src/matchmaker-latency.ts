@@ -4,26 +4,12 @@ export const MATCHMAKER_LATENCY_CACHE_TTL_MS = 60_000;
 export const MATCHMAKER_LATENCY_FETCH_TIMEOUT_MS = 3_000;
 export const MATCHMAKER_LATENCY_PROBE_TIMEOUT_MS = 1_500;
 export const MATCHMAKER_LATENCY_MAX_CONCURRENCY = 4;
-/**
- * Krunker's ping list advertises the game port (3000), which does not accept connections from
- * ordinary networks - every probe against it times out, so no latency was ever recorded and the
- * popup showed a dash. Measured on the reference machine: port 3000 times out for every region
- * while 443 connects, and a 443 connect agrees with ICMP to the same host within ~5 ms.
- */
+
 export const MATCHMAKER_LATENCY_FALLBACK_PORT = 443;
-/**
- * The first connect to a host also pays DNS resolution (measured: 153 ms first, ~55 ms after).
- * Probing twice and keeping the best sample removes that one-off cost.
- */
+
 export const MATCHMAKER_LATENCY_PROBE_ATTEMPTS = 2;
 export const MATCHMAKER_LATENCY_TARGET_STALE_TTL_MS = 5 * 60_000;
-/**
- * How long a host:port pair that timed out or refused the probe is skipped outright. The ping
- * list advertises the game port, which is dead on ordinary networks, so without this every
- * re-measurement (one per cacheTtlMs per region) paid the full probe timeout for a port that is
- * never going to answer. Trying it once per host per service lifetime is enough to pick up a
- * future Krunker fix that makes the advertised port reachable again.
- */
+
 export const MATCHMAKER_LATENCY_DEAD_PORT_TTL_MS = 10 * 60_000;
 export const MATCHMAKER_PING_LIST_MAX_RESPONSE_BYTES = 64 * 1024;
 export const MATCHMAKER_PING_LIST_MAX_TARGETS = 32;
@@ -249,11 +235,7 @@ export class MatchmakerRegionLatencyService {
 				const item = pending[nextIndex++];
 				let latencyMs: number | undefined;
 				if (item.target) {
-					// Try the advertised port first so a future Krunker change is picked up
-					// automatically, then the fallback. Each is sampled more than once because the
-					// first connect to a host also pays for DNS. A port that failed recently is
-					// skipped entirely: re-paying a dead port's timeout on every TTL refresh is
-					// pure latency on the matchmaker popup.
+
 					const nowMs = this.now();
 					this.pruneDeadPorts(nowMs);
 					const candidatePorts = item.target.port === MATCHMAKER_LATENCY_FALLBACK_PORT
@@ -261,8 +243,7 @@ export class MatchmakerRegionLatencyService {
 						: [item.target.port, MATCHMAKER_LATENCY_FALLBACK_PORT];
 					for (const port of candidatePorts) {
 						const target = { host: item.target.host, port };
-						// Long-cache only the advertised game port. Port 443 is the recovery path and
-						// must be retried after a transient failure on the ordinary latency-cache cadence.
+
 						const deadPortKey = port === MATCHMAKER_LATENCY_FALLBACK_PORT
 							? undefined
 							: `${target.host}:${port}`;

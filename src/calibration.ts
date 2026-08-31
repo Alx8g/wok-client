@@ -8,24 +8,24 @@ import {
 } from './calibration-benchmark.ts';
 
 const CALIBRATION_STATE_VERSION = 2;
-/** v5: event-loop rejection now requires independent animation-callback corroboration. */
+
 export const CALIBRATION_VERSION = 5;
 export const CALIBRATION_BENCHMARK_MS = 2_800;
 export const CALIBRATION_MIN_SAMPLES = 45;
 export const CALIBRATION_SCORE_TIE_MINIMUM = 5;
 export const CALIBRATION_SCORE_MEANINGFUL_WIN_RATIO = 0.03;
-/** Stage-1 clear-win margin (design §3.2): max(3 x tie minimum, 10% of the loser's score). */
+
 export const CALIBRATION_CLEAR_WIN_TIE_MULTIPLIER = 3;
 export const CALIBRATION_CLEAR_WIN_RATIO = 0.1;
-/** Range-overlap decision inputs (design §3.3). */
+
 export const CALIBRATION_OVERLAP_WIN_MARGIN_MULTIPLIER = 2;
 export const CALIBRATION_OVERLAP_MAX_UNION_FRACTION = 0.25;
-/** Hard calibration-run budget (design §3.4). */
+
 export const CALIBRATION_RUN_BUDGET_MS = 90_000;
 export const CALIBRATION_MAX_LAUNCHES = 6;
-/** Provisional profiles that accrue no verdict within this window become 'unwatched' (design §4.4). */
+
 export const CALIBRATION_PROVISIONAL_WINDOW_MS = 14 * 24 * 60 * 60 * 1_000;
-/** Cooldown between same-launch trials (design §3.2). */
+
 export const CALIBRATION_INTRA_LAUNCH_COOLDOWN_MS = 500;
 
 export const FRAME_POLICIES = ['uncapped', 'capped'] as const;
@@ -61,13 +61,13 @@ export interface EffectiveBackendVerification {
 }
 
 export interface CalibrationSignature {
-	/** Informational only. App-only releases do not invalidate calibration. */
+
 	appVersion: string;
 	benchmarkVersion: number;
 	driverFingerprint: string;
 	electronVersion: string;
 	hardwareFingerprint: string;
-	/** Scene-content version (design §1.3); 0 is the sentinel for the pre-v3 synthetic workload. */
+
 	workloadVersion: number;
 }
 
@@ -87,31 +87,31 @@ export interface CalibrationTrialEnvironment {
 
 export interface CalibrationMetrics {
 	averageFps: number;
-	/** Diagnostic flags such as gpu-queue-exceeds-frame-budget (design §2.2). */
+
 	contaminationFlags?: string[];
 	cpuSubmitP50Ms?: number;
 	cpuSubmitP95Ms?: number;
 	environment?: CalibrationTrialEnvironment;
 	eventLoopP95Ms: number;
-	/** Optional until the main-process metrics normalizer is updated. */
+
 	eventLoopWorstMs?: number;
 	gpuDisjointDiscardCount?: number;
-	/** GPU time is diagnostic and tie-break evidence only; it is never a scored input (design §2.2). */
+
 	gpuTimeP50Ms?: number;
 	gpuTimeP95Ms?: number;
 	gpuTimingStatus?: CalibrationGpuTimingStatus;
 	longFrameRatio: number;
-	/** Optional for persisted version-1 records and older main-process normalizers. */
+
 	lowConfidenceReasons?: CalibrationLowConfidenceReason[];
 	onePercentLowFps: number;
 	p95FrameTimeMs: number;
-	/** Reasons recorded when this trial (or its retry) was rejected (design §2.4). */
+
 	rejectionReasons?: CalibrationTrialRejectionReason[];
 	sampleCount: number;
 	stallRatio?: number;
 	success: boolean;
 	webglRenderer: string;
-	/** Stamped so mixed-version results can never be compared silently (design §1.3). */
+
 	workloadVersion?: number;
 	worstFrameTimeMs: number;
 }
@@ -120,47 +120,47 @@ export interface CalibrationResult {
 	backendVerification: EffectiveBackendVerification;
 	candidate: CalibrationCandidate;
 	failureReason?: string;
-	/** Set when the field confirmation loop rolled this profile back (design §4.4). */
+
 	fieldRejected?: true;
 	metrics: CalibrationMetrics;
 	score: number;
-	/** Index of the plan slot this trial fills. */
+
 	slotIndex?: number;
 }
 
 export interface CalibrationTrialSlot {
 	candidateId: string;
-	/** Slots sharing a launch group run in the same app launch, separated by a cooldown + reload. */
+
 	launchGroup: number;
 	stage: CalibrationTrialStage;
 }
 
 export interface CalibrationState {
 	activeSelection?: CalibrationResult;
-	/** At most one automatic rollback per signature (design §4.4). */
+
 	autoRollbackUsed?: true;
 	calibrationOfferDeclinedAt?: number;
 	candidates: CalibrationCandidate[];
 	competitiveModeWasEnabled: boolean;
 	completedAt?: number;
-	/** Set when calibration completed without a benchmark cycle (audit C2); absent for measured runs. */
+
 	completionReason?: string;
 	confirmation?: CalibrationConfirmationStatus;
 	fieldRejectedCandidateIds: string[];
 	launchCount: number;
 	plan: CalibrationTrialSlot[];
-	/** Retries actually launched in this calibration run; diagnostic records are independent. */
+
 	runRetriesUsed: number;
 	planCreatedAt?: number;
 	previousSelection?: CalibrationResult;
 	provisionalSince?: number;
 	recommendedSelection?: CalibrationResult;
-	/** Rejected attempts retained for diagnostics; never scored (design §2.4). */
+
 	rejectedAttempts: CalibrationResult[];
 	rerunRequested: boolean;
 	results: CalibrationResult[];
 	signature: CalibrationSignature;
-	/** Benchmark/workload-version-only staleness: selection stays applied, rerun is opportunistic (design §5.2). */
+
 	signatureStale?: true;
 	staleRerunPromptShownAt?: number;
 	startedAt?: number;
@@ -270,25 +270,15 @@ export function createCalibrationCandidates({
 		if (!candidates.some(existing => existing.id === candidate.id)) candidates.push(candidate);
 	};
 
-	// Keep the first pass short. A capped candidate is staged later only when a clean uncapped trial shows severe instability.
 	addCandidate(currentBackend, currentFramePolicy);
 	addCandidate(recommendedBackend, 'uncapped');
 
-	// Chromium default on Windows is ANGLE-D3D11. D3D11on12 is a valid automatic candidate only
-	// when hardware selection explicitly recommended it (Intel-only systems). Forcing it as a
-	// generic AMD/NVIDIA challenger can fall through to d3d11-warp-webgl software rendering.
 	if (platform === 'win32' && recommendedBackend === 'd3d11on12') addCandidate('default', 'uncapped');
 
 	if (candidates.length === 0) addCandidate('default', 'uncapped');
 	return candidates.slice(0, 2);
 }
 
-/**
- * True when staged candidates offer genuinely different renderer backends. Frame-policy variants
- * of one backend are not a backend comparison, and Windows `default` and explicit `d3d11` both
- * resolve to ANGLE-D3D11. Avoiding tautological trials also prevents unsupported D3D11on12 probes
- * from falling through to software WARP on AMD/NVIDIA systems.
- */
 export function calibrationOffersBackendComparison(
 	candidates: CalibrationCandidate[],
 	platform: NodeJS.Platform = process.platform
@@ -299,15 +289,8 @@ export function calibrationOffersBackendComparison(
 	return backends.size > 1;
 }
 
-/** Reason persisted (and shown in diagnostics) when calibration completes without a benchmark cycle. */
 export const CALIBRATION_NO_COMPARISON_REASON = 'Only the Chromium default backend is available to benchmark on this platform, so calibration completed immediately with the default profile instead of measuring one candidate against itself.';
 
-/**
- * Completes calibration without running the consent/launch/benchmark cycle. No selection is
- * applied or changed: with no results and no recommendation, the automatic recommendation
- * (Chromium default off Windows) stays in charge, and the reason is persisted so diagnostics
- * and future readers can tell an unmeasured completion from a measured one.
- */
 export function completeCalibrationWithoutComparison(
 	state: CalibrationState,
 	reason: string = CALIBRATION_NO_COMPARISON_REASON,
@@ -332,10 +315,6 @@ function detectEffectiveRendererBackend(webglRenderer: string): ExplicitGraphics
 	return undefined;
 }
 
-/**
- * Verifies only explicit backend requests against the effective WebGL renderer.
- * Chromium's default backend is intentionally indeterminate because it is allowed to choose any supported implementation.
- */
 export function verifyEffectiveRendererBackend(
 	candidateBackend: AppliedGraphicsBackend,
 	webglRenderer: string
@@ -381,7 +360,6 @@ export function calibrationSignaturesEqual(left: CalibrationSignature, right: Ca
 		&& left.workloadVersion === right.workloadVersion;
 }
 
-/** True when only the benchmark/workload versions differ: the machine identity is unchanged (design §5.2). */
 export function calibrationSignatureOnlyVersionsDiffer(left: CalibrationSignature, right: CalibrationSignature): boolean {
 	return !calibrationSignaturesEqual(left, right)
 		&& left.driverFingerprint === right.driverFingerprint
@@ -402,7 +380,7 @@ export function createCalibrationState(
 
 	return {
 		...(preserveSelection ? { activeSelection: preserveSelection } : {}),
-		// One automatic rollback per signature (design §4.4): the marker survives same-signature resets.
+
 		...(sameSignature && previousState.autoRollbackUsed ? { autoRollbackUsed: true as const } : {}),
 		...(previousState?.calibrationOfferDeclinedAt !== undefined ? { calibrationOfferDeclinedAt: previousState.calibrationOfferDeclinedAt } : {}),
 		candidates,
@@ -421,12 +399,6 @@ export function createCalibrationState(
 	};
 }
 
-/**
- * Consent transition (design §4.2/§4.3): UNCALIBRATED -> RUNNING. Builds the counterbalanced
- * screen-stage plan; the coin flip is a pure function of the persisted plan-creation time and the
- * hardware fingerprint, so order effects cancel across the population while each install resumes
- * its own plan deterministically.
- */
 export function startCalibrationRun(state: CalibrationState, now: number = Date.now()): CalibrationState {
 	if (state.status === 'running') return state;
 	const screenCandidates = [...state.candidates];
@@ -479,7 +451,6 @@ export function getPendingCalibrationCandidate(state: CalibrationState): Calibra
 	return state.candidates.find(candidate => candidate.id === candidateId);
 }
 
-/** Consecutive pending slots that share the first pending slot's launch group (same-candidate trials share a launch). */
 export function getPendingLaunchSlotIndices(state: CalibrationState): number[] {
 	const first = getPendingCalibrationSlotIndex(state);
 	if (first === undefined) return [];
@@ -495,10 +466,6 @@ export function getPendingLaunchSlotIndices(state: CalibrationState): number[] {
 	return indices;
 }
 
-/**
- * Startup detours through the calibration window only to resume a flow the user already consented
- * to: mid-plan relaunches, an interrupted results page, or an explicit rerun (design §4.1).
- */
 export function calibrationResumeRequired(state: CalibrationState | undefined): boolean {
 	if (!state) return false;
 	if (state.rerunRequested) return true;
@@ -522,7 +489,6 @@ export function isCalibrationRunTimeBudgetExhausted(state: CalibrationState, now
 		&& now - state.startedAt > CALIBRATION_RUN_BUDGET_MS;
 }
 
-/** Clamp every admitted trial to the calibration run's one absolute wall-clock budget. */
 export function clampCalibrationTrialDeadline(state: CalibrationState | undefined, requestedDeadlineAt: number): number {
 	if (state?.status !== 'running' || state.startedAt === undefined) return requestedDeadlineAt;
 	return Math.min(requestedDeadlineAt, state.startedAt + CALIBRATION_RUN_BUDGET_MS);
@@ -533,12 +499,10 @@ export function isCalibrationBudgetExhausted(state: CalibrationState, now: numbe
 		&& (state.launchCount >= CALIBRATION_MAX_LAUNCHES || isCalibrationRunTimeBudgetExhausted(state, now));
 }
 
-/** True only before an allowed launch is recorded; the sixth launch may run, the seventh may not. */
 export function canStartCalibrationLaunch(state: CalibrationState, now: number = Date.now()): boolean {
 	return state.status === 'running' && !isCalibrationBudgetExhausted(state, now);
 }
 
-/** Atomically enforces the pre-increment launch budget and records an admitted launch. */
 export function tryRecordCalibrationLaunch(
 	state: CalibrationState,
 	now: number = Date.now()
@@ -562,8 +526,6 @@ export function prepareCalibrationState(
 		};
 	}
 
-	// Benchmark-only staleness on a completed calibration: the selection is still the user-confirmed
-	// best-known profile for this hardware, so it stays applied and the rerun is opportunistic (design §5.2).
 	if (
 		existing
 		&& !existing.rerunRequested
@@ -579,26 +541,14 @@ export function prepareCalibrationState(
 	}
 
 	const reset = createCalibrationState(signature, candidates, competitiveModeEnabled, existing);
-	// With nothing to compare, the consent/relaunch/benchmark cycle would measure one candidate
-	// against itself (audit C2): complete immediately instead, whether this is a fresh state
-	// (no consent dialog will ever be offered for it) or an explicit rerun (the single-candidate
-	// launch cycle is skipped). The automatic default profile stays in charge.
+
 	if (!calibrationOffersBackendComparison(candidates, platform)) {
 		return completeCalibrationWithoutComparison(reset);
 	}
-	// An explicit rerun is itself consent, so the fresh plan starts immediately.
+
 	return existing?.rerunRequested ? startCalibrationRun(reset) : reset;
 }
 
-/**
- * Relative score. Shape deliberately unchanged for workload v2 (findings §5-6): under depth-6
- * pacing the rAF loop is paced by real per-frame cost, so the submission lane's API-thread and
- * driver/translation cost lands directly in the frame intervals that averageFps, 1% low, and
- * p95 already aggregate. No separate cpuSubmit term is added — the renderer-side bracket only
- * sees a slice of the submission pipeline (the GPU-process service and driver cost surfaces as
- * frame-interval back-pressure), and a second term would double-count the slice it does see.
- * cpuSubmitP50/P95 remain reported diagnostic evidence, like GPU time (design §2.2).
- */
 export function calculateCalibrationScore(metrics: CalibrationMetrics, _framePolicy: FramePolicy = 'uncapped'): number {
 	if (!metrics.success || metrics.sampleCount < CALIBRATION_MIN_SAMPLES) return -1_000_000;
 
@@ -636,12 +586,6 @@ function resultHasLowConfidenceEvidence(result: CalibrationResult): boolean {
 	return metricsLowConfidenceReasons(result.metrics).length > 0;
 }
 
-/**
- * True when the benchmark flagged this trial's frame times as products of its own fence pacing
- * rather than the backend's rendering throughput. Such a trial is real evidence that the
- * benchmark could not measure the candidate — not evidence that the candidate is slow — so it
- * must never decide a cross-candidate comparison in either direction.
- */
 export function metricsShowFencePacingArtifact(metrics: CalibrationMetrics): boolean {
 	return (metrics.contaminationFlags ?? []).includes(BENCHMARK_FENCE_PACING_CONTAMINATION_FLAG);
 }
@@ -655,7 +599,6 @@ function resultVerificationConfidence(result: CalibrationResult): number {
 	return 0;
 }
 
-/** Results measured with different workload versions are never compared numerically (design §5.4). */
 function resultsNumericallyComparable(left: CalibrationResult, right: CalibrationResult): boolean {
 	return (left.metrics.workloadVersion ?? 0) === (right.metrics.workloadVersion ?? 0);
 }
@@ -704,7 +647,6 @@ function isKnownGoodCalibrationResult(result: CalibrationResult | undefined): re
 	return Boolean(result && isCleanCalibrationResult(result));
 }
 
-/** Appends the ABAB repeat stage when Stage 1 is inside the clear-win margin or contaminated (design §3.2). */
 function appendRepeatStageIfNeeded(plan: CalibrationTrialSlot[], results: CalibrationResult[]): CalibrationTrialSlot[] {
 	if (plan.some(slot => slot.stage === 'repeat')) return plan;
 	const screenSlotIndices = plan
@@ -717,10 +659,9 @@ function appendRepeatStageIfNeeded(plan: CalibrationTrialSlot[], results: Calibr
 	const firstResult = results.find(result => result.slotIndex === first.index);
 	const secondResult = results.find(result => result.slotIndex === second.index);
 	if (!firstResult || !secondResult) return plan;
-	// A candidate excluded by the validity gates cannot win, so repeating the other is pointless.
+
 	if (!isValidCalibrationResult(firstResult) || !isValidCalibrationResult(secondResult)) return plan;
-	// A fence-pacing artifact is deterministic for a backend on a given machine; repeating the
-	// trials reproduces the artifact and can never make the comparison numeric.
+
 	if (resultShowsFencePacingArtifact(firstResult) || resultShowsFencePacingArtifact(secondResult)) return plan;
 
 	const bothClean = isCleanCalibrationResult(firstResult) && isCleanCalibrationResult(secondResult);
@@ -774,9 +715,7 @@ export function recordCalibrationResult(
 		slotIndex
 	};
 	const results = [...state.results, result];
-	// Capped (vsync) recovery staging was removed: a competitive preset never auto-applies a
-	// display-synchronized profile on synthetic evidence, because the benchmark's score cannot
-	// see the latency cost. Manual vsync remains available by turning fpsUncap off.
+
 	plan = appendRepeatStageIfNeeded(plan, results);
 
 	return {
@@ -787,7 +726,6 @@ export function recordCalibrationResult(
 	};
 }
 
-/** Persists a rejected attempt for diagnostics; it never participates in scoring (design §2.4). */
 export function recordRejectedCalibrationAttempt(
 	state: CalibrationState,
 	candidate: CalibrationCandidate,
@@ -811,7 +749,6 @@ export function recordRejectedCalibrationAttempt(
 	};
 }
 
-/** Records one retry immediately before it is launched; rejected-attempt diagnostics are unrelated. */
 export function recordCalibrationRetryLaunch(
 	state: CalibrationState,
 	now: number = Date.now()
@@ -854,7 +791,6 @@ function pickBetterRejectedAttempt(
 	return second.onePercentLowFps > first.onePercentLowFps ? second : first;
 }
 
-/** Applies the one-per-trial and two-per-run retry policy around a main-process trial callback. */
 export async function orchestrateCalibrationTrialRetry(
 	options: CalibrationTrialRetryOrchestrationOptions
 ): Promise<CalibrationTrialAttemptOutcome> {
@@ -934,8 +870,7 @@ function summarizeCandidateTrials(state: CalibrationState, candidate: Calibratio
 	const trials = state.results.filter(result => result.candidate.id === candidate.id);
 	const validTrials = trials.filter(isValidCalibrationResult);
 	const cleanTrials = validTrials.filter(isCleanCalibrationResult);
-	// Statistics come from clean trials; a candidate with only warn-and-continue evidence is
-	// summarized over its valid trials but can never win (design §3.3 rule 1).
+
 	const statisticsSource = cleanTrials.length > 0 ? cleanTrials : validTrials;
 	const statistics = scoreStatistics(statisticsSource.map(trial => trial.score));
 	let representative: CalibrationResult | undefined;
@@ -966,7 +901,6 @@ function summaryGpuTieBreakValue(summary: CandidateTrialSummary): number | undef
 	return scoreStatistics(measured).median;
 }
 
-/** Tie resolution ladder (design §3.3 rule 4): keep the current or safer candidate. */
 function resolveTiedCandidates(state: CalibrationState, left: CandidateTrialSummary, right: CandidateTrialSummary): CandidateTrialSummary {
 	const active = state.activeSelection;
 	if (isKnownGoodCalibrationResult(active)) {
@@ -1006,13 +940,6 @@ function summaryShowsFencePacingArtifact(summary: CandidateTrialSummary): boolea
 	return summary.validTrials.some(resultShowsFencePacingArtifact);
 }
 
-/**
- * When a fence-pacing artifact invalidates the numeric comparison, neither candidate may win on
- * scores. The status quo is kept: a known-good active selection first, otherwise candidate order
- * (the current backend is always staged first). The prefer-default tie rung is deliberately
- * skipped — it presumes both candidates were fairly measured, which is exactly what the artifact
- * disproves. The provisional confirmation loop remains the authority on the retained choice.
- */
 function resolveArtifactAffectedCandidates(state: CalibrationState, left: CandidateTrialSummary, right: CandidateTrialSummary): CandidateTrialSummary {
 	const active = state.activeSelection;
 	if (isKnownGoodCalibrationResult(active)) {
@@ -1024,7 +951,6 @@ function resolveArtifactAffectedCandidates(state: CalibrationState, left: Candid
 	return leftIndex <= rightIndex ? left : right;
 }
 
-/** Pairwise decision per design §3.3: validity gates, range overlap, minimum effect size, tie ladder. */
 function decideBetweenCandidates(state: CalibrationState, left: CandidateTrialSummary, right: CandidateTrialSummary): CandidateTrialSummary {
 	if (left.validTrials.length === 0 && right.validTrials.length === 0) return resolveTiedCandidates(state, left, right);
 	if (left.validTrials.length === 0) return right;
@@ -1040,7 +966,7 @@ function decideBetweenCandidates(state: CalibrationState, left: CandidateTrialSu
 	const highCanWin = high.cleanTrials.length >= requiredCleanTrialsToWin;
 
 	if (!planHasRepeatSlots) {
-		// Stage-1 early exit: one clean trial each decides only past the clear-win margin.
+
 		if (highCanWin && low.cleanTrials.length > 0 && Number.isFinite(medianDiff) && medianDiff >= calibrationClearWinMargin(low.median)) return high;
 		if (highCanWin && low.cleanTrials.length === 0 && medianDiff >= calibrationScoreWinThreshold(low.median)) return high;
 		return resolveTiedCandidates(state, left, right);
@@ -1061,7 +987,7 @@ function decideBetweenCandidates(state: CalibrationState, left: CandidateTrialSu
 			&& overlap / union < CALIBRATION_OVERLAP_MAX_UNION_FRACTION;
 	}
 	if (wins && highCanWin) {
-		// A field-rejected candidate needs a dominant (disjoint-range) win to be re-selected (design §4.4).
+
 		if (state.fieldRejectedCandidateIds.includes(high.candidate.id) && !dominantWin) return resolveTiedCandidates(state, left, right);
 		return high;
 	}
@@ -1080,9 +1006,6 @@ export function finalizeCalibration(state: CalibrationState): CalibrationState {
 	const bestUncapped = selectBestSummary(state, state.candidates.filter(candidate => candidate.framePolicy === 'uncapped'))?.representative;
 	const bestCapped = selectBestSummary(state, state.candidates.filter(candidate => candidate.framePolicy === 'capped'))?.representative;
 
-	// A capped (vsync) result can only be recommended when no uncapped evidence exists at all —
-	// a legacy resumed plan. The capped "rescue" swap was removed: its latency cost is invisible
-	// to the score, and it twice demoted this project's reference machine on synthetic evidence.
 	let recommendedSelection = bestUncapped ?? bestCapped;
 
 	const activeSelection = state.activeSelection;
@@ -1107,8 +1030,7 @@ export function finalizeCalibration(state: CalibrationState): CalibrationState {
 
 export function completeCalibration(state: CalibrationState, applyRecommendation: boolean, now: number = Date.now()): CalibrationState {
 	if (applyRecommendation && state.recommendedSelection) {
-		// Apply provisionally: retain the previous selection through the bounded compatibility
-		// window. Without an active automatic validator, expiry parks the selection as unwatched.
+
 		return {
 			...state,
 			activeSelection: state.recommendedSelection,
@@ -1143,11 +1065,6 @@ export function canAutoRollbackCalibration(state: CalibrationState): boolean {
 	return state.confirmation === 'pending' && state.autoRollbackUsed !== true;
 }
 
-/**
- * Automatic rollback (design §4.4): restores the previous selection for the next launch, marks the
- * losing candidate field-rejected (it then loses ties permanently and needs a dominant win to be
- * re-selected), and consumes the single per-signature automatic rollback.
- */
 export function rollbackCalibration(state: CalibrationState, now: number = Date.now()): CalibrationState {
 	if (!canAutoRollbackCalibration(state)) return state;
 	const rejectedCandidateId = state.activeSelection?.candidate.id;
@@ -1169,7 +1086,6 @@ export function rollbackCalibration(state: CalibrationState, now: number = Date.
 	};
 }
 
-/** "Keep anyway", an inconclusive verdict, or a stalled sampling window parks the profile unwatched (design §4.4). */
 export function markCalibrationUnwatched(state: CalibrationState, now: number = Date.now()): CalibrationState {
 	if (state.confirmation !== 'pending') return state;
 	return {
@@ -1316,8 +1232,7 @@ function parseSignature(value: unknown, requireWorkloadVersion: boolean): Calibr
 	if (requireWorkloadVersion && (!Number.isInteger(value.workloadVersion) || Number(value.workloadVersion) < 0)) return undefined;
 
 	const benchmarkVersion = Number(value.benchmarkVersion);
-	// V1-era signatures predate the workload concept: stamp the sentinel 0 so their results can
-	// never be numerically compared with real workload results (design §5.1).
+
 	const workloadVersion = Number.isInteger(value.workloadVersion) && Number(value.workloadVersion) >= 0
 		? Number(value.workloadVersion)
 		: benchmarkVersion >= CALIBRATION_VERSION ? WORKLOAD_VERSION : 0;
@@ -1392,7 +1307,6 @@ function parseStateCore(value: Record<string, unknown>, requireWorkloadVersion: 
 	};
 }
 
-/** Upgrades a persisted version-1 document: results map to single-trial plans (design §5.1). */
 function upgradeVersionOneState(core: ParsedStateCore): CalibrationState {
 	const stampWorkloadVersion = (result: CalibrationResult, slotIndex?: number): CalibrationResult => ({
 		...result,

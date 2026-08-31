@@ -377,8 +377,7 @@ test('valid native blocker patterns retain scheme, host, subdomain, path, and al
 		'file://server/shared/*',
 		'file://server:1234/ported/*'
 	]);
-	// Electron invokes a blocker-only callback only after its native URL filter matches,
-	// so every callback can cancel without reparsing the URL in JavaScript.
+
 	assert.deepEqual(dispatchBeforeRequest(state, 'https://exact.example.com/private/data.json'), { cancel: true });
 	assert.deepEqual(dispatchBeforeRequest(state, 'https://child.cdn.example.com/assets/bundle.js'), { cancel: true });
 	assert.deepEqual(dispatchBeforeRequest(state, 'https://ports.example.com:8443/socket'), { cancel: true });

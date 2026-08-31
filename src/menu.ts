@@ -2,15 +2,12 @@ import { shell, type MenuItemConstructorOptions, type MenuItem, app, BrowserWind
 import type { OpenDevToolsOptions } from 'electron/main';
 import { APP_NAME, NOTICES_URL, WEBSITE_URL } from './branding.ts';
 
-// Menu
-/** submenu to replace the About screen */
 export const aboutSubmenu: MenuItemConstructorOptions[] = [
 	{ label: APP_NAME, enabled: false },
 	{ label: 'Website', registerAccelerator: false, click: () => shell.openExternal(WEBSITE_URL) },
 	{ label: 'Open-source notices', registerAccelerator: false, click: () => shell.openExternal(NOTICES_URL) }
 ];
 
-/** the menu with the app name on mac (array, to be spread) */
 export const macAppMenuArr: (MenuItemConstructorOptions | MenuItem)[] = process.platform === 'darwin'
 	? [ {
 		label: app.name,
@@ -27,16 +24,14 @@ export const macAppMenuArr: (MenuItemConstructorOptions | MenuItem)[] = process.
 	} ]
 	: [];
 
-/** make 2 menuItems that determine wether to use fallback or not, and then act accordingly */
 export function constructDevtoolsSubmenu(
 	providedWindow: BrowserWindow,
 	skipFallbackPreference: null | boolean | (() => null | boolean) = null,
 	options?: OpenDevToolsOptions
 ) {
-	const maxLag = 500; // default timeout by asger-finding / Commander
+	const maxLag = 500;
 	let detectedSkipFallback = typeof skipFallbackPreference === 'function' ? null : skipFallbackPreference;
 
-	/** Fallback if openDevTools fails */
 	function fallbackDevtools() {
 		providedWindow.webContents.closeDevTools();
 
@@ -48,7 +43,6 @@ export function constructDevtoolsSubmenu(
 		providedWindow.once('closed', () => devtoolsWindow.destroy());
 	}
 
-	/** test first time if should open fallback or not. then decide */
 	function openDevToolsWithFallback() {
 		const configuredPreference = typeof skipFallbackPreference === 'function'
 			? skipFallbackPreference()
@@ -59,20 +53,18 @@ export function constructDevtoolsSubmenu(
 		} else if (skipFallback === false) {
 			fallbackDevtools();
 		} else {
-			providedWindow.webContents.openDevTools(options); // start opening devtools
-			const popupDevtoolTimeout = setTimeout(() => { detectedSkipFallback = false; fallbackDevtools(); }, maxLag); // wait maxLag. if times out, always run fallback
+			providedWindow.webContents.openDevTools(options);
+			const popupDevtoolTimeout = setTimeout(() => { detectedSkipFallback = false; fallbackDevtools(); }, maxLag);
 			providedWindow.webContents.once('devtools-opened', () => { detectedSkipFallback = true; clearTimeout(popupDevtoolTimeout); }); // if opens devtools first, never run fallback
 		}
 	}
 
-	// return 2 menuItems that can be spread and injected where needed
 	return [
 		{ label: 'Toggle Developer Tools', accelerator: 'CommandOrControl+Shift+I', click: () => { openDevToolsWithFallback(); } },
 		{ label: 'Toggle Developer Tools (F12)', accelerator: 'F12', click: () => { openDevToolsWithFallback(); } }
 	];
 }
 
-/** other submenus that all windows share. since mac relies on menu for system stuff like copying, i have to add it here */
 export const csMenuTemplate: (MenuItemConstructorOptions | MenuItem)[] = [
 	{
 		label: 'Edit',

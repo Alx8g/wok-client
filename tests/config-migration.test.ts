@@ -133,7 +133,6 @@ test('an interrupted phase 2 resumes on the next launch without overwriting exis
 	writeTestFile(join(source, 'swapper', 'textures', 'b.png'), 'legacy-b');
 	writeTestFile(join(source, 'scripts', 's.js'), 'legacy-s');
 
-	// Simulate an interrupted earlier phase 2: one file already arrived, no marker written.
 	writeTestFile(join(destination, 'swapper', 'textures', 'a.png'), 'already-migrated');
 
 	const resumed = await migrateLegacyConfigsPhaseTwo(destination, [{ label: 'Legacy', path: source }]);

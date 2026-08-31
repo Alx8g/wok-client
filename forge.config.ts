@@ -22,8 +22,6 @@ import { renderLinuxLauncherScript } from './src/linux-session.ts';
 import { verifyPackagedApplication } from './scripts/verify-package.mjs';
 import { BUNDLED_THEMES, THEME_LAYER_ASSETS, themeAssetName } from './src/themes.ts';
 
-// Assets are packaged by an explicit allowlist. The theme stylesheets come from the registry so a
-// new bundled theme cannot be listed in settings but missing from the build.
 const packagedAssetNames = [
     'blockFilters.txt', 'wok-mark.svg', 'hideAds.css',
     'intro-short-1080.webm', 'intro-short-1440.webm', 'intro-long-1080.webm', 'intro-long-1440.webm',
@@ -164,7 +162,7 @@ export default {
         appCategoryType: "public.app-category.games",
         appCopyright: "Copyright © 2026 WOK contributors",
         ignore: [
-            // The app ships the bundled runtime (scripts/bundle.mjs output), not src/.
+
             /^\/(?!(bundle|assets|node_modules|package\.json|LICENSE|THIRD_PARTY_NOTICES\.txt|PATCHED_ELECTRON\.txt))/,
             /^\/bundle\/metafile\.json$/,
             /^\/bundle\/.*\.mjs\.map$/,
@@ -191,25 +189,16 @@ export default {
         ]
     },
     outDir: "dist",
-    
+
     makers: [
         new MakerAppImage({
             options: {
                 bin: "wok-client",
                 icon: "./build/icon.png",
                 name: "wok-client",
-                // The maker writes its desktop entry to `${productName}.desktop` and names the
-                // AppImage from it too, so the Forge app name ("WOK Client") produced a
-                // "WOK Client.desktop" that is invalid under the desktop-entry file-naming spec and
-                // can never match the `wok-client` XDG app id Electron reports (package.json
-                // `desktopName`). Naming it after the executable fixes icon and window matching on
-                // both Wayland (app_id) and X11 (WM_CLASS), and drops the space from the released
-                // artifact name.
+
                 productName: "wok-client",
-                // Supplying the entry keeps the human-readable Name and adds StartupWMClass, which
-                // the generated one cannot express once productName is the file name. It also owns
-                // Categories, MimeType and Keywords now: the maker ignores those options whenever
-                // desktopFile is set.
+
                 desktopFile: "./build/wok-client.desktop"
             }
         }),
@@ -241,9 +230,6 @@ export default {
 
                     renameSync(wrapper, realBin);
 
-                    // Chromium picks its ozone platform before any application code runs, so the
-                    // session detection has to happen in this launcher. Generated from
-                    // src/linux-session.ts so the shipped shell and the tested resolver agree.
                     writeFileSync(wrapper, renderLinuxLauncherScript(exeName), { mode: 0o755 });
                 }
 

@@ -1,11 +1,4 @@
-/**
- * Renderer-only cleanup for Krunker's promotional menu surfaces.
- *
- * Targets are marked instead of removed. A tiny stylesheet hides marked nodes and collapses only
- * empty ad/grid slots, so disabling the setting restores Krunker's own elements and listeners
- * exactly as they were. The observer exists because the menu, ad slots, and stream cards are
- * replaced after startup.
- */
+
 
 import { mutationRecordsTouchSelector } from './mutation-relevance.ts';
 
@@ -79,7 +72,6 @@ interface MenuDeclutterMutationObserver {
 	observe(target: unknown): void;
 }
 
-/** Injectable lifecycle boundary so document and body replacement can be tested without a browser. */
 export interface MenuDeclutterLifecycleHooks {
 	currentBody(): unknown;
 	currentDocument(): unknown;
@@ -90,12 +82,6 @@ export interface MenuDeclutterLifecycleHooks {
 	clearInterval(handle: unknown): void;
 }
 
-/**
- * Observe the current document without pinning the feature to the first documentElement or body.
- * Krunker can replace either during startup, and a navigation can leave the old observer watching a
- * detached document. The mutation observer follows the Document itself; the lifecycle and body poll
- * cover a whole-document navigation and environments that create a body without a mutation signal.
- */
 export function createMenuDeclutterLifecycleObserver(
 	callback: () => void,
 	hooks: MenuDeclutterLifecycleHooks
@@ -148,7 +134,7 @@ export interface MenuDeclutterEnvironment {
 	ensureStylesheet(): void;
 	queryAll(selector: string): readonly MenuDeclutterElement[];
 	removeStylesheet(): void;
-	/** Reads CSS visibility so ad blockers and the separate Hide Ads setting are respected. */
+
 	isHidden?(element: MenuDeclutterElement): boolean;
 }
 
@@ -184,11 +170,6 @@ const CONTROL_AFFORDANCE_TOKENS = new Set([
 	'keyboard_arrow_right'
 ]);
 
-/**
- * Krunker renders Material Icons as text nodes next to the visible label. Strip only the known
- * icon/affordance tokens so a control with an exact label still matches, while e.g. "Wallet
- * transaction history" and "Notifications settings" do not.
- */
 function semanticControlLabel(value: string | null | undefined): string {
 	const tokens = normalizeLabel(value).split(' ').filter(Boolean);
 	if (tokens.length > 0 && CONTROL_ICON_TOKENS.has(tokens[0])) tokens.shift();
@@ -248,7 +229,6 @@ function isVerticalSeparator(element: MenuDeclutterElement | null | undefined): 
 	return element?.closest('.verticalSeparator') === element;
 }
 
-/** Hide separators belonging to a removed header control, without touching adjacent controls. */
 function addAdjacentSeparatorTargets(
 	targets: Set<MenuDeclutterElement>,
 	control: MenuDeclutterElement
@@ -275,7 +255,6 @@ function normalizePromotionText(value: string | null | undefined): string {
 		.trim();
 }
 
-/** Exact semantic check so an ordinary stream card is never hidden because of a loose keyword. */
 export function isKrunkerStreamPromotionText(value: string | null | undefined): boolean {
 	return normalizePromotionText(value) === normalizePromotionText(STREAM_PROMOTION_TEXT);
 }
@@ -285,7 +264,6 @@ function isKrunkerStreamPromotionCard(card: MenuDeclutterElement): boolean {
 	return isKrunkerStreamPromotionText(title?.textContent);
 }
 
-/** Find current targets using Krunker's stable semantic IDs/classes, not generated Svelte hashes. */
 export function collectMenuDeclutterTargets(
 	environment: Pick<MenuDeclutterEnvironment, 'queryAll'>
 ): ReadonlySet<MenuDeclutterElement> {
@@ -297,13 +275,12 @@ export function collectMenuDeclutterTargets(
 	}
 	for (const dailySpin of environment.queryAll('#dailySpinDiv')) targets.add(dailySpin);
 	for (const storePromotion of environment.queryAll('#homeStoreAd')) targets.add(storePromotion);
-	// Hide only the Store's animated promotion fragments, never the Store menu item itself.
+
 	for (const shopBadge of environment.queryAll('.shop-badge')) targets.add(shopBadge);
 	for (const saleInfo of environment.queryAll('.kr-sale-info')) targets.add(saleInfo);
-	// Contact, Terms, and Changelog are the only children of this dedicated footer container.
+
 	for (const footerLinks of environment.queryAll('#termsInfo')) targets.add(footerLinks);
-	// Krunker exposes this generated settings control only when its ad-consent provider is active.
-	// Match its exact visible label so Import, Export, Reset, and future settings actions stay intact.
+
 	for (const settingsButton of environment.queryAll('.settingsBtn')) {
 		if (normalizeLabel(settingsButton.textContent) === 'manage ads') targets.add(settingsButton);
 	}
@@ -313,20 +290,15 @@ export function collectMenuDeclutterTargets(
 
 	const isRemovableControl = (control: MenuDeclutterElement): boolean => {
 		if (matchesAnySemanticLabel(control)) return true;
-		// The live notification section can contain expanded notification content. Its title remains a
-		// small exact semantic label even when the section's aggregate text no longer does.
+
 		const notificationTitle = control.querySelector('.webpush-title');
 		if (notificationTitle !== null && matchesAnySemanticLabel(notificationTitle)) return true;
-		// What's New has no stable ID. Its component does retain a stable icon and title class, while
-		// its optional version suffix makes aggregate exact-text matching unreliable.
+
 		const icon = normalizeLabel(control.querySelector('.menuItemIcon')?.textContent);
 		const title = normalizeLabel(control.querySelector('.menuItemTitle')?.textContent);
 		return icon === 'campaign' && (title === "what's new" || title.startsWith("what's new -"));
 	};
 
-	// Current and historical builds use explicit IDs for most requested controls. The KR balance is
-	// deliberately not targeted: #menuKRCount belongs to its own .ph-item, while Wallet is the
-	// separate .ph-item carrying the backpack icon and Wallet label.
 	for (const selector of [
 		'#menuBtnCustomGames',
 		'#menuBtnGuide',
@@ -363,8 +335,6 @@ export function collectMenuDeclutterTargets(
 		.filter(isKrunkerStreamPromotionCard);
 	for (const promotion of streamPromotions) targets.add(promotion);
 
-	// If Featured contains only Krunker's self-promotion, hide its now-empty frame too. A real
-	// featured stream keeps the section visible and only the promotion card is marked.
 	for (const promotion of streamPromotions) {
 		const section = promotion.closest('.featured-section');
 		if (!section) continue;
@@ -381,15 +351,11 @@ function hasRenderableAdContent(
 ): boolean {
 	if (hiddenTargets.has(element)) return false;
 
-	// The paid bundle's text is still present in textContent after its card is hidden. Ignore that
-	// text when deciding whether its surrounding slot contains another, real ad.
 	const paidPromotion = element.querySelector('#homeStoreAd');
 	const elementText = normalizeLabel(element.textContent);
 	const paidText = normalizeLabel(paidPromotion?.textContent);
 	if (elementText.length > 0 && elementText !== paidText) return true;
 
-	// Ad providers normally materialize an iframe/image/object after the placeholder is mounted.
-	// An empty #krunker-io_* placeholder must not keep a 300x250 flex slot alive.
 	for (const selector of ['iframe', 'img', 'video', 'object', 'embed', 'canvas', 'ins']) {
 		if (element.querySelectorAll(selector).length > 0) return true;
 	}
@@ -422,9 +388,6 @@ function collectAdLayoutTargets(
 			collapsed.add(topRightAd);
 		}
 
-		// #homeStoreAd is the paid promotion inside a fixed 300x250 swap slot. Collapse that parent
-		// only when its alternate ad container is also absent/hidden; a visible ordinary ad must keep
-		// its slot and the event/listener wiring Krunker attached to it.
 		if (swapSlot) {
 			const paidPromotion = swapSlot.querySelector('#homeStoreAd');
 			const alternateAd = swapSlot.querySelector('#adCon');
@@ -462,12 +425,9 @@ function collectStreamLayoutTargets(
 			collapsed.add(grid);
 			continue;
 		}
-		// Krunker counts its promo card when it sets the fixed grid columns. Once that card is hidden,
-		// use the count of genuine cards so two real streams do not leave a third-column hole.
+
 		gridColumns.set(grid, genuineCards.length);
 
-		// In Small mode Krunker also fixes the overlay width from that promo-inclusive count. Override
-		// that width only for the affected mode; Expanded mode intentionally keeps its 800px surface.
 		const overlay = grid.closest('.streams-overlay');
 		if (overlay && smallOverlays.has(overlay)) {
 			const width = streamOverlayWidth(genuineCards.length);
@@ -495,7 +455,6 @@ function collectRaisedStreamTargets(
 	}
 }
 
-/** Collect layout-only changes separately from hidden nodes so each owned marker can be restored. */
 export function collectMenuDeclutterLayoutTargets(
 	environment: Pick<MenuDeclutterEnvironment, 'queryAll' | 'isHidden'>,
 	hiddenTargets: ReadonlySet<MenuDeclutterElement> = collectMenuDeclutterTargets(environment)
@@ -646,8 +605,7 @@ function createBrowserEnvironment(): MenuDeclutterEnvironment {
 				return {
 					disconnect: () => { observer.disconnect(); },
 					observe: target => {
-						// Menu components are added or replaced as child nodes. Watching every style and text
-						// mutation would also observe gameplay HUD updates and our own marker attributes.
+
 						observer.observe(target as Node, {
 							childList: true,
 							subtree: true
@@ -701,7 +659,6 @@ ${streamWidthRules}`;
 
 let browserController: MenuDeclutterController | undefined;
 
-/** Apply the preference immediately; false restores every marked Krunker element. */
 export function applyMenuDeclutterSettings(
 	preferences: Readonly<Partial<UserPrefs>> | undefined
 ): void {

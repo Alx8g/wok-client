@@ -194,7 +194,6 @@ const settingsDesc: SettingsDesc = {
 	matchmaker_minRemainingTime: { title: 'Minimum Time Left', type: 'num', min: 0, max: 480, desc: 'Rejects matches with fewer seconds remaining.', safety: 0, cat: 3, instant: true },
 	matchmaker_openServerWindow: { title: 'Open Servers On Cancel', type: 'bool', desc: 'Opens Krunker’s server browser when a search is cancelled.', safety: 0, cat: 3, instant: true },
 
-	safeFlags_highPerformanceGpu: { title: 'Prefer High-Performance GPU', type: 'bool', desc: 'Asks Windows to use the faster GPU on PCs with two. Also set WOK to High performance in Windows if needed.', safety: 1, cat: 0 },
 	safeFlags_disableBackgrounding: { title: 'Keep Running When Tabbed Out', type: 'bool', desc: 'Keeps WOK at full speed when another window is focused. Uses more power.', safety: 2, cat: 0 },
 	safeFlags_gpuRasterizing: { title: 'Force GPU Rasterization', type: 'bool', desc: 'Overrides Chromium’s driver safety block. No proven performance gain; leave off.', safety: 3, cat: 4 },
 	experimentalFlags_experimental: { title: 'Experimental Flags', type: 'bool', desc: 'Enables unproven Linux flags that may reduce stability.', safety: 4, cat: 4 },

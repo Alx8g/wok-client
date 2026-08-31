@@ -23,7 +23,6 @@ export function computeCommandLineSwitches(userPrefs: UserPrefs, graphicsBackend
 		if (graphicsBackend === 'vulkan') enabledFeatures.push('Vulkan');
 	}
 	if (enabledFeatures.length > 0) switches.push({ name: 'enable-features', value: enabledFeatures.join(',') });
-	if (userPrefs.safeFlags_highPerformanceGpu) switches.push({ name: 'force-high-performance-gpu' });
 	if (userPrefs.experimentalFlags_experimental && platform === 'linux') switches.push({ name: 'enable-native-gpu-memory-buffers' });
 	if (userPrefs.safeFlags_gpuRasterizing) switches.push({ name: 'enable-gpu-rasterization' });
 	const uncapFrames = framePolicy ? framePolicy === 'uncapped' : Boolean(userPrefs.fpsUncap);

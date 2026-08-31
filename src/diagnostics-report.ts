@@ -29,7 +29,6 @@ const REPORTED_PREFERENCE_KEYS = [
 	'graphicsBackend',
 	'safeFlags_disableBackgrounding',
 	'safeFlags_gpuRasterizing',
-	'safeFlags_highPerformanceGpu',
 	'experimentalFlags_experimental'
 ] as const;
 

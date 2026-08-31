@@ -627,7 +627,7 @@ function whenDOMReady(callback: () => void) {
 	const observer = typeof MutationObserver === 'function'
 		? new MutationObserver(() => { if (document.body) run(); })
 		: undefined;
-	observer?.observe(document.documentElement, { childList: true, subtree: true });
+	if (document.documentElement) observer?.observe(document.documentElement, { childList: true, subtree: true });
 	// Last resort for a document that produces neither: the steps are all body-dependent, so a
 	// cheap poll is preferable to features that silently never start.
 	const poll = window.setInterval(() => { if (document.body) run(); }, 250);

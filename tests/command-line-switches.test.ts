@@ -6,7 +6,7 @@ import type { AppliedGraphicsBackend } from '../src/graphics-profile.ts';
 const BACKENDS: readonly AppliedGraphicsBackend[] = ['default', 'd3d11', 'd3d11on12', 'vulkan'];
 const FRAME_POLICIES: readonly (FramePolicy | undefined)[] = [undefined, 'uncapped', 'capped'];
 const PLATFORMS: readonly NodeJS.Platform[] = ['win32', 'linux', 'darwin'];
-const PERFORMANCE_PREF_KEYS = ['fpsUncap', 'safeFlags_disableBackgrounding', 'safeFlags_gpuRasterizing', 'safeFlags_highPerformanceGpu', 'experimentalFlags_experimental'] as const;
+const PERFORMANCE_PREF_KEYS = ['fpsUncap', 'safeFlags_disableBackgrounding', 'safeFlags_gpuRasterizing', 'experimentalFlags_experimental'] as const;
 const KNOWN_SWITCH_NAMES = new Set([
 	'autoplay-policy',
 	'disable-background-timer-throttling',
@@ -14,7 +14,6 @@ const KNOWN_SWITCH_NAMES = new Set([
 	'disable-backgrounding-occluded-windows',
 	'use-angle',
 	'enable-features',
-	'force-high-performance-gpu',
 	'enable-native-gpu-memory-buffers',
 	'enable-gpu-rasterization',
 	'disable-frame-rate-limit',
@@ -51,7 +50,6 @@ function expectedSwitchSet({ backend, framePolicy, platform, prefs }: MatrixCase
 	const enabledFeatures: string[] = platform === 'win32' ? [...WOK_WINDOWS_RUNTIME_FEATURES] : [];
 	if (backend === 'vulkan') enabledFeatures.push('Vulkan');
 	if (enabledFeatures.length > 0) expected.set('enable-features', enabledFeatures.join(','));
-	if (prefs.safeFlags_highPerformanceGpu) expected.set('force-high-performance-gpu', undefined);
 	if (prefs.experimentalFlags_experimental && platform === 'linux') expected.set('enable-native-gpu-memory-buffers', undefined);
 	if (prefs.safeFlags_gpuRasterizing) expected.set('enable-gpu-rasterization', undefined);
 	const uncapped = framePolicy === undefined ? prefs.fpsUncap === true : framePolicy === 'uncapped';
@@ -79,6 +77,11 @@ test('every mixture of performance preferences produces exactly the intended swi
 	}
 	assert.equal(checkedCases, 2 ** PERFORMANCE_PREF_KEYS.length * BACKENDS.length * FRAME_POLICIES.length * PLATFORMS.length);
 });
+test('legacy forced-GPU preferences cannot select a non-scanout adapter', () => {
+	const switches = computeCommandLineSwitches({ safeFlags_highPerformanceGpu: true }, 'default', undefined, 'win32');
+	assert.ok(!switches.some(entry => entry.name === 'force-high-performance-gpu'));
+});
+
 test('a calibrated frame policy overrides the manual fpsUncap preference in both directions', () => {
 	const names = (prefs: UserPrefs, framePolicy?: FramePolicy) => computeCommandLineSwitches(prefs, 'default', framePolicy, 'win32').map((entry) => entry.name);
 	assert.ok(!names({ fpsUncap: true }, 'capped').includes('disable-frame-rate-limit'));
@@ -91,7 +94,6 @@ test('shipped defaults on Windows produce the expected switch list in a stable o
 		fpsUncap: true,
 		safeFlags_disableBackgrounding: true,
 		safeFlags_gpuRasterizing: false,
-		safeFlags_highPerformanceGpu: true,
 		experimentalFlags_experimental: false
 	};
 	assert.deepEqual(computeCommandLineSwitches(shippedDefaults, 'd3d11on12', undefined, 'win32'), [
@@ -101,7 +103,6 @@ test('shipped defaults on Windows produce the expected switch list in a stable o
 		{ name: 'disable-backgrounding-occluded-windows' },
 		{ name: 'use-angle', value: 'd3d11on12' },
 		{ name: 'enable-features', value: WOK_WINDOWS_RUNTIME_FEATURES.join(',') },
-		{ name: 'force-high-performance-gpu' },
 		{ name: 'disable-frame-rate-limit' },
 		{ name: 'disable-gpu-vsync' }
 	]);

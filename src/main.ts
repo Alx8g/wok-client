@@ -380,7 +380,6 @@ const settingsSkeleton = {
 	safeFlags_disableBackgrounding: true,
 	// Chromium already GPU-rasterizes by default; true would only force past the driver blocklist.
 	safeFlags_gpuRasterizing: false,
-	safeFlags_highPerformanceGpu: true,
 	experimentalFlags_experimental: false,
 	matchmaker: false,
 	competitionAutomation: false,

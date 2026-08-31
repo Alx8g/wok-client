@@ -18,7 +18,7 @@ function baseInput(): DiagnosticsReportInput {
 		graphicsSelection: { backend: 'd3d11on12', preference: 'auto', reason: 'D3D11on12 is the tuned profile for Windows systems using only Intel graphics.', source: 'auto' },
 		osVersion: '10.0.26100',
 		platform: 'win32',
-		preferences: { competitiveMode: true, fpsUncap: true, fullscreen: 'windowed', graphicsBackend: 'auto', safeFlags_highPerformanceGpu: true }
+		preferences: { competitiveMode: true, fpsUncap: true, fullscreen: 'windowed', graphicsBackend: 'auto' }
 	};
 }
 
@@ -30,7 +30,6 @@ test('reports hardware, selection, and graceful placeholders without calibration
 	assert.ok(report.includes('recommendation: d3d11on12'));
 	assert.ok(report.includes('backend failures: none'));
 	assert.ok(report.includes('CALIBRATION: never run'));
-	assert.ok(report.includes('safeFlags_highPerformanceGpu=true'));
 	assert.ok(report.includes('safeFlags_gpuRasterizing=unset'));
 });
 

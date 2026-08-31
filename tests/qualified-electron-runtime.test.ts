@@ -10,10 +10,10 @@ import {
     resolveQualifiedElectronZipDir
 } from '../forge.config.ts';
 
-const RC13_ELECTRON_SHA256 = 'b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4';
+const ACCEPTED_ELECTRON_SHA256 = 'b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4';
 
-test('rc.13 pins the accepted Electron runtime', () => {
-    assert.equal(QUALIFIED_ELECTRON_SHA256, RC13_ELECTRON_SHA256);
+test('the release pins the accepted Electron runtime', () => {
+    assert.equal(QUALIFIED_ELECTRON_SHA256, ACCEPTED_ELECTRON_SHA256);
 });
 
 test('qualified Electron staging is opt-in', () => {

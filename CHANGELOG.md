@@ -1,3 +1,9 @@
+## WOK Client 1.1.0-rc.14 (2026-08-31)
+
+### Fixed
+- Removed the forced high-performance GPU switch that selected the RX 580 while the active display was Intel-owned, producing a gray game window on hybrid-GPU systems.
+- Guarded the document-start observer until Krunker creates its root element, preventing an early visual setup error on faster launches.
+
 ## WOK Client 1.1.0-rc.13 (2026-08-31)
 
 ### Runtime

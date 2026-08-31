@@ -12,7 +12,6 @@ export function applyCommandLineSwitches(userPrefs: UserPrefs, graphicsBackend: 
 	}
 	if (userPrefs.safeFlags_disableBackgrounding) console.log('Applied flags to disable background throttling');
 	console.log(`Using graphics backend: ${graphicsBackend}`);
-	if (userPrefs.safeFlags_highPerformanceGpu) console.log('Requested the high-performance GPU on dual-GPU systems');
 	if (userPrefs.experimentalFlags_experimental && process.platform === 'linux') console.log('Enabled experimental Linux GPU memory buffers');
 	if (userPrefs.safeFlags_gpuRasterizing) console.log('Forcing GPU rasterization past the driver blocklist');
 	const uncapFrames = framePolicy ? framePolicy === 'uncapped' : Boolean(userPrefs.fpsUncap);

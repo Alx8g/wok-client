@@ -6,11 +6,7 @@ export interface CommandLineSwitch {
 	value?: string;
 }
 
-export const WOK_WINDOWS_RUNTIME_FEATURES = [
-	'WebSocketStarvationEscape:min_wait/0ms',
-	'PostedMessageStarvationEscape:min_wait/0ms',
-	'WokNetworkServiceHighPriority'
-] as const;
+export const WOK_WINDOWS_RUNTIME_FEATURES: readonly string[] = [];
 
 export function computeCommandLineSwitches(userPrefs: UserPrefs, graphicsBackend: AppliedGraphicsBackend, framePolicy?: FramePolicy, platform: NodeJS.Platform = process.platform): CommandLineSwitch[] {
 	const switches: CommandLineSwitch[] = [{ name: 'autoplay-policy', value: 'no-user-gesture-required' }];

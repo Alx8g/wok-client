@@ -1,3 +1,9 @@
+## WOK Client 1.1.0-rc.15 (2026-08-31)
+
+### Fixed
+- Restored Windows releases to the proven default patched Electron 44 nightly runtime after rc.13/rc.14 packaged smoke testing reproduced a gray renderer.
+- Kept the rc.14 hybrid-GPU fix and document-root guard while returning all custom Chromium scheduler work to diagnostic-only status.
+
 ## WOK Client 1.1.0-rc.14 (2026-08-31)
 
 ### Fixed

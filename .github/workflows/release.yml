@@ -118,6 +118,22 @@ jobs:
       - name: Build platform package
         run: pnpm run make -- --arch=${{ matrix.arch }}
 
+      - name: Smoke installed Windows package
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem 'dist/make/nsis/x64/*setup.exe')
+          if ($installers.Count -ne 1) { throw "Expected one NSIS installer, found $($installers.Count)." }
+          ./scripts/smoke-packaged-windows.ps1 -InstallerPath $installers[0].FullName
+
+      - name: Upload Windows smoke diagnostics
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wok-smoke-windows
+          path: dist/smoke/**
+          if-no-files-found: warn
+
       - name: Upload platform package
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -137,6 +153,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: artifacts
+          pattern: wok-client-*
           merge-multiple: true
 
       - name: Create checksums and release notes

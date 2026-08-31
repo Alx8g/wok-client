@@ -118,6 +118,7 @@ import {
 	selectGameplayDisplay,
 	type DisplayOption
 } from './display-selection.ts';
+import { analyzeReleaseSmokeBitmap } from './release-smoke.ts';
 import {
 	RUNTIME_PROFILE_DURATION_MS,
 	RUNTIME_PROFILE_SAMPLE_INTERVAL_US,
@@ -141,6 +142,12 @@ if (userDataOverrideDir) {
 		console.error(`Ignoring WOK_USER_DATA_DIR (not an absolute path): ${userDataOverrideDir}`);
 	}
 }
+
+const releaseSmokeReportPath = process.env.WOK_RELEASE_SMOKE_REPORT?.trim();
+if (releaseSmokeReportPath && !pathIsAbsolute(releaseSmokeReportPath)) {
+	throw new Error(`WOK_RELEASE_SMOKE_REPORT must be absolute: ${releaseSmokeReportPath}`);
+}
+const RELEASE_SMOKE_TIMEOUT_MS = 60_000;
 
 // Process start is needed by both ordinary startup profiling and optional diagnostic marks.
 const processStartWallClockMs = estimateProcessStartWallClockMs(Date.now(), process.uptime());
@@ -2145,12 +2152,65 @@ app.on('ready', async () => {
 	// Telling "the renderer never reported readiness" apart from "readiness arrived but the window
 	// stayed hidden" is the whole diagnosis of a stuck launch, so record the first signal here too.
 	let gameUsableReportedAt: number | undefined;
+	let releaseSmokeSettled = false;
+	let releaseSmokeTimer: ReturnType<typeof setTimeout> | undefined;
+	const finishReleaseSmoke = async (requestedOutcome: 'success' | 'timeout') => {
+		if (!releaseSmokeReportPath || releaseSmokeSettled) return;
+		releaseSmokeSettled = true;
+		if (releaseSmokeTimer !== undefined) clearTimeout(releaseSmokeTimer);
+		const screenshotPath = `${releaseSmokeReportPath}.png`;
+		let screenshotError: string | undefined;
+		let pixels: ReturnType<typeof analyzeReleaseSmokeBitmap> | undefined;
+		try {
+			let captureTimeout: ReturnType<typeof setTimeout> | undefined;
+			const image = await Promise.race([
+				mainWindow.webContents.capturePage(),
+				new Promise<never>((_resolve, reject) => {
+					captureTimeout = setTimeout(() => { reject(new Error('Screenshot capture timed out.')); }, 5_000);
+				})
+			]);
+			if (captureTimeout !== undefined) clearTimeout(captureTimeout);
+			pixels = analyzeReleaseSmokeBitmap(image.toBitmap());
+			await writeFile(screenshotPath, image.toPNG());
+		} catch (error) {
+			screenshotError = error instanceof Error ? error.message : String(error);
+		}
+		const success = requestedOutcome === 'success' && pixels?.nonUniform === true;
+		const report = {
+			appVersion: app.getVersion(),
+			capturedAt: new Date().toISOString(),
+			enabledFeatures: app.commandLine.getSwitchValue('enable-features'),
+			forceHighPerformanceGpu: app.commandLine.hasSwitch('force-high-performance-gpu'),
+			gameUsableElapsedMs: gameUsableReportedAt === undefined ? null : gameUsableReportedAt - processStartWallClockMs,
+			outcome: success ? 'success' : 'failure',
+			pixels: pixels ?? null,
+			requestedOutcome,
+			runtime: { chrome: process.versions.chrome, electron: process.versions.electron, node: process.versions.node },
+			screenshotError: screenshotError ?? null,
+			screenshotPath,
+			url: mainWindow.webContents.getURL(),
+			visible: mainWindow.isVisible()
+		};
+		try {
+			await writeFile(releaseSmokeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+			console.log(`[wok-release-smoke] ${JSON.stringify(report)}`);
+			app.exit(success ? 0 : 2);
+		} catch (error) {
+			console.error('Failed to write release smoke report.', error);
+			app.exit(3);
+		}
+	};
 	const noteGameUsable = (event: IpcMainEvent) => {
 		if (!isTrustedGameIpcSender(event) || gameUsableReportedAt !== undefined) return;
 		gameUsableReportedAt = Date.now();
+		void finishReleaseSmoke('success');
 	};
 	ipcMain.on('wok_game_usable', noteGameUsable);
-	mainWindow.once('closed', () => { ipcMain.removeListener('wok_game_usable', noteGameUsable); });
+	if (releaseSmokeReportPath) releaseSmokeTimer = setTimeout(() => { void finishReleaseSmoke('timeout'); }, RELEASE_SMOKE_TIMEOUT_MS);
+	mainWindow.once('closed', () => {
+		ipcMain.removeListener('wok_game_usable', noteGameUsable);
+		if (releaseSmokeTimer !== undefined) clearTimeout(releaseSmokeTimer);
+	});
 
 	const GRAPHICS_STABILITY_CONFIRMATION_MS = 30_000;
 	const graphicsStability = createGraphicsStabilityConfirmation({

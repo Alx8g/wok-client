@@ -14,7 +14,7 @@ Releases: [WOK Client releases](https://github.com/nzalexgarciagil-ctrl/wok-clie
 
 WOK Client is an independent GPLv3 project. Release provenance, third-party licenses, and modification notices are recorded in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), [CHANGELOG.md](CHANGELOG.md), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt).
 
-Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations.
+Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations. Before publication, the Windows job installs its generated NSIS package and requires a trusted game-usable signal plus a non-uniform screenshot from the installed executable.
 
 WOK Client is an independent project. It is not affiliated with, endorsed by, or approved by FRVR. An optimized browser wrapper is not automatically exempt from a game's terms, so users should review the current Krunker rules and use optional legacy features at their own risk.
 

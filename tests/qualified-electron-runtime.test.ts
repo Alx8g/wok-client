@@ -6,8 +6,15 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
     QUALIFIED_ELECTRON_ARCHIVE_NAME,
+    QUALIFIED_ELECTRON_SHA256,
     resolveQualifiedElectronZipDir
 } from '../forge.config.ts';
+
+const ACCEPTED_ELECTRON_SHA256 = 'b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4';
+
+test('the release pins the accepted Electron runtime', () => {
+    assert.equal(QUALIFIED_ELECTRON_SHA256, ACCEPTED_ELECTRON_SHA256);
+});
 
 test('qualified Electron staging is opt-in', () => {
     assert.equal(resolveQualifiedElectronZipDir({}), undefined);

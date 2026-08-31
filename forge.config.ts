@@ -40,7 +40,7 @@ export const PATCHED_ELECTRON_RELEASE = `v${PATCHED_ELECTRON_VERSION}-patched-2`
 export const QUALIFIED_ELECTRON_ARCHIVE_NAME =
     `electron-v${PATCHED_ELECTRON_VERSION}-win32-x64.zip`;
 export const QUALIFIED_ELECTRON_SHA256 =
-    "20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0";
+    "b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4";
 
 function sha256File(filePath: string): string {
     const descriptor = openSync(filePath, 'r');

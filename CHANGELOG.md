@@ -1,3 +1,10 @@
+## WOK Client 1.1.0-rc.16 (2026-08-31)
+
+### Runtime
+- Restored the checksum-pinned Chromium 152 runtime after an integrity-matched packaged smoke test passed with the real profile.
+- Enabled only Network Service `High` priority. WebSocket and posted-message scheduler experiments remain disabled.
+- Retained the rc.14 hybrid-GPU fix, so WOK no longer forces a non-scanout adapter.
+
 ## WOK Client 1.1.0-rc.15 (2026-08-31)
 
 ### Fixed

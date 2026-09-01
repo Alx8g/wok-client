@@ -14,7 +14,7 @@ Releases: [WOK Client releases](https://github.com/nzalexgarciagil-ctrl/wok-clie
 
 WOK Client is an independent GPLv3 project. Release provenance, third-party licenses, and modification notices are recorded in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), [CHANGELOG.md](CHANGELOG.md), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt).
 
-Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations. Before publication, the Windows job installs its generated NSIS package and requires a trusted game-usable signal plus a non-uniform screenshot from the installed executable.
+Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations.
 
 WOK Client is an independent project. It is not affiliated with, endorsed by, or approved by FRVR. An optimized browser wrapper is not automatically exempt from a game's terms, so users should review the current Krunker rules and use optional legacy features at their own risk.
 
@@ -96,21 +96,21 @@ To make a local platform package after reviewing the provenance and platform pre
 pnpm run make
 ```
 
-Tagged Windows x64 releases use the accepted Electron 44 / Chromium 152 runtime
-documented in [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). Linux x64 and macOS arm64
-continue to use the default patched Electron nightly archives.
+Tagged releases use the default patched Electron 44 nightly runtime documented in
+[PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). The optimized qualified Chromium 152
+archive remains an explicit local diagnostic override; it is not the current production
+runtime because real-play testing found a network-latency regression.
 
-To reproduce the Windows package locally, download the pinned runtime from
-`wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54-network-high.1`, then point
-Forge at it:
+To reproduce that diagnostic runtime locally, point Forge at the pinned archive before
+packaging:
 
 ```powershell
-$env:WOK_QUALIFIED_ELECTRON_ZIP = 'electron-v44.0.0-nightly.20260522-wok-chromium152-network-high-win32-x64.zip'
+$env:WOK_QUALIFIED_ELECTRON_ZIP = 'T:/wok-electron-build/package/electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip'
 pnpm run make -- --arch=x64
 ```
 
 Forge rejects any archive whose SHA-256 is not
-`b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4` and gives
+`20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0` and gives
 Electron Packager the verified local ZIP through `electronZipDir`.
 
 There is intentionally no registry publish command in the package metadata. Pushing a reviewed version tag invokes the pinned GitHub Actions release workflow, which publishes unsigned GitHub prerelease artifacts and SHA-256 checksums.

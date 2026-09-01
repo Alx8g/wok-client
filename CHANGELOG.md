@@ -1,3 +1,9 @@
+## WOK Client 1.1.0-rc.17 (2026-09-01)
+
+### Fixed
+- Restored the proven patched Electron runtime after live testing reproduced 178 ms ping on servers that normally measured about 26 ms with the custom Chromium runtime.
+- Kept the installed-package release smoke gate, hybrid-GPU fix, source cleanup and all non-runtime features.
+
 ## WOK Client 1.1.0-rc.16 (2026-08-31)
 
 ### Runtime

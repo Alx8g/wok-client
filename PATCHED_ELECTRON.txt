@@ -1,65 +1,50 @@
 WOK CLIENT PATCHED ELECTRON PROVENANCE
-Last verified: 2026-08-31
+Last verified: 2026-08-30
 
-CURRENT WINDOWS RELEASE RUNTIME
+CURRENT RELEASE RUNTIME
 
-Tagged Windows x64 releases use:
-  Archive: electron-v44.0.0-nightly.20260522-wok-chromium152-network-high-win32-x64.zip
-  Release: https://github.com/nzalexgarciagil-ctrl/wok-client/releases/tag/wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54-network-high.1
-  SHA-256: b735eddbde18d75edae41147a19b642d8eec41714b7878ced181ab59c1ebd7e4
-  Electron: 44.0.0-nightly.20260522
-  Chromium: 152.0.7977.54
-  Chromium source base: 68bf21f4e1edf03f2e2be14a35e2732e200fe828
-  Build configuration: official static release build, PGO phase 2 profile
-    input, ThinLTO, V8 builtins PGO, and stripped Chromium, Blink, and V8
-    symbols
+Tagged releases use the default patched Electron 44 nightly archives from
+thegu5/electron documented below. The Windows x64 archive SHA-256 is:
+  b754494a4cefb03de1e120f936c68de231b1dd58c9b2c72bd60a8b60e966bc0e
 
-The attached WOK_ELECTRON_SOURCE.patch implements:
-  - Windows High priority for only the Network Service utility process
-  - a dedicated WebSocket I/O queue with one control-priority task service
-  - a separately gated posted-message queue with one control-priority task
-    service
-  - unchanged input and compositor queue priorities
+The optimized qualified Chromium 152 Windows archive remains available only as
+an explicit WOK_QUALIFIED_ELECTRON_ZIP diagnostic override. Real-play A/B
+testing found the user-reported network-latency regression in that runtime and
+not in the default patched nightly payload, whose 17 compared Chromium files
+matched the no-regression isolated build byte-for-byte.
 
-Current WOK builds enable only Network Service High priority. The WebSocket and
-posted-message scheduler experiments remain present but disabled after packaged
-runtime smoke testing failed when they were activated.
+LOCALLY QUALIFIED WOK CHROMIUM 152 WINDOWS RUNTIME (DIAGNOSTIC OVERRIDE)
 
-The runtime uses Chromium's base uncapped draw-throttle condition. It does not
-ship the later depth-one uncapped compositor back-pressure experiment. The
-source patch, runtime audit and checksum manifest are assets on the runtime
-release above.
-
-Validation completed before release:
-  - ZIP integrity for all 73 entries
-  - only electron.exe differs from the preserved optimized runtime payload
-  - focused scheduler tests passed 4/4
-  - a clean three-cycle comparison covered nine runtime treatments
-  - the user accepted the isolated WOK preview after live gameplay ping/FPS
-    testing
-
-The clean fixed-load matrix measured a 2,916 median requestAnimationFrame
-callback rate for the final all-escapes candidate. These callback measurements
-do not establish submitted, GPU-completed, presented or displayed frame rates.
-Performance varies by hardware, drivers, thermals, game updates and scene.
-
-Local Forge and Windows release builds select this archive through
-WOK_QUALIFIED_ELECTRON_ZIP. forge.config.ts verifies the pinned SHA-256, stages
-the standard Electron archive name on the same volume, and passes that
-directory to Electron Packager through electronZipDir.
-
-Linux x64 and macOS arm64 releases continue to use the default patched Electron
-44 nightly archives documented below.
-
-PREVIOUS OPTIMIZED WINDOWS DIAGNOSTIC
-
-The previous optimized archive remains available for comparison:
+The locally installed Windows x64 performance build uses:
   Archive: electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip
   Release: https://github.com/nzalexgarciagil-ctrl/wok-client/releases/tag/wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54
   SHA-256: 20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0
+  Electron: 44.0.0-nightly.20260522
+  Chromium: 152
+  Electron patch commits:
+    8c5f55ba7  fix: preserve IPC under uncapped mouse input
+    d62cccc07  fix: bound uncapped compositor submissions
+  Chromium source commit: 68bf21f4e1edf
+  Build configuration: official static release build, PGO phase 2, ThinLTO,
+    V8 builtins PGO, and stripped Chromium, Blink, and V8 symbols
 
-Real-play A/B testing reproduced the prior user-reported network-latency issue
-in that archive. It is not used by current tagged releases.
+The archive passed ZIP integrity, extracted launch, synthetic 2560x1440, and
+13x10-second real-game qualification. Against official Electron 44 stable on
+the same machine and workload, it measured:
+  Synthetic paired geometric mean rAF callback-rate gain: 6.69%
+  Real-game average rAF callback-rate mean gain: 7.46%
+  Real-game rAF callback-rate 1% low mean gain: 9.56%
+  Real-game p95 rAF callback-interval reduction: 11.45%
+
+These callback measurements do not establish submitted, GPU-completed, or
+presented frame rates. Frame-provenance instrumentation is required before
+using them as rendered-frame results.
+
+Local Forge builds select this archive only when WOK_QUALIFIED_ELECTRON_ZIP is
+set. forge.config.ts verifies the pinned SHA-256, stages the standard Electron
+archive name on the same volume, and passes that directory to Electron Packager
+through electronZipDir. The public cross-platform fallback documented below is
+unchanged when the environment variable is absent.
 
 WOK Client uses the npm package metadata and TypeScript API definitions from:
   electron-nightly 44.0.0-nightly.20260522

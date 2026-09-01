@@ -77,8 +77,8 @@ test('every mixture of performance preferences produces exactly the intended swi
 	}
 	assert.equal(checkedCases, 2 ** PERFORMANCE_PREF_KEYS.length * BACKENDS.length * FRAME_POLICIES.length * PLATFORMS.length);
 });
-test('Windows enables only the packaged-smoke-tested runtime feature', () => {
-	assert.deepEqual(WOK_WINDOWS_RUNTIME_FEATURES, ['WokNetworkServiceHighPriority']);
+test('release builds do not enable diagnostic runtime features', () => {
+	assert.deepEqual(WOK_WINDOWS_RUNTIME_FEATURES, []);
 });
 
 test('legacy forced-GPU preferences cannot select a non-scanout adapter', () => {
@@ -106,7 +106,6 @@ test('shipped defaults on Windows produce the expected switch list in a stable o
 		{ name: 'disable-renderer-backgrounding' },
 		{ name: 'disable-backgrounding-occluded-windows' },
 		{ name: 'use-angle', value: 'd3d11on12' },
-		{ name: 'enable-features', value: WOK_WINDOWS_RUNTIME_FEATURES.join(',') },
 		{ name: 'disable-frame-rate-limit' },
 		{ name: 'disable-gpu-vsync' }
 	]);

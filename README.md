@@ -1,226 +1,81 @@
 # WOK Client
 
-WOK Client is the fastest Krunker client. Ever.
+The fastest Krunker client. Ever. WOK Client is an independent, open-source (GPLv3) desktop client for Krunker on Windows, Linux, and macOS.
 
-Website: [wok.social](https://wok.social)
-
-Source: [github.com/nzalexgarciagil-ctrl/wok-client](https://github.com/nzalexgarciagil-ctrl/wok-client)
-
-Releases: [WOK Client releases](https://github.com/nzalexgarciagil-ctrl/wok-client/releases)
+[Website](https://wok.social) · [Releases](https://github.com/nzalexgarciagil-ctrl/wok-client/releases) · [Source](https://github.com/nzalexgarciagil-ctrl/wok-client)
 
 ![WOK Client](assets/full_logo.svg)
 
-## Project status
+WOK Client is not affiliated with, endorsed by, or approved by FRVR. An optimized browser wrapper is not automatically exempt from a game's terms, so review the current Krunker rules. Optional legacy features are disabled by default and used at your own risk.
 
-WOK Client is an independent GPLv3 project. Release provenance, third-party licenses, and modification notices are recorded in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt), [CHANGELOG.md](CHANGELOG.md), and [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt).
+## Install
 
-Pull requests and branch pushes run source validation on Windows, Linux, and macOS. Version tags build unsigned platform packages and publish them as GitHub prereleases with checksums and explicit testing limitations.
-
-WOK Client is an independent project. It is not affiliated with, endorsed by, or approved by FRVR. An optimized browser wrapper is not automatically exempt from a game's terms, so users should review the current Krunker rules and use optional legacy features at their own risk.
+Download a package from the [releases page](https://github.com/nzalexgarciagil-ctrl/wok-client/releases). Tagged builds are unsigned prereleases with SHA-256 checksums; Windows x64 has had real gameplay testing, Linux and macOS are built and source-validated but still need native smoke testing. See [docs/linux-qa-checklist.md](docs/linux-qa-checklist.md) for what to verify on Linux. Unsigned macOS builds may need `xattr -c "/Applications/WOK Client.app"` to clear quarantine.
 
 ## Features
 
 - Hardware-aware graphics selection with recovery and calibration safeguards
 - Performance diagnostics for frame pacing, graphics backend, and WebGL state
-- Bundled themes for the client's own UI, plus your own CSS files, switchable without a restart
+- Bundled themes plus your own CSS files, switchable without a restart
 - Menu timer, quick class picker, and match-result export
 - Configurable matchmaker and competition-room helper
-- Optional Discord Rich Presence using an in-tree IPC client
-- Ad requests are blocked by default; legacy resource swapping, custom filters, matchmaker, and competition automation remain disabled by default
+- Optional Discord Rich Presence
+- Ad requests blocked by default
 
-Terms-sensitive features remain configurable. Legacy and early WOK profiles are migrated once without deleting the original profile files.
+Legacy and early WOK profiles are migrated once without deleting the original profile files.
 
-## Security boundaries
+## Security
 
-WOK Client keeps Electron web security enabled, disables renderer Node integration, validates privileged IPC senders and payloads, restricts main-window navigation to HTTPS Krunker origins, and opens other HTTPS links in the system browser.
-
-The game preload still requires the page's main JavaScript world, so `contextIsolation` and the renderer sandbox are not currently enabled for the game window. Do not load arbitrary sites through development overrides. The override setting accepts only HTTPS URLs on `krunker.io` or its subdomains.
+Electron web security stays enabled, renderer Node integration is disabled, privileged IPC senders and payloads are validated, and main-window navigation is restricted to HTTPS Krunker origins; other HTTPS links open in the system browser. The game preload needs the page's main JavaScript world, so `contextIsolation` and the renderer sandbox are not enabled for the game window. Do not load arbitrary sites through development overrides; the override setting accepts only HTTPS URLs on `krunker.io` or its subdomains.
 
 ## Hotkeys
 
 Press `Alt` on Windows or Linux to reveal the application menu.
 
-- `F5`: reload the game
-- `F7`: copy the current game link
-- `Ctrl+F7` or `Cmd+F7`: join the game link from the clipboard
-- `F12` or `Ctrl+Shift+I`/`Cmd+Shift+I`: toggle Developer Tools
-- `Ctrl+Shift+F9` or `Cmd+Shift+F9`: capture a 10-second renderer CPU profile
-- Matchmaker accept, cancel, and launch keys are configurable; the default launch key is `F1`
+| Key | Action |
+| --- | --- |
+| `F5` | Reload the game |
+| `F7` | Copy the current game link |
+| `Ctrl+F7` / `Cmd+F7` | Join the game link from the clipboard |
+| `F12` or `Ctrl+Shift+I` | Toggle Developer Tools |
+| `Ctrl+Shift+F9` | Capture a 10-second renderer CPU profile |
+| `F1` (configurable) | Matchmaker launch |
 
-Runtime profiles are written beneath the app's `config/runtime-profiles/` directory. A second launch with `--capture-runtime-profile` triggers the same capture without a keyboard shortcut. Rank renderer self-time from a source checkout with:
+Matchmaker accept, cancel, and launch keys are configurable. A second launch with `--capture-runtime-profile` captures the same profile without a keyboard shortcut.
+
+## Diagnostics
+
+Analyze a captured renderer profile or Chromium trace from a source checkout:
 
 ```sh
 node scripts/analyze-runtime-profile.mjs "/path/to/renderer.cpuprofile"
-```
-
-For a diagnostic Chromium trace, keep callback, commit, present-call, and presentation-feedback rates separate with:
-
-```sh
 node scripts/analyze-frame-trace.mjs "/path/to/chromium-trace.json" "/path/to/report.json"
 ```
 
-The frame-trace report also includes queue depth and p50/p95/p99 stage durations. Trace throughput is diagnostic only because tracing can reduce frame cadence.
+The frame-trace report separates callback, commit, present-call, and presentation-feedback rates and includes queue depth and p50/p95/p99 stage durations. Trace throughput is diagnostic only because tracing can reduce frame cadence.
 
-## Build and validation
+## Build
 
-Requirements:
-
-- Git
-- Node.js 24.13.0 or newer
-- pnpm 11.15.1 or newer
-- Platform packaging tools when making a local executable; Windows installer creation also requires NSIS
-
-The documented patched-Electron release currently provides archives for macOS arm64, Linux x64, and Windows x64. Other architectures require a separately reviewed Electron build and checksum record. Windows x64 has received local gameplay testing. Linux x64 and macOS arm64 retain the existing packaging paths and are covered by source validation, but still require native package and gameplay smoke tests before they are described as verified releases.
-
-From a source checkout:
+Requirements: Git, Node.js 24.13.0+, pnpm 11.15.1+, and platform packaging tools for a local executable (NSIS additionally for the Windows installer).
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm run validate
+pnpm run validate   # lint + typecheck + tests
+pnpm start          # run from source
+pnpm run make       # local platform package
 ```
 
-`pnpm install` downloads the documented patched Electron build and verifies it against the release checksum manifest. The mirror, source commit, and SHA-256 values are recorded in [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt).
+`pnpm install` downloads the documented patched Electron build and verifies it against the release checksum manifest recorded in [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). There is no registry publish command; pushing a reviewed version tag runs the pinned GitHub Actions release workflow. Release provenance and modification notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) and [CHANGELOG.md](CHANGELOG.md).
 
-Development commands:
+## Documentation
 
-```sh
-pnpm start
-pnpm run lint
-pnpm run typecheck
-pnpm test
-```
-
-To make a local platform package after reviewing the provenance and platform prerequisites:
-
-```sh
-pnpm run make
-```
-
-Tagged releases use the default patched Electron 44 nightly runtime documented in
-[PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). The optimized qualified Chromium 152
-archive remains an explicit local diagnostic override; it is not the current production
-runtime because real-play testing found a network-latency regression.
-
-To reproduce that diagnostic runtime locally, point Forge at the pinned archive before
-packaging:
-
-```powershell
-$env:WOK_QUALIFIED_ELECTRON_ZIP = 'T:/wok-electron-build/package/electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip'
-pnpm run make -- --arch=x64
-```
-
-Forge rejects any archive whose SHA-256 is not
-`20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0` and gives
-Electron Packager the verified local ZIP through `electronZipDir`.
-
-There is intentionally no registry publish command in the package metadata. Pushing a reviewed version tag invokes the pinned GitHub Actions release workflow, which publishes unsigned GitHub prerelease artifacts and SHA-256 checksums.
-
-## Windows installer
-
-`pnpm run make` builds the Windows installer with NSIS through `MakerNSIS.ts`. The wizard walks a welcome page, the GPL-3.0 license, a components page for the two shortcuts, the install location, a progress log that names each step, and a finish page that can launch the client.
-
-The install is per-user. It goes to `%LOCALAPPDATA%\WOK Client`, writes only under `HKCU`, and never asks for administrator rights. Uninstalling removes the application, its shortcuts, its Add/Remove Programs entry, its `App Paths` and `Applications` registration, and any `wok:` or `crankshaft:` link handler still pointing at that installation. Settings in `%APPDATA%\WOK Client` are left alone.
-
-Command line switches, on both the installer and `Uninstall.exe`:
-
-- `/S`: silent, with every default component
-- `/D=<path>`: install location; must be the last argument and unquoted
-- `/NODESKTOP`: skip the desktop shortcut
-- `/NOSTARTMENU`: skip the Start Menu shortcut
-
-A silent install that finds the application running exits with a non-zero code instead of waiting on a prompt. `QuietUninstallString` in Add/Remove Programs already carries `/S`.
-
-### Installer artwork
-
-The Modern UI bitmaps are committed under `build/installer/`:
-
-- `wok-header.bmp`, 150x57, the header on every page after the welcome
-- `wok-side.bmp`, 164x314, the welcome and finish panel
-
-Both are generated from `assets/wok-mark.svg` and `assets/full_logo.svg` by `scripts/generate-installer-art.mjs`. The generator is dependency-free, deterministic, and needs no image tooling or installed fonts:
-
-```sh
-node scripts/generate-installer-art.mjs
-node scripts/generate-installer-art.mjs --check
-```
-
-Edit a brand vector, rerun the generator, and commit the bitmaps. `pnpm test` fails when the committed bitmaps no longer match the generator output, and the maker regenerates them if a checkout is missing them.
-
-## Linux: Wayland and X11
-
-WOK Client picks its display server at launch. If the session looks like Wayland it runs as a
-native Wayland application; otherwise it runs on X11, which inside a Wayland session means
-XWayland. The session is Wayland when `WAYLAND_DISPLAY` is set, or when `XDG_SESSION_TYPE` is
-exactly `wayland`.
-
-This is a deliberate change from earlier versions, which always passed `--ozone-platform=x11`.
-Electron has defaulted to native Wayland since Electron 38; WOK ships Electron 44, so the forced
-X11 was an override of the framework's own default. XWayland adds a composition and pacing layer,
-is upscaled by the compositor on fractional-scaling desktops, and is the path affected by
-[mutter#3765](https://gitlab.gnome.org/GNOME/mutter/-/issues/3765), where the pointer escapes a
-window that has locked it. Native Wayland avoids all three.
-
-Detecting `WAYLAND_DISPLAY` is what WOK adds over Electron's own detection, which reads only
-`XDG_SESSION_TYPE`. Sessions started from a TTY, from some display managers, or inside some
-containers leave that variable unset and would otherwise silently fall back to X11.
-
-The full evidence behind this default, including what to re-check on the next Electron bump, is in
-[docs/linux-wayland.md](docs/linux-wayland.md).
-
-To override, set `WOK_OZONE_PLATFORM` before launching:
-
-| Value | Effect |
+| Doc | Contents |
 | --- | --- |
-| `wayland` | Force native Wayland |
-| `x11` | Force X11, which is XWayland inside a Wayland session |
-| `auto` | Pass no flag and let Electron choose |
-
-```sh
-WOK_OZONE_PLATFORM=x11 ./wok-client-x64.AppImage
-```
-
-The value is matched exactly, in lower case. Anything else is ignored with a message on standard
-error and the session detection runs as usual, so a typo cannot leave the client unable to start.
-
-An environment variable rather than a setting, because Chromium resolves the display server before
-any of the client's own code runs, so a stored preference cannot be read in time.
-
-The client prints the display server it ended up on at startup, which is the first thing to check
-in a bug report. If pointer lock, window placement, or fullscreen misbehave on your desktop,
-`WOK_OZONE_PLATFORM=x11` restores the previous behaviour; please report what broke.
-
-Some Wayland behaviour is set by the compositor, not by the client, and differs from X11: the
-compositor decides where windows are placed, so borderless mode cannot position itself on a chosen
-monitor, and requests to raise or focus a window are advisory. Input-method (IME) support uses
-`text-input-v3`; `--enable-wayland-ime` can be appended if your input method needs the older path.
-
-### Not yet verified on a Linux desktop
-
-Linux packages are built and source-validated in CI but have not had a gameplay smoke test. If you
-run WOK on Linux, these are the things worth checking, in order:
-
-1. **Pointer lock.** Click into a match and turn continuously in one direction. The cursor must
-   stay captured and must not hit an invisible edge or reappear over another window. Press Escape
-   and confirm it releases, then click back in and confirm it recaptures. Check it windowed,
-   fullscreen and borderless, and on a fractionally scaled display if you have one.
-2. Fullscreen and borderless actually cover the monitor, with square corners and no gap.
-3. The window carries the WOK icon in the dock, the window switcher, and the window itself.
-4. `wok://` and `crankshaft://` links open the client, and F7 or Ctrl+F7 round-trips a game link.
-5. Multi-monitor and mixed-DPI setups: the client opens on the expected display and is not blurry.
-6. The launch animation window appears above the game and hands over without leaving a stray window.
-
-## macOS quarantine
-
-Locally built or unsigned applications may be quarantined by macOS. Review the source and build provenance before clearing quarantine. If appropriate for your own build:
-
-```sh
-xattr -c "/Applications/WOK Client.app"
-```
-
-## Open-source notices
-
-Third-party licenses, modification notices, and source provenance are maintained in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). The historical release record remains in [CHANGELOG.md](CHANGELOG.md).
+| [docs/windows-installer.md](docs/windows-installer.md) | Installer behavior, switches, artwork |
+| [docs/qualified-electron.md](docs/qualified-electron.md) | Diagnostic Chromium 152 runtime override |
+| [docs/linux-wayland.md](docs/linux-wayland.md) | Wayland/X11 selection, overrides, limitations |
+| [docs/linux-qa-checklist.md](docs/linux-qa-checklist.md) | What to smoke-test on a Linux desktop |
 
 ## License
 
-WOK Client is distributed under GNU GPL version 3 only. See [LICENSE](LICENSE). Third-party components retain their own licenses as listed in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt). Local packages copy the WOK GPL license, third-party notices, and patched-Electron provenance into the packaged resources directory without replacing Electron's own license files.
+WOK Client is distributed under GNU GPL version 3 only. See [LICENSE](LICENSE). Third-party components retain their own licenses as listed in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt).

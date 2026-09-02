@@ -1,6 +1,6 @@
 # Qualified Chromium 152 runtime (diagnostic override)
 
-Tagged releases use the default patched Electron 44 nightly runtime documented in [PATCHED_ELECTRON.txt](../PATCHED_ELECTRON.txt). The optimized qualified Chromium 152 archive is an explicit local diagnostic override, not the production runtime: real-play A/B testing found a user-reported network-latency regression in that runtime and not in the default patched nightly payload, whose 17 compared Chromium files matched the no-regression isolated build byte-for-byte.
+Tagged releases use the default patched Electron 44 nightly runtime documented in [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). The optimized qualified Chromium 152 archive is an explicit local diagnostic override, not the production runtime: real-play A/B testing found a user-reported network-latency regression in that runtime and not in the default patched nightly payload, whose 17 compared Chromium files matched the no-regression isolated build byte-for-byte.
 
 ## Measurements
 

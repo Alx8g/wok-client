@@ -23,8 +23,8 @@ const REQUIRED_ASSETS = new Set([
 	'assets/wok-mark.svg'
 ]);
 const REQUIRED_EXTERNAL_NOTICES = new Map([
-	['PATCHED_ELECTRON.txt', 'PATCHED_ELECTRON.txt'],
-	['THIRD_PARTY_NOTICES.txt', 'THIRD_PARTY_NOTICES.txt'],
+	['PATCHED_ELECTRON.txt', 'docs/PATCHED_ELECTRON.txt'],
+	['THIRD_PARTY_NOTICES.txt', 'docs/THIRD_PARTY_NOTICES.txt'],
 	['WOK-CLIENT-GPL-3.0.txt', 'LICENSE']
 ]);
 const FORBIDDEN_PREFIXES = ['.git/', '.working/', 'dist/', 'scripts/', 'src/', 'tests/'];

@@ -5,7 +5,7 @@ import { MakerBase } from '@electron-forge/maker-base';
 import type { MakerOptions } from '@electron-forge/maker-base';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
-import { INSTALLER_ART_DIR, INSTALLER_ART_FILES, writeInstallerArt } from './scripts/generate-installer-art.mjs';
+import { INSTALLER_ART_DIR, INSTALLER_ART_FILES, writeInstallerArt } from './generate-installer-art.mjs';
 function resolveIcon(iconPath: string | undefined): string | undefined {
 	if (!iconPath) return undefined;
 	const absolute = path.isAbsolute(iconPath) ? iconPath : path.resolve(process.cwd(), iconPath);

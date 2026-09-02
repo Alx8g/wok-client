@@ -1,7 +1,7 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerAppImage } from "@reforged/maker-appimage";
 import { MakerDMG } from "@electron-forge/maker-dmg";
-import { MakerNSIS } from "./MakerNSIS.ts";
+import { MakerNSIS } from "./scripts/MakerNSIS.ts";
 import { createHash } from 'node:crypto';
 import {
     closeSync,
@@ -151,8 +151,8 @@ function copyWokNotices(buildPath: string, platform: string) {
         resourcesPath = join(buildPath, appBundle.name, 'Contents', 'Resources');
     }
     copyFileSync(join(import.meta.dirname, 'LICENSE'), join(resourcesPath, 'WOK-CLIENT-GPL-3.0.txt'));
-    copyFileSync(join(import.meta.dirname, 'THIRD_PARTY_NOTICES.txt'), join(resourcesPath, 'THIRD_PARTY_NOTICES.txt'));
-    copyFileSync(join(import.meta.dirname, 'PATCHED_ELECTRON.txt'), join(resourcesPath, 'PATCHED_ELECTRON.txt'));
+    copyFileSync(join(import.meta.dirname, 'docs', 'THIRD_PARTY_NOTICES.txt'), join(resourcesPath, 'THIRD_PARTY_NOTICES.txt'));
+    copyFileSync(join(import.meta.dirname, 'docs', 'PATCHED_ELECTRON.txt'), join(resourcesPath, 'PATCHED_ELECTRON.txt'));
 }
 
 export default {

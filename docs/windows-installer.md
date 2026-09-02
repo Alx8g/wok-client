@@ -1,6 +1,6 @@
 # Windows installer
 
-`pnpm run make` builds the Windows installer with NSIS through `MakerNSIS.ts`. The wizard walks a welcome page, the GPL-3.0 license, a components page for the two shortcuts, the install location, a progress log that names each step, and a finish page that can launch the client.
+`pnpm run make` builds the Windows installer with NSIS through `scripts/MakerNSIS.ts`. The wizard walks a welcome page, the GPL-3.0 license, a components page for the two shortcuts, the install location, a progress log that names each step, and a finish page that can launch the client.
 
 ## Install layout
 

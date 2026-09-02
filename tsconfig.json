@@ -17,6 +17,6 @@
 		"src/**/*",
 		"tests/**/*",
 		"forge.config.ts",
-		"MakerNSIS.ts"
+		"scripts/**/*"
 	]
 }

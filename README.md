@@ -65,7 +65,7 @@ pnpm start          # run from source
 pnpm run make       # local platform package
 ```
 
-`pnpm install` downloads the documented patched Electron build and verifies it against the release checksum manifest recorded in [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt). There is no registry publish command; pushing a reviewed version tag runs the pinned GitHub Actions release workflow. Release provenance and modification notices are in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) and [CHANGELOG.md](CHANGELOG.md).
+`pnpm install` downloads the documented patched Electron build and verifies it against the release checksum manifest recorded in [docs/PATCHED_ELECTRON.txt](docs/PATCHED_ELECTRON.txt). There is no registry publish command; pushing a reviewed version tag runs the pinned GitHub Actions release workflow. Release provenance and modification notices are in [docs/THIRD_PARTY_NOTICES.txt](docs/THIRD_PARTY_NOTICES.txt) and [CHANGELOG.md](CHANGELOG.md).
 
 ## Documentation
 
@@ -73,6 +73,8 @@ pnpm run make       # local platform package
 | --- | --- |
 | [docs/windows-installer.md](docs/windows-installer.md) | Installer behavior, switches, artwork |
 | [docs/qualified-electron.md](docs/qualified-electron.md) | Diagnostic Chromium 152 runtime override |
+| [docs/THIRD_PARTY_NOTICES.txt](docs/THIRD_PARTY_NOTICES.txt) | Third-party licenses and modification notices |
+| [docs/PATCHED_ELECTRON.txt](docs/PATCHED_ELECTRON.txt) | Patched Electron runtime provenance and checksums |
 | [docs/linux-wayland.md](docs/linux-wayland.md) | Wayland/X11 selection, overrides, limitations |
 | [docs/linux-qa-checklist.md](docs/linux-qa-checklist.md) | What to smoke-test on a Linux desktop |
 

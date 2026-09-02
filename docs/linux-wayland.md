@@ -2,7 +2,7 @@
 
 The evidence behind the Linux display-server default. Read this before changing it, and re-check the last section when Electron is bumped.
 
-Gathered 2026-08-04 against the exact runtime WOK ships: `electron-nightly 44.0.0-nightly.20260522` (patched mirror, see [PATCHED_ELECTRON.txt](../PATCHED_ELECTRON.txt)), which pins Chromium 150.0.7847.0, verified from Electron's `DEPS` at that tag. Read from primary sources: Electron release notes and issue threads, Chromium source at the exact shipped tag, Chromium's tracker, GNOME/mutter's tracker, and the freedesktop protocol tables. File names below are Chromium files at tag `150.0.7847.0`, byte-identical to `main` at the time.
+Gathered 2026-08-04 against the exact runtime WOK ships: `electron-nightly 44.0.0-nightly.20260522` (patched mirror, see [PATCHED_ELECTRON.txt](PATCHED_ELECTRON.txt)), which pins Chromium 150.0.7847.0, verified from Electron's `DEPS` at that tag. Read from primary sources: Electron release notes and issue threads, Chromium source at the exact shipped tag, Chromium's tracker, GNOME/mutter's tracker, and the freedesktop protocol tables. File names below are Chromium files at tag `150.0.7847.0`, byte-identical to `main` at the time.
 
 ## The default, and what WOK adds
 

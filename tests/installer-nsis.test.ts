@@ -23,8 +23,8 @@ const baseOptions: InstallerScriptOptions = {
 	headerBitmapPath,
 	sideBitmapPath,
 	homepageUrl: 'https://wok.social',
-	supportUrl: 'https://github.com/nzalexgarciagil-ctrl/wok-client/issues',
-	updatesUrl: 'https://github.com/nzalexgarciagil-ctrl/wok-client',
+	supportUrl: 'https://github.com/alx8g/wok-client/issues',
+	updatesUrl: 'https://github.com/alx8g/wok-client',
 	protocolSchemes: ['wok', 'crankshaft']
 };
 const script = buildInstallerScript(baseOptions);

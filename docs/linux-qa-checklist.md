@@ -1,6 +1,6 @@
 # Linux smoke-test checklist
 
-Linux packages are built and source-validated in CI but have not had a gameplay smoke test. If you run WOK on Linux, check these things in order and [report](https://github.com/nzalexgarciagil-ctrl/wok-client/issues) what breaks.
+Linux packages are built and source-validated in CI but have not had a gameplay smoke test. If you run WOK on Linux, check these things in order and [report](https://github.com/alx8g/wok-client/issues) what breaks.
 
 The client prints the display server it ended up on at startup, which is the first thing to check in a bug report. If pointer lock, window placement, or fullscreen misbehave, `WOK_OZONE_PLATFORM=x11` restores the previous behavior. See [docs/linux-wayland.md](linux-wayland.md) for the full display-server story.
 

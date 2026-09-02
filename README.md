@@ -2,7 +2,7 @@
 
 The fastest Krunker client. Ever. WOK Client is an independent, open-source (GPLv3) desktop client for Krunker on Windows, Linux, and macOS.
 
-[Website](https://wok.social) · [Releases](https://github.com/nzalexgarciagil-ctrl/wok-client/releases) · [Source](https://github.com/nzalexgarciagil-ctrl/wok-client)
+[Website](https://wok.social) · [Releases](https://github.com/alx8g/wok-client/releases) · [Source](https://github.com/alx8g/wok-client)
 
 ![WOK Client](assets/full_logo.svg)
 
@@ -10,7 +10,7 @@ WOK Client is not affiliated with, endorsed by, or approved by FRVR. An optimize
 
 ## Install
 
-Download a package from the [releases page](https://github.com/nzalexgarciagil-ctrl/wok-client/releases). Tagged builds are unsigned prereleases with SHA-256 checksums; Windows x64 has had real gameplay testing, Linux and macOS are built and source-validated but still need native smoke testing. See [docs/linux-qa-checklist.md](docs/linux-qa-checklist.md) for what to verify on Linux. Unsigned macOS builds may need `xattr -c "/Applications/WOK Client.app"` to clear quarantine.
+Download a package from the [releases page](https://github.com/alx8g/wok-client/releases). Tagged builds are unsigned prereleases with SHA-256 checksums; Windows x64 has had real gameplay testing, Linux and macOS are built and source-validated but still need native smoke testing. See [docs/linux-qa-checklist.md](docs/linux-qa-checklist.md) for what to verify on Linux. Unsigned macOS builds may need `xattr -c "/Applications/WOK Client.app"` to clear quarantine.
 
 ## Features
 

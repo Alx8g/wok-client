@@ -17,7 +17,7 @@ LOCALLY QUALIFIED WOK CHROMIUM 152 WINDOWS RUNTIME (DIAGNOSTIC OVERRIDE)
 
 The locally installed Windows x64 performance build uses:
   Archive: electron-v44.0.0-nightly.20260522-wok-chromium152-win32-x64.zip
-  Release: https://github.com/nzalexgarciagil-ctrl/wok-client/releases/tag/wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54
+  Release: https://github.com/alx8g/wok-client/releases/tag/wok-electron-v44.0.0-nightly.20260522-chromium152.0.7977.54
   SHA-256: 20246da5d4b33316391b2dc70e538d6a300fc9c17e9e5563389895c614b7d9b0
   Electron: 44.0.0-nightly.20260522
   Chromium: 152

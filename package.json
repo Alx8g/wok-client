@@ -25,10 +25,10 @@
 	"homepage": "https://wok.social",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/nzalexgarciagil-ctrl/wok-client.git"
+		"url": "https://github.com/alx8g/wok-client.git"
 	},
 	"bugs": {
-		"url": "https://github.com/nzalexgarciagil-ctrl/wok-client/issues"
+		"url": "https://github.com/alx8g/wok-client/issues"
 	},
 	"keywords": [
 		"krunker",

@@ -358,8 +358,8 @@ export function collectMenuDeclutterTargets(
 		}
 	}
 
-	const streamPromotions = environment
-		.queryAll('.stream-card.promo-card')
+	const streamPromotions = [...environment
+		.queryAll('.stream-card.promo-card')]
 		.filter(isKrunkerStreamPromotionCard);
 	for (const promotion of streamPromotions) targets.add(promotion);
 
@@ -368,7 +368,7 @@ export function collectMenuDeclutterTargets(
 	for (const promotion of streamPromotions) {
 		const section = promotion.closest('.featured-section');
 		if (!section) continue;
-		const cards = section.querySelectorAll('.stream-card');
+		const cards = [...section.querySelectorAll('.stream-card')];
 		if (cards.length > 0 && cards.every(isKrunkerStreamPromotionCard)) targets.add(section);
 	}
 
@@ -453,7 +453,7 @@ function collectStreamLayoutTargets(
 ): void {
 	const smallOverlays = new Set(environment.queryAll('.streams-overlay.small'));
 	for (const grid of environment.queryAll('.streams-grid')) {
-		const cards = grid.querySelectorAll('.stream-card');
+		const cards = [...grid.querySelectorAll('.stream-card')];
 		const promotions = cards.filter(card => hiddenTargets.has(card) || isKrunkerStreamPromotionCard(card));
 		if (promotions.length === 0) continue;
 

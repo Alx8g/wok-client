@@ -1,0 +1,391 @@
+{
+  "recordedAt": "2026-09-04T21:51:32.163Z",
+  "baseline": "e51e6b3baaef0265ffe8dc8dfc768229900d8ad6",
+  "candidate": "829b0bd",
+  "environment": {
+    "node": "v24.14.1",
+    "platform": "win32",
+    "arch": "x64",
+    "cpu": "12th Gen Intel(R) Core(TM) i9-12900H"
+  },
+  "scope": "Synthetic client CPU workloads. Not gameplay FPS, frame presentation, startup duration, network latency or a whole-client speedup. DOM selector timings use stubs. Selector call counts establish the DOM-work reduction.",
+  "method": "Each run uses four warmups and eleven paired rounds with alternating execution order. Reported times are medians. Each workload checks its output.",
+  "validation": {
+    "source": "pnpm run validate: lint and typecheck passed, 593 tests passed",
+    "bundle": "pnpm run bundle:verify passed, 26 outputs",
+    "performanceJob": "Updated command passed all 47 tests. A regression guard rejects missing test paths.",
+    "browser": "Not verified. cloak-browse service was terminated by the initial timeout. Detached retry did not provide a healthy browser connection. No gameplay comparison was run."
+  },
+  "unchanged": [
+    "Game code and renderer runtime",
+    "Resolution, effects and quality settings",
+    "Mouse input and network behaviour",
+    "Feature preferences and security settings"
+  ],
+  "runs": [
+    {
+      "baselineRef": "e51e6b3baaef0265ffe8dc8dfc768229900d8ad6",
+      "runtime": "v24.14.1",
+      "rounds": 11,
+      "scope": "Synthetic client CPU work only. Not a gameplay FPS or presentation measurement. DOM selector timings use stubs. Selector counts, not those timings, establish the DOM saving.",
+      "results": [
+        {
+          "name": "identity misses",
+          "baselineMs": 6.5096000000000345,
+          "candidateMs": 4.537800000000004,
+          "reductionPercent": 30.29064765884263,
+          "counts": {
+            "baseline": {
+              "textNodes": 128000,
+              "resolverCalls": 256000
+            },
+            "candidate": {
+              "textNodes": 128000,
+              "resolverCalls": 128000
+            }
+          },
+          "times": {
+            "baseline": [
+              7.178200000000004,
+              6.5096000000000345,
+              6.029699999999991,
+              5.247200000000021,
+              5.6077999999999975,
+              11.881399999999985,
+              11.211799999999982,
+              8.159899999999993,
+              7.4827999999999975,
+              6.012200000000007,
+              5.60329999999999
+            ],
+            "candidate": [
+              4.480500000000006,
+              4.537800000000004,
+              4.135699999999986,
+              4.406399999999962,
+              6.231399999999951,
+              8.186800000000005,
+              6.149799999999971,
+              5.612700000000018,
+              4.905899999999974,
+              3.781600000000026,
+              3.297399999999982
+            ]
+          }
+        },
+        {
+          "name": "identity echoes",
+          "baselineMs": 4.05680000000001,
+          "candidateMs": 0.542699999999968,
+          "reductionPercent": 86.62246105304756,
+          "counts": {
+            "baseline": {
+              "echoes": 50000,
+              "scheduledFrames": 50000
+            },
+            "candidate": {
+              "echoes": 50000,
+              "scheduledFrames": 0
+            }
+          },
+          "times": {
+            "baseline": [
+              6.001199999999983,
+              4.5668999999999755,
+              4.093200000000024,
+              4.05680000000001,
+              4.385899999999992,
+              4.115299999999991,
+              3.622700000000009,
+              3.9173999999999864,
+              3.5294999999999845,
+              3.274600000000021,
+              3.2857999999999947
+            ],
+            "candidate": [
+              1.1259000000000015,
+              1.0506999999999493,
+              0.6566000000000258,
+              0.5402000000000271,
+              0.6577000000000339,
+              0.5738000000000056,
+              0.5043000000000006,
+              0.4742999999999711,
+              0.542699999999968,
+              0.442799999999977,
+              0.48689999999999145
+            ]
+          }
+        },
+        {
+          "name": "standalone clan rewrites",
+          "baselineMs": 27.625299999999925,
+          "candidateMs": 17.901399999999853,
+          "reductionPercent": 35.199255754689,
+          "counts": {
+            "baseline": {
+              "rewrites": 30000
+            },
+            "candidate": {
+              "rewrites": 30000
+            }
+          },
+          "times": {
+            "baseline": [
+              31.80880000000002,
+              29.9144,
+              30.203499999999963,
+              22.16629999999998,
+              29.99980000000005,
+              26.558000000000106,
+              27.625299999999925,
+              33.331899999999905,
+              23.626800000000003,
+              24.64059999999995,
+              22.588400000000092
+            ],
+            "candidate": [
+              19.191800000000057,
+              20.027500000000032,
+              15.32120000000009,
+              15.061500000000024,
+              17.63639999999998,
+              20.79410000000007,
+              17.901399999999853,
+              18.434299999999894,
+              14.388500000000022,
+              15.49630000000002,
+              24.929799999999886
+            ]
+          }
+        },
+        {
+          "name": "unrelated text mutations",
+          "baselineMs": 1.4478999999998905,
+          "candidateMs": 1.2760999999998148,
+          "reductionPercent": 11.86546032185155,
+          "counts": {
+            "baseline": {
+              "mutations": 50000,
+              "selectorCalls": 250000
+            },
+            "candidate": {
+              "mutations": 50000,
+              "selectorCalls": 100000
+            }
+          },
+          "times": {
+            "baseline": [
+              1.0636000000001786,
+              1.2231000000001586,
+              1.3645000000001346,
+              1.4045999999998457,
+              1.4796999999998661,
+              1.4908999999997832,
+              1.5004999999998745,
+              1.5149000000001251,
+              1.4862000000000535,
+              1.4478999999998905,
+              1.4296999999999116
+            ],
+            "candidate": [
+              0.9745000000000346,
+              0.9785999999999149,
+              1.401200000000017,
+              1.1585999999999785,
+              1.3558000000000447,
+              1.32549999999992,
+              1.27150000000006,
+              1.3396000000000186,
+              1.2760999999998148,
+              1.2706000000000586,
+              1.2787000000000717
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "baselineRef": "e51e6b3baaef0265ffe8dc8dfc768229900d8ad6",
+      "runtime": "v24.14.1",
+      "rounds": 11,
+      "scope": "Synthetic client CPU work only. Not a gameplay FPS or presentation measurement. DOM selector timings use stubs. Selector counts, not those timings, establish the DOM saving.",
+      "results": [
+        {
+          "name": "identity misses",
+          "baselineMs": 6.7934999999999945,
+          "candidateMs": 4.115499999999997,
+          "reductionPercent": 39.42003385589166,
+          "counts": {
+            "baseline": {
+              "textNodes": 128000,
+              "resolverCalls": 256000
+            },
+            "candidate": {
+              "textNodes": 128000,
+              "resolverCalls": 128000
+            }
+          },
+          "times": {
+            "baseline": [
+              9.622500000000002,
+              6.167699999999996,
+              5.81959999999998,
+              10.649100000000004,
+              11.178899999999999,
+              8.823499999999967,
+              7.932200000000023,
+              6.426199999999994,
+              6.7934999999999945,
+              5.545500000000004,
+              5.484399999999994
+            ],
+            "candidate": [
+              4.502100000000013,
+              4.115499999999997,
+              4.057900000000018,
+              4.024000000000001,
+              6.180700000000002,
+              6.1173,
+              4.194500000000005,
+              3.662300000000016,
+              3.4454000000000065,
+              3.1451000000000136,
+              4.3004999999999995
+            ]
+          }
+        },
+        {
+          "name": "identity echoes",
+          "baselineMs": 4.591499999999996,
+          "candidateMs": 0.6383999999999901,
+          "reductionPercent": 86.09604704345006,
+          "counts": {
+            "baseline": {
+              "echoes": 50000,
+              "scheduledFrames": 50000
+            },
+            "candidate": {
+              "echoes": 50000,
+              "scheduledFrames": 0
+            }
+          },
+          "times": {
+            "baseline": [
+              6.464200000000005,
+              3.776299999999992,
+              3.9436000000000035,
+              5.233299999999986,
+              4.522799999999961,
+              4.591499999999996,
+              4.612599999999986,
+              4.631899999999973,
+              4.342299999999966,
+              4.891300000000001,
+              3.743600000000015
+            ],
+            "candidate": [
+              0.5939000000000192,
+              0.5196000000000254,
+              0.6708999999999605,
+              0.6245000000000118,
+              0.6972000000000094,
+              0.665300000000002,
+              0.7128000000000156,
+              0.6383999999999901,
+              0.6691999999999894,
+              0.6162000000000489,
+              0.5002999999999815
+            ]
+          }
+        },
+        {
+          "name": "standalone clan rewrites",
+          "baselineMs": 24.26940000000002,
+          "candidateMs": 15.791299999999978,
+          "reductionPercent": 34.93329048101739,
+          "counts": {
+            "baseline": {
+              "rewrites": 30000
+            },
+            "candidate": {
+              "rewrites": 30000
+            }
+          },
+          "times": {
+            "baseline": [
+              24.26940000000002,
+              21.868299999999977,
+              23.62130000000002,
+              28.610400000000027,
+              29.041000000000054,
+              21.930799999999977,
+              22.822399999999902,
+              24.036399999999958,
+              26.855299999999943,
+              30.1015000000001,
+              27.75570000000016
+            ],
+            "candidate": [
+              15.913999999999987,
+              15.565600000000018,
+              17.835000000000036,
+              15.449600000000032,
+              17.280900000000088,
+              15.791299999999978,
+              15.319200000000023,
+              15.518000000000029,
+              22.837200000000053,
+              14.996800000000007,
+              17.368900000000167
+            ]
+          }
+        },
+        {
+          "name": "unrelated text mutations",
+          "baselineMs": 0.9059999999999491,
+          "candidateMs": 0.8212999999998374,
+          "reductionPercent": 9.348785871977528,
+          "counts": {
+            "baseline": {
+              "mutations": 50000,
+              "selectorCalls": 250000
+            },
+            "candidate": {
+              "mutations": 50000,
+              "selectorCalls": 100000
+            }
+          },
+          "times": {
+            "baseline": [
+              1.001299999999901,
+              0.9933000000000902,
+              1.0765000000001237,
+              0.9030999999999949,
+              0.8851000000001932,
+              0.909099999999853,
+              0.8816999999999098,
+              0.9171000000001186,
+              0.8785000000000309,
+              0.9059999999999491,
+              0.8792000000000826
+            ],
+            "candidate": [
+              0.8643999999999323,
+              0.8481999999999061,
+              0.8272000000001754,
+              0.7858999999998559,
+              0.7563999999999851,
+              0.7321999999999207,
+              0.7797999999997955,
+              0.7865999999999076,
+              0.8350000000000364,
+              0.8212999999998374,
+              0.8412000000000717
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

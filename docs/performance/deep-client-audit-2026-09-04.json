@@ -1,0 +1,1041 @@
+{
+  "recordedAt": "2026-09-04T22:43:16.933Z",
+  "verdict": "Live menu captures verify elimination of repeated NodeList exceptions and a much smaller client-owned menu observer path. They do not establish a gameplay FPS gain.",
+  "revisions": {
+    "baseline": "52793cf9bc68224b01701660b0db87ac72c5db9e",
+    "existingCrashFixIntegrated": "https://github.com/Alx8g/wok-client/pull/29",
+    "crashFixWithNodeListGuard": "a96c5b3",
+    "narrowedMenuObserver": "b1ec56d"
+  },
+  "runtime": {
+    "installed_and_test_chromium": "150.0.7849.0",
+    "electron": "44.0.0-nightly.20260522"
+  },
+  "method": "Each stage used the same installed Electron/Chromium version and copied client settings. A roughly ten-second CPU-only capture was followed by a separate CPU-plus-Chromium-trace capture. Stages were baseline, existing crash fix plus NodeList test guard, and narrowed menu mutation observer. No graphics quality, input, security or networking preferences were changed. CPU profile sampling interval was 1000 microseconds. All six reported profiles have valid recorded time deltas.",
+  "scopeLimits": [
+    "These are live menu captures with pointer lock inactive, not active-match stress tests.",
+    "Maps differ between launches. Do not compare displayed FPS, total CPU use or frame rates as a controlled speedup.",
+    "Focus remained stable in the three CPU-only samples, but changed in some trace samples.",
+    "Sampling and tracing add overhead. Callback and presentation-feedback counts are not successful displayed-frame counts.",
+    "No matched gameplay 1%-low, input-latency, sustained-load or long-session memory result is established.",
+    "The approved browser harness failed to attach twice. Controlled match navigation remains blocked until that harness works or a manual matched session is supplied."
+  ],
+  "validation": {
+    "source": "pnpm run validate passed lint, typecheck and 597 tests",
+    "bundle": "pnpm run bundle:verify passed with 26 outputs",
+    "menuRegression": "10000 unrelated menu text updates are rejected. All 30 owned surface selectors and container replacement/removal remain covered. All 18 menu layout/lifecycle tests now return non-array NodeList-like collections."
+  },
+  "areas": [
+    {
+      "area": "renderer and menu",
+      "evidence": "The initial live menu CPU capture attributes approximately 8.9% inclusive sampled time to MenuDeclutterController.reconcile. querySelectorAll alone accounts for approximately 3.2%, called by that controller. FRVR error handling and reporting are also active. The initial profile has one negative time delta, so the existing analyser uses uniform sample weighting. These percentages are approximate attribution, not a measured speedup.",
+      "action": "Integrated existing PR 29 rather than duplicating its NodeList and DOM-ready fixes. Strengthened the element collection type and changed all menu fake-DOM tests to iterable, indexed non-array collections. Collect explicit exception counts before and after."
+    },
+    {
+      "area": "frame pipeline",
+      "evidence": "The initial instrumented menu trace contains 974 callbacks and 1016 presentation feedback events over 10.296 seconds. This runtime has no WokFrameTerminal ledger events, so feedback events cannot establish successful presented-frame rates. Focus changed during this sample.",
+      "action": "Do not claim gameplay FPS gains from this capture. Obtain separate CPU-only samples and before/after exception counts. Controlled match automation is blocked by the approved harness failing to attach twice."
+    },
+    {
+      "area": "memory and shutdown",
+      "evidence": "Twelve older GPU/utility helpers remained after the measured windows closed, totalling about 579 MB private committed memory. Their working-set sum was about 1.3 GB and includes shared pages. The initially tracked active GPU exited on clean close, but a different helper with the same parent remained. Ownership and cleanup cause are not fully established.",
+      "action": "No process-name scavenger, forced termination, OS tuning or claimed FPS improvement. Investigate helper creation and shutdown in the Electron runtime before changing lifecycle behaviour."
+    },
+    {
+      "area": "startup",
+      "evidence": "Main module evaluation took about 146 ms from process start, app ready about 205 ms, window creation about 245 ms, DOM ready about 2.9 s, game usable about 8.7 s. These are individual warmed-profile launches, not a matched startup benchmark.",
+      "action": "Keep the existing lazy module boundaries and verified bundled calibration behaviour. Retain the existing intro and graphics features. Integrate PR 29's existing DOM-ready crash fix."
+    },
+    {
+      "area": "network and matchmaking",
+      "evidence": "Request features are disabled in the copied settings, so the handler avoids installing session-wide interception. The latency service already bounds concurrency and response size, caches region results, and remembers unavailable advertised ports. Initial probes can still pay a 1.5 s advertised-port timeout before the port-443 fallback.",
+      "action": "Do not bypass filters, increase traffic indiscriminately, remove revalidation, or claim a reduction in server RTT. A changed fallback strategy requires separate matched network testing."
+    },
+    {
+      "area": "input and effects",
+      "evidence": "The raw-pointer wrapper runs at lock requests rather than on every mouse event. Motion blur is disabled in the copied settings and therefore its draw-call hooks are not on this measured path. Enabling blur does wrap every WebGL draw call and copies the rendered canvas.",
+      "action": "Do not advertise disabled-effect optimisations as current gameplay gains. Keep input fidelity, native resolution, graphics flags and effect preferences unchanged."
+    },
+    {
+      "area": "background work",
+      "evidence": "Discord RPC and resource swapping are disabled. Identity preference retries are bounded. Menu lifecycle has a 250 ms body-identity poll and a document mutation observer. Frame diagnostic loops are disabled in normal operation.",
+      "action": "Narrowed the menu mutation filter to the actual owned surfaces. Container insertion/removal still checks descendants, and all 30 named owned surfaces retain mutation coverage."
+    }
+  ],
+  "captures": [
+    {
+      "label": "before-cpu-only",
+      "source": "52793cf",
+      "elapsedMs": 10083.5956,
+      "profileDurationMs": 10156.88,
+      "samples": 6607,
+      "instrumentation": {
+        "cpuSampleIntervalUs": 1000,
+        "trace": false
+      },
+      "weighting": "recorded time deltas",
+      "contextBefore": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Free for All on Subzero",
+        "nodes": 1284,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "contextAfter": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Free for All on Subzero",
+        "nodes": 1284,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "exceptions": {
+        "TypeError: cards.every is not a function": 1041
+      },
+      "exceptionWindowNote": "Observed while collecting the approximately ten-second CPU profile.",
+      "clientSelfPercent": 6.849849560101133,
+      "menuCallbackInclusivePercent": 10.688764660013705,
+      "menuTargetCollectionInclusivePercent": 9.775728373279984,
+      "categories": [
+        {
+          "category": "page",
+          "selfMs": 6194.498,
+          "selfPercent": 60.98819716290829
+        },
+        {
+          "category": "program",
+          "selfMs": 3094.923,
+          "selfPercent": 30.471197848158095
+        },
+        {
+          "category": "wok",
+          "selfMs": 695.731,
+          "selfPercent": 6.849849560101133
+        },
+        {
+          "category": "idle",
+          "selfMs": 127.897,
+          "selfPercent": 1.25921542835989
+        },
+        {
+          "category": "runtime",
+          "selfMs": 30.778,
+          "selfPercent": 0.303026126133222
+        },
+        {
+          "category": "garbage-collector",
+          "selfMs": 12.386,
+          "selfPercent": 0.12194689707863045
+        }
+      ],
+      "rendererMetrics": [
+        {
+          "name": "LayoutCount",
+          "delta": 1044
+        },
+        {
+          "name": "RecalcStyleCount",
+          "delta": 1044
+        },
+        {
+          "name": "LayoutDuration",
+          "delta": 0.558477
+        },
+        {
+          "name": "RecalcStyleDuration",
+          "delta": 0.337136
+        },
+        {
+          "name": "ScriptDuration",
+          "delta": 6.513221
+        },
+        {
+          "name": "TaskDuration",
+          "delta": 10.07377
+        }
+      ]
+    },
+    {
+      "label": "before-trace",
+      "source": "52793cf",
+      "elapsedMs": 10070.418999999998,
+      "profileDurationMs": 10188.558,
+      "samples": 6564,
+      "instrumentation": {
+        "cpuSampleIntervalUs": 1000,
+        "trace": true
+      },
+      "weighting": "recorded time deltas",
+      "contextBefore": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Free for All on Subzero",
+        "nodes": 1284,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "contextAfter": {
+        "pointerLocked": false,
+        "focused": false,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Free for All on Subzero",
+        "nodes": 1284,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "exceptions": {
+        "TypeError: cards.every is not a function": 4064
+      },
+      "exceptionWindowNote": "This counter includes trace finalisation and is not a ten-second error rate.",
+      "clientSelfPercent": 6.4635545088912485,
+      "menuCallbackInclusivePercent": 10.073996732412967,
+      "menuTargetCollectionInclusivePercent": 9.16613518811985,
+      "categories": [
+        {
+          "category": "page",
+          "selfMs": 5556.564,
+          "selfPercent": 54.53729566048503
+        },
+        {
+          "category": "program",
+          "selfMs": 3630.86,
+          "selfPercent": 35.636642594565394
+        },
+        {
+          "category": "wok",
+          "selfMs": 658.543,
+          "selfPercent": 6.4635545088912485
+        },
+        {
+          "category": "idle",
+          "selfMs": 270.353,
+          "selfPercent": 2.653496206234484
+        },
+        {
+          "category": "garbage-collector",
+          "selfMs": 47.872,
+          "selfPercent": 0.46986040615364805
+        },
+        {
+          "category": "runtime",
+          "selfMs": 23.822,
+          "selfPercent": 0.2338113008729989
+        }
+      ],
+      "rendererMetrics": [
+        {
+          "name": "LayoutCount",
+          "delta": 1064
+        },
+        {
+          "name": "RecalcStyleCount",
+          "delta": 1064
+        },
+        {
+          "name": "LayoutDuration",
+          "delta": 0.56415
+        },
+        {
+          "name": "RecalcStyleDuration",
+          "delta": 0.354845
+        },
+        {
+          "name": "ScriptDuration",
+          "delta": 5.870716
+        },
+        {
+          "name": "TaskDuration",
+          "delta": 10.036942
+        }
+      ]
+    },
+    {
+      "label": "after-cpu-only",
+      "source": "a96c5b3",
+      "elapsedMs": 10042.188699999999,
+      "profileDurationMs": 10160.388,
+      "samples": 6593,
+      "instrumentation": {
+        "cpuSampleIntervalUs": 1000,
+        "trace": false
+      },
+      "weighting": "recorded time deltas",
+      "contextBefore": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Hardpoint on Frontier",
+        "nodes": 1284,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "contextAfter": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Hardpoint on Frontier",
+        "nodes": 1284,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "exceptions": {},
+      "exceptionWindowNote": "Observed while collecting the approximately ten-second CPU profile.",
+      "clientSelfPercent": 4.761717761172113,
+      "menuCallbackInclusivePercent": 10.674552979669674,
+      "menuTargetCollectionInclusivePercent": 8.22350485040532,
+      "categories": [
+        {
+          "category": "page",
+          "selfMs": 4459.48,
+          "selfPercent": 43.89084353865226
+        },
+        {
+          "category": "idle",
+          "selfMs": 2876.878,
+          "selfPercent": 28.31464703906977
+        },
+        {
+          "category": "program",
+          "selfMs": 2329.502,
+          "selfPercent": 22.927293721460245
+        },
+        {
+          "category": "wok",
+          "selfMs": 483.809,
+          "selfPercent": 4.761717761172113
+        },
+        {
+          "category": "garbage-collector",
+          "selfMs": 9.956,
+          "selfPercent": 0.09798838390817359
+        }
+      ],
+      "rendererMetrics": [
+        {
+          "name": "LayoutCount",
+          "delta": 1138
+        },
+        {
+          "name": "RecalcStyleCount",
+          "delta": 1138
+        },
+        {
+          "name": "LayoutDuration",
+          "delta": 0.64316
+        },
+        {
+          "name": "RecalcStyleDuration",
+          "delta": 0.405472
+        },
+        {
+          "name": "ScriptDuration",
+          "delta": 4.004739
+        },
+        {
+          "name": "TaskDuration",
+          "delta": 7.341108
+        }
+      ]
+    },
+    {
+      "label": "after-trace",
+      "source": "a96c5b3",
+      "elapsedMs": 10055.099900000001,
+      "profileDurationMs": 10180.838,
+      "samples": 6539,
+      "instrumentation": {
+        "cpuSampleIntervalUs": 1000,
+        "trace": true
+      },
+      "weighting": "recorded time deltas",
+      "contextBefore": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Hardpoint on Frontier",
+        "nodes": 1288,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "contextAfter": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Hardpoint on Frontier",
+        "nodes": 1292,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "exceptions": {},
+      "exceptionWindowNote": "Observed while collecting the approximately ten-second CPU profile.",
+      "clientSelfPercent": 4.6272517056061595,
+      "menuCallbackInclusivePercent": 9.638892201211727,
+      "menuTargetCollectionInclusivePercent": 7.430223327392107,
+      "categories": [
+        {
+          "category": "page",
+          "selfMs": 4121.711,
+          "selfPercent": 40.48498758157236
+        },
+        {
+          "category": "program",
+          "selfMs": 2903.063,
+          "selfPercent": 28.514970968008726
+        },
+        {
+          "category": "idle",
+          "selfMs": 2668.794,
+          "selfPercent": 26.213893198182703
+        },
+        {
+          "category": "wok",
+          "selfMs": 471.093,
+          "selfPercent": 4.6272517056061595
+        },
+        {
+          "category": "garbage-collector",
+          "selfMs": 15.799,
+          "selfPercent": 0.1551836892012229
+        }
+      ],
+      "rendererMetrics": [
+        {
+          "name": "LayoutCount",
+          "delta": 1116
+        },
+        {
+          "name": "RecalcStyleCount",
+          "delta": 1116
+        },
+        {
+          "name": "LayoutDuration",
+          "delta": 0.667512
+        },
+        {
+          "name": "RecalcStyleDuration",
+          "delta": 0.446462
+        },
+        {
+          "name": "ScriptDuration",
+          "delta": 3.613602
+        },
+        {
+          "name": "TaskDuration",
+          "delta": 7.580259
+        }
+      ]
+    },
+    {
+      "label": "gated-cpu-only",
+      "source": "b1ec56d",
+      "elapsedMs": 10057.015699999998,
+      "profileDurationMs": 10166.516,
+      "samples": 6717,
+      "instrumentation": {
+        "cpuSampleIntervalUs": 1000,
+        "trace": false
+      },
+      "weighting": "recorded time deltas",
+      "contextBefore": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Team Deathmatch on Sandstorm",
+        "nodes": 1278,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "contextAfter": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Team Deathmatch on Sandstorm",
+        "nodes": 1278,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "exceptions": {},
+      "exceptionWindowNote": "Observed while collecting the approximately ten-second CPU profile.",
+      "clientSelfPercent": 0.2761024524035569,
+      "menuCallbackInclusivePercent": 0.7023645071723685,
+      "menuTargetCollectionInclusivePercent": null,
+      "categories": [
+        {
+          "category": "page",
+          "selfMs": 4170.289,
+          "selfPercent": 41.01984396621222
+        },
+        {
+          "category": "idle",
+          "selfMs": 3484.9,
+          "selfPercent": 34.27821290990936
+        },
+        {
+          "category": "program",
+          "selfMs": 2456.419,
+          "selfPercent": 24.161856431446132
+        },
+        {
+          "category": "wok",
+          "selfMs": 28.07,
+          "selfPercent": 0.2761024524035569
+        },
+        {
+          "category": "garbage-collector",
+          "selfMs": 26.285,
+          "selfPercent": 0.2585448151559492
+        }
+      ],
+      "rendererMetrics": [
+        {
+          "name": "LayoutCount",
+          "delta": 1122
+        },
+        {
+          "name": "RecalcStyleCount",
+          "delta": 1122
+        },
+        {
+          "name": "LayoutDuration",
+          "delta": 0.665193
+        },
+        {
+          "name": "RecalcStyleDuration",
+          "delta": 0.43248800000000004
+        },
+        {
+          "name": "ScriptDuration",
+          "delta": 3.213053
+        },
+        {
+          "name": "TaskDuration",
+          "delta": 6.66884
+        }
+      ]
+    },
+    {
+      "label": "gated-trace",
+      "source": "b1ec56d",
+      "elapsedMs": 10077.405299999999,
+      "profileDurationMs": 10202.516,
+      "samples": 6527,
+      "instrumentation": {
+        "cpuSampleIntervalUs": 1000,
+        "trace": true
+      },
+      "weighting": "recorded time deltas",
+      "contextBefore": {
+        "pointerLocked": false,
+        "focused": true,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Team Deathmatch on Sandstorm",
+        "nodes": 1278,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "contextAfter": {
+        "pointerLocked": false,
+        "focused": false,
+        "hidden": false,
+        "viewport": {
+          "width": 1520,
+          "height": 825,
+          "dpr": 1
+        },
+        "map": "Team Deathmatch on Sandstorm",
+        "nodes": 1278,
+        "canvases": [
+          {
+            "id": "game-overlay",
+            "width": 1520,
+            "height": 825
+          },
+          {
+            "id": "",
+            "width": 180,
+            "height": 90
+          },
+          {
+            "id": "spinWindow",
+            "width": 300,
+            "height": 150
+          },
+          {
+            "id": "classPreviewCanvas",
+            "width": 750,
+            "height": 600
+          },
+          {
+            "id": "miniMapCanvas",
+            "width": 300,
+            "height": 300
+          },
+          {
+            "id": "",
+            "width": 1520,
+            "height": 825
+          }
+        ],
+        "blur": false
+      },
+      "exceptions": {},
+      "exceptionWindowNote": "Observed while collecting the approximately ten-second CPU profile.",
+      "clientSelfPercent": 0.42112161353140737,
+      "menuCallbackInclusivePercent": 0.7678890187479245,
+      "menuTargetCollectionInclusivePercent": null,
+      "categories": [
+        {
+          "category": "page",
+          "selfMs": 4841.882,
+          "selfPercent": 47.457725133682715
+        },
+        {
+          "category": "program",
+          "selfMs": 2979.488,
+          "selfPercent": 29.20346314575738
+        },
+        {
+          "category": "idle",
+          "selfMs": 2313.217,
+          "selfPercent": 22.673005364559096
+        },
+        {
+          "category": "wok",
+          "selfMs": 42.965,
+          "selfPercent": 0.42112161353140737
+        },
+        {
+          "category": "garbage-collector",
+          "selfMs": 23.975,
+          "selfPercent": 0.2349910551475734
+        }
+      ],
+      "rendererMetrics": [
+        {
+          "name": "LayoutCount",
+          "delta": 946
+        },
+        {
+          "name": "RecalcStyleCount",
+          "delta": 946
+        },
+        {
+          "name": "LayoutDuration",
+          "delta": 0.721035
+        },
+        {
+          "name": "RecalcStyleDuration",
+          "delta": 0.442836
+        },
+        {
+          "name": "ScriptDuration",
+          "delta": 3.801236
+        },
+        {
+          "name": "TaskDuration",
+          "delta": 7.974768
+        }
+      ]
+    }
+  ]
+}

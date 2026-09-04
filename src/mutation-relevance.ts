@@ -18,9 +18,13 @@ function nodeTouchesSelector(
 ): boolean {
 	const element = typeof node.matches === 'function' ? node : node.parentElement;
 	if (!element) return false;
-	return element.matches?.(selector) === true
-		|| element.closest?.(selector) != null
-		|| (includeDescendants && element.querySelector?.(selector) != null);
+	// closest tests the element itself before its ancestors. A separate matches call repeats it.
+	const matches = typeof element.closest === 'function'
+		? element.closest(selector) != null
+		: element.matches?.(selector) === true;
+	// A text node can inherit its parent's membership, but cannot contain a surface. Searching
+	// its parent's descendants instead scans unrelated siblings on every HUD text replacement.
+	return matches || (includeDescendants && node === element && element.querySelector?.(selector) != null);
 }
 
 /** Ignore document-wide mutations that cannot add, remove, or change the owned surface. */

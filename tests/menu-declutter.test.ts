@@ -86,7 +86,7 @@ class FakeMenuElement implements MenuDeclutterElement {
 		return this.querySelectorAll(selector)[0] ?? null;
 	}
 
-	querySelectorAll(selector: string): FakeMenuElement[] {
+	querySelectorAll(selector: string): ArrayLike<FakeMenuElement> & Iterable<FakeMenuElement> {
 		const matches: FakeMenuElement[] = [];
 		const visit = (element: FakeMenuElement) => {
 			for (const child of element.children) {
@@ -95,7 +95,11 @@ class FakeMenuElement implements MenuDeclutterElement {
 			}
 		};
 		visit(this);
-		return matches;
+		return {
+			...matches,
+			length: matches.length,
+			[Symbol.iterator]: () => matches[Symbol.iterator]()
+		};
 	}
 
 	removeAttribute(name: string): void {
@@ -154,7 +158,7 @@ function createHarness(root: FakeMenuElement, hidden = new Set<FakeMenuElement>(
 			return observer;
 		},
 		ensureStylesheet: () => { stylesheetMounted = true; },
-		queryAll: (selector: string) => root.querySelectorAll(selector),
+		queryAll: (selector: string) => [...root.querySelectorAll(selector)],
 		removeStylesheet: () => { stylesheetMounted = false; },
 		isHidden: (element: MenuDeclutterElement) => hidden.has(element as FakeMenuElement)
 	};
@@ -200,7 +204,7 @@ function createLifecycleHarness(initialBody: FakeMenuElement | undefined) {
 			clearInterval: () => { pollCallback = undefined; }
 		}),
 		ensureStylesheet: () => { stylesheetMounted = true; },
-		queryAll: (selector: string) => currentBody?.querySelectorAll(selector) ?? [],
+		queryAll: (selector: string) => [...(currentBody?.querySelectorAll(selector) ?? [])],
 		removeStylesheet: () => { stylesheetMounted = false; },
 		isHidden: (element: MenuDeclutterElement) => hidden.has(element as FakeMenuElement)
 	};
@@ -336,7 +340,7 @@ test('collects stable menu promotions without hiding real stream cards', () => {
 	featured.append(realStream, promotion);
 	root.append(battlePass, dailySpin, paidPackage, leaderboards, notifications, wallet, featured);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(battlePass), true);
 	assert.equal(targets.has(dailySpin), true);
 	assert.equal(targets.has(paidPackage), true);
@@ -360,7 +364,7 @@ test('uses exact generated control labels for Wallet, Notifications, and Leaderb
 	headerRight.append(notifications);
 	root.append(headerLeft, headerRight, leaderboards, unrelatedWalletText);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(wallet), true);
 	assert.equal(targets.has(notifications), true);
 	assert.equal(targets.has(leaderboards), true);
@@ -401,7 +405,7 @@ test('removes the current Wallet control while preserving the separate KR balanc
 	headerRight.append(notification, notificationSeparator, settings);
 	root.append(headerLeft, headerRight);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(wallet), true);
 	assert.equal(targets.has(balance), false, 'the KR balance remains visible');
 	assert.equal(targets.has(leftSeparator), true, 'the separator before Wallet is hidden');
@@ -423,7 +427,7 @@ test('removes signed-in header separators and the Now Playing prefix styling onl
 	header.append(profile, firstSeparator, balance, secondSeparator);
 	root.append(header);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(profile), false);
 	assert.equal(targets.has(balance), false);
 	assert.equal(targets.has(firstSeparator), true);
@@ -454,7 +458,7 @@ test('removes the requested Custom Games, Community, Guide, and Whats New contro
 	);
 	root.append(customGames, community, guide, whatsNew, unrelatedCampaign);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(customGames), true);
 	assert.equal(targets.has(community), true);
 	assert.equal(targets.has(guide), true);
@@ -477,7 +481,7 @@ test('hides only Store promo badges and the dedicated legal footer container', (
 	);
 	root.append(store, footer);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(spinBadge), true);
 	assert.equal(targets.has(saleInfo), true);
 	assert.equal(targets.has(footer), true);
@@ -492,7 +496,7 @@ test('hides only the exact Manage Ads settings button', () => {
 	const adHelp = new FakeMenuElement('div', '', ['settingsBtn'], 'Manage Ads Help');
 	root.append(manageAds, exportSettings, adHelp);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(manageAds), true);
 	assert.equal(targets.has(exportSettings), false);
 	assert.equal(targets.has(adHelp), false);
@@ -510,7 +514,7 @@ test('accepts exact accessible labels while rejecting partial control names', ()
 	const notificationSettings = new FakeMenuElement('div', '', ['nav-item'], 'Notifications settings');
 	root.append(wallet, notifications, leaderboards, walletHistory, notificationSettings);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(wallet), true);
 	assert.equal(targets.has(notifications), true);
 	assert.equal(targets.has(leaderboards), true);
@@ -651,7 +655,7 @@ test('hides an empty featured promotion frame but preserves unrelated promo card
 	const unrelatedPromotion = createPromotionCard('Featured creator challenge');
 	root.append(emptyFeatured, unrelatedPromotion);
 
-	const targets = collectMenuDeclutterTargets({ queryAll: selector => root.querySelectorAll(selector) });
+	const targets = collectMenuDeclutterTargets({ queryAll: selector => [...root.querySelectorAll(selector)] });
 	assert.equal(targets.has(selfPromotion), true);
 	assert.equal(targets.has(emptyFeatured), true, 'the otherwise empty Featured frame is hidden');
 	assert.equal(targets.has(unrelatedPromotion), false, 'unrelated promo-card content is untouched');

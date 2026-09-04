@@ -81,7 +81,7 @@ jobs:
       - name: Perf-unit assertions
         # Cheap perf-adjacent unit tests only: frame-time stats, diagnostic lifecycle,
         # identity parsing/observer work, and startup marks. No app launch, no packaging.
-        run: node --test tests/performance-stats.test.ts tests/gameplay-fps-log.test.ts tests/draw-call-stats.test.ts tests/identity-rewrite.test.ts tests/mutation-relevance.test.ts tests/parse-perf-marks.test.ts
+        run: node --test tests/performance-stats.test.ts tests/gameplay-fps-log.test.ts tests/draw-call-stats.test.ts tests/identity-rewrite.test.ts tests/mutation-relevance.test.ts tests/menu-declutter-mutations.test.ts tests/parse-perf-marks.test.ts
 
   # Future packaged startup-marks smoke job — intentionally disabled scaffolding.
   # TODO(perf-gate): enable (remove `if: false`) only once a runner pool with understood

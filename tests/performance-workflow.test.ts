@@ -12,4 +12,5 @@ test('observe-only performance checks reference existing tests and cover the opt
 	for (const path of paths) assert.ok(existsSync(new URL(path, root)), `missing performance test: ${path}`);
 	assert.ok(paths.includes('tests/identity-rewrite.test.ts'));
 	assert.ok(paths.includes('tests/mutation-relevance.test.ts'));
+	assert.ok(paths.includes('tests/menu-declutter-mutations.test.ts'));
 });

@@ -7,7 +7,7 @@
  * replaced after startup.
  */
 
-import { mutationRecordsTouchSelector } from './mutation-relevance.ts';
+import { mutationRecordsTouchSelector, type MutationRecordLike } from './mutation-relevance.ts';
 
 export const MENU_DECLUTTER_PREFERENCE_KEY = 'wokMenuDeclutter';
 export const MENU_DECLUTTER_ATTRIBUTE = 'data-wok-menu-declutter';
@@ -24,10 +24,10 @@ export const MENU_DECLUTTER_STATIC_CSS = `
 `;
 export const STREAM_PROMOTION_TEXT = 'Stream Krunker and get featured!';
 
+// Do not include broad menu roots: timer, map and other unrelated text updates inside them
+// otherwise trigger a full menu scan. Added/replaced containers are checked for owned descendants.
 const MENU_DECLUTTER_SURFACE_SELECTOR = [
 	'#signedInHeaderBar',
-	'#menuHolder',
-	'#mainMenu',
 	'#dailySpinDiv',
 	'#homeStoreAd',
 	'#termsInfo',
@@ -50,12 +50,19 @@ const MENU_DECLUTTER_SURFACE_SELECTOR = [
 	'.nav-notif-section',
 	'.nav-wallet-section',
 	'.streams-overlay',
+	'.streams-grid',
 	'.stream-card',
 	'.featured-section',
 	'.top-ad-row',
 	'.shop-badge',
-	'.kr-sale-info'
+	'.kr-sale-info',
+	'.settingsBtn'
 ].join(', ');
+
+/** Only mutations that can change a declutter target need a full menu reconciliation. */
+export function menuDeclutterMutationsAreRelevant(records: readonly MutationRecordLike[]): boolean {
+	return mutationRecordsTouchSelector(records, MENU_DECLUTTER_SURFACE_SELECTOR);
+}
 
 export interface MenuDeclutterElement {
 	textContent: string | null;
@@ -642,7 +649,7 @@ function createBrowserEnvironment(): MenuDeclutterEnvironment {
 			createMutationObserver: mutationCallback => {
 				if (typeof MutationObserver !== 'function') return undefined;
 				const observer = new MutationObserver(records => {
-					if (mutationRecordsTouchSelector(records, MENU_DECLUTTER_SURFACE_SELECTOR)) mutationCallback();
+					if (menuDeclutterMutationsAreRelevant(records)) mutationCallback();
 				});
 				return {
 					disconnect: () => { observer.disconnect(); },

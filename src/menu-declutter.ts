@@ -61,7 +61,8 @@ export interface MenuDeclutterElement {
 	textContent: string | null;
 	closest(selector: string): MenuDeclutterElement | null;
 	querySelector(selector: string): MenuDeclutterElement | null;
-	querySelectorAll(selector: string): readonly MenuDeclutterElement[];
+	/** Native querySelectorAll returns a NodeList, not an Array with filter/every methods. */
+	querySelectorAll(selector: string): ArrayLike<MenuDeclutterElement> & Iterable<MenuDeclutterElement>;
 	removeAttribute(name: string): void;
 	setAttribute(name: string, value: string): void;
 	getAttribute?(name: string): string | null;

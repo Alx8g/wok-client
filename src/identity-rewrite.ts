@@ -225,7 +225,7 @@ export function createIdentityTextRewrite(rules: Readonly<IdentityRewriteRules>)
 	const clanBeforeNamePattern = clanNeedles.length === 0 || realNames.length === 0
 		? undefined
 		: new RegExp(`(?<![${IDENTIFIER_CHARACTER_CLASS}])(?:${alternation(clanNeedles)})(?=\\s*(?:${alternation(realNames)})(?![${IDENTIFIER_CHARACTER_CLASS}]))`, 'gu');
-	const clanSet = new Set(clanNeedles);
+	const standaloneClanPatterns = new Map(clanNeedles.map(clan => [clan, new RegExp(escapeForRegExp(clan), 'gu')]));
 	const gates = [...nameNeedles, ...clanNeedles];
 	const shortestGate = Math.min(...gates.map(gate => gate.length));
 
@@ -234,9 +234,9 @@ export function createIdentityTextRewrite(rules: Readonly<IdentityRewriteRules>)
 		let next = text;
 		let fragments: IdentityTextFragment[] = [];
 		if (clanNeedles.length > 0) {
-			const trimmed = next.trim();
-			if (clanSet.has(trimmed)) {
-				const result = replaceMatchesWithFragments(next, fragments, new RegExp(escapeForRegExp(trimmed), 'gu'), displayClan);
+			const standaloneClanPattern = standaloneClanPatterns.get(next.trim());
+			if (standaloneClanPattern) {
+				const result = replaceMatchesWithFragments(next, fragments, standaloneClanPattern, displayClan);
 				next = result.text;
 				fragments = result.fragments as IdentityTextFragment[];
 			} else {
@@ -289,7 +289,7 @@ export interface IdentityRewriteEngineOptions {
 	/** Tracked nodes tolerated before detached ones are swept out. */
 	pruneThreshold?: number;
 	rewrite: IdentityTextRewriter;
-	/** Optional detailed result used when the renderer wants to decorate exact replacement ranges. */
+	/** When present, replaces the text-only parser, including on misses, and supplies decoration ranges. */
 	rewriteDetailed?: IdentityTextRewriteResolver;
 	/** Applies a detailed rewrite, optionally replacing the text node with marked DOM fragments. */
 	applyRewrite?(node: IdentityRewriteNode, original: string, rewrite: IdentityTextRewrite): IdentityRewriteApplication | undefined;
@@ -376,7 +376,7 @@ export function startIdentityRewriteEngine(options: IdentityRewriteEngineOptions
 		}
 
 		const detailed = options.rewriteDetailed?.(current);
-		const next = detailed?.text ?? options.rewrite(current);
+		const next = options.rewriteDetailed ? detailed?.text : options.rewrite(current);
 		if (next === undefined) return;
 		// A detailed rewrite can intentionally preserve the text while decorating its exact identity
 		// ranges (the RGB toggle with no custom alias). Give that renderer hook the first chance to
@@ -434,7 +434,12 @@ export function startIdentityRewriteEngine(options: IdentityRewriteEngineOptions
 		if (stopped) return;
 		for (const record of records) {
 			if (record.type === 'characterData') {
-				queue(record.target);
+				// An observer echo needs no frame at all. Keep the flush-time check too because
+				// Krunker can change queued text again before the scheduled callback runs.
+				const target = record.target;
+				const applied = target && tracked.get(target);
+				if (applied && target.data === applied.applied) continue;
+				queue(target);
 				continue;
 			}
 			const added = record.addedNodes;

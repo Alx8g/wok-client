@@ -2436,6 +2436,18 @@ app.on('ready', async () => {
 	logPerfMark('loadurl-called');
 	const gameNavigation = mainWindow.loadURL('https://krunker.io');
 
+	/*
+	 * Show the hidden game window as soon as the navigation is under way, with or without the
+	 * intro. A hidden renderer receives no compositor frames, so Krunker's load can stall before
+	 * ready-to-show on affected machines and the launch deadlocks; showing the window (which the
+	 * intro path always does at its opaque reveal) keeps the load moving, and the black splash
+	 * background in the preload covers the unstyled page until readiness.
+	 */
+	if (!introHandoff.isRevealOwned() && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+		mainWindow.showInactive();
+		logPerfMark('window-revealed-without-intro');
+	}
+
 	// Start the intro only once the game navigation is under way, so the identity animation can
 	// never delay the first byte of Krunker's load. Calibration launches skip it: that flow has
 	// already put windows in front of the user and should reach the game as directly as possible.

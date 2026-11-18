@@ -608,11 +608,16 @@ function applyRawMouseInputPreference(_userPrefs: UserPrefs): void {
  */
 function whenDOMReady(callback: () => void) {
 	let ran = false;
+	// Declared before run() so every path that reaches run() sees initialized bindings. run()
+	// fires synchronously from the document.body branch below on every reload and on every
+	// did-finish-load fallback, where the body already exists.
+	let observer: MutationObserver | undefined;
+	let poll: number | undefined;
 	const run = () => {
 		if (ran) return;
 		ran = true;
 		observer?.disconnect();
-		window.clearInterval(poll);
+		if (poll !== undefined) window.clearInterval(poll);
 		document.removeEventListener('DOMContentLoaded', run);
 		callback();
 	};
@@ -624,13 +629,13 @@ function whenDOMReady(callback: () => void) {
 
 	document.addEventListener('DOMContentLoaded', run, { once: true });
 	// A parser that never emits the event still builds the body, so watch for the element itself.
-	const observer = typeof MutationObserver === 'function'
+	observer = typeof MutationObserver === 'function'
 		? new MutationObserver(() => { if (document.body) run(); })
 		: undefined;
 	if (document.documentElement) observer?.observe(document.documentElement, { childList: true, subtree: true });
 	// Last resort for a document that produces neither: the steps are all body-dependent, so a
 	// cheap poll is preferable to features that silently never start.
-	const poll = window.setInterval(() => { if (document.body) run(); }, 250);
+	poll = window.setInterval(() => { if (document.body) run(); }, 250);
 }
 
 /** Resolve an element by id as soon as the parser creates it, giving up at DOMContentLoaded. */

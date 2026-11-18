@@ -38,6 +38,8 @@ export interface IntroGameWindowHandoff {
 	handleReadyToShow(): void;
 	revealBehindIntro(): void;
 	revealForUse(): void;
+	/** True while the intro owns the game window's first reveal (between beginIntro and end). */
+	isRevealOwned(): boolean;
 }
 export function createIntroGameWindowHandoff(gameWindow: IntroGameWindow, fullscreenMode: string): IntroGameWindowHandoff {
 	let introActive = false;
@@ -60,6 +62,7 @@ export function createIntroGameWindowHandoff(gameWindow: IntroGameWindow, fullsc
 		endIntro: () => {
 			introActive = false;
 		},
+		isRevealOwned: () => introActive,
 		handleReadyToShow: () => {
 			if (!introActive) reveal(true);
 		},

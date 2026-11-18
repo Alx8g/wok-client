@@ -289,12 +289,14 @@ test('the engine ignores the mutations its own writes produce', () => {
 	harness.runFrames();
 	assert.equal(chat.data, 'Nightfall: gg');
 	const callsAfterFirstPass = rewriteCalls;
+	const framesAfterFirstPass = harness.frameCount;
 
 	// Exactly what a real MutationObserver delivers after the engine writes.
 	harness.characterDataChanged(chat, 'Nightfall: gg');
 	harness.runFrames(4);
 	assert.equal(chat.data, 'Nightfall: gg');
 	assert.equal(rewriteCalls, callsAfterFirstPass, 'an echo of our own write is recognised, not re-rewritten');
+	assert.equal(harness.frameCount, framesAfterFirstPass, 'our own writes do not schedule an empty animation callback');
 
 	// Krunker rewriting the same node is not an echo and is processed normally.
 	harness.characterDataChanged(chat, 'Rocketeer: wp');
@@ -349,6 +351,52 @@ test('the engine applies a same-value detailed decoration instead of discarding 
 
 	assert.equal(applications, 1);
 	assert.equal(engine.rewrittenNodeCount, 1);
+});
+
+test('a detailed parser miss is final rather than parsing the same text again', () => {
+	const unrelated = text('FPS 1000');
+	const mine = text('Rocketeer');
+	let detailedCalls = 0;
+	let plainCalls = 0;
+	const detailed = createIdentityTextRewrite({ clans: [], displayClan: '', displayName: 'Nightfall', names: ['Rocketeer'] });
+	assert.ok(detailed);
+	const engine = startIdentityRewriteEngine({
+		createObserver: () => ({ disconnect: () => {}, observe: () => {} }),
+		rewrite: value => { plainCalls++; return detailed(value)?.text; },
+		rewriteDetailed: value => { detailedCalls++; return detailed(value); },
+		root: element('BODY', [unrelated, mine]),
+		schedule: frame => { frame(); }
+	});
+	assert.equal(detailedCalls, 2);
+	assert.equal(plainCalls, 0);
+	assert.equal(unrelated.data, 'FPS 1000');
+	assert.equal(mine.data, 'Nightfall');
+	engine.restoreAll();
+	assert.equal(mine.data, 'Rocketeer');
+	engine.stop();
+});
+
+test('an echo does not hide a later game write before the next flush', () => {
+	const mine = text('Rocketeer: first');
+	const harness = createHarness(element('BODY', [mine]), swapRocketeer);
+	harness.runFrames();
+	harness.characterDataChanged(mine, 'Nightfall: first');
+	harness.characterDataChanged(mine, 'Rocketeer: second');
+	harness.runFrames(4);
+	assert.equal(mine.data, 'Nightfall: second');
+	harness.engine.restoreAll();
+	assert.equal(mine.data, 'Rocketeer: second');
+});
+
+test('standalone clan rules remain reusable across consecutive matches and misses', () => {
+	const rewrite = createIdentityTextRewrite({ clans: ['OLD', 'A.B'], displayClan: 'WOK', displayName: '', names: [] });
+	assert.ok(rewrite);
+	for (let index = 0; index < 5; index++) {
+		assert.deepEqual(rewrite('  OLD  '), { fragments: [{ start: 2, end: 5 }], text: '  WOK  ' });
+		assert.deepEqual(rewrite('\tA.B\n'), { fragments: [{ start: 1, end: 4 }], text: '\tWOK\n' });
+		assert.equal(rewrite('that OLD map'), undefined);
+		assert.equal(rewrite('AxB'), undefined);
+	}
 });
 
 test('an extra exclusion rule composes with the built-in ones', () => {
